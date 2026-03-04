@@ -8,7 +8,7 @@ namespace RosterRotation
         ScenarioCreationOptions.AddToAllGames,
         GameScenes.SPACECENTER, GameScenes.FLIGHT, GameScenes.TRACKSTATION, GameScenes.EDITOR
     )]
-    public class RosterRotationScenario : ScenarioModule
+    public class EACScenario : ScenarioModule
     {
         private const string NodeNameNew = "EAC";
         private const string NodeNameOld = "RosterRotation";
