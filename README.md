@@ -59,7 +59,7 @@ Kerbal Space Program/
         EAC.dll
       [Assets...]
 
-      ## Settings
+## Settings
 
 EAC settings are available in:
 
