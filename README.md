@@ -58,3 +58,93 @@ Kerbal Space Program/
       Plugins/
         EAC.dll
       [Assets...]
+
+      ## Settings
+
+EAC settings are available in:
+
+**Space Center → Settings → Difficulty Options → EAC**
+
+From there you can configure:
+
+- Kerbin time vs Earth time
+- Training parameters (days, funds/science scaling)
+- Aging on/off
+- Retirement ages
+- Notification routing and categories
+- Debug/verbose logging
+
+All settings are saved into your save file and persist across reloads.
+
+---
+
+## Save Data
+
+EAC stores per-Kerbal records and settings in the save file under the ScenarioModule and EAC nodes.  
+If you manually edit saves, make backups first.
+
+Typical stored items include:
+
+- retirement status / retirement time
+- experience at retirement
+- birth time / aging info
+- training state and end time
+- message and feature toggles
+
+---
+
+## Compatibility
+
+- Built for **Kerbal Space Program [your target version]**
+- Intended to be compatible with stock Astronaut Complex UI.
+- Other mods that heavily replace Astronaut Complex UI may conflict.
+
+If you see UI oddities, try:
+
+- verifying only one copy of the plugin DLL is installed
+- checking for other mods that patch Astronaut Complex lists/buttons
+
+---
+
+## Known Notes
+
+- Some Astronaut Complex UI layouts may not include certain stock lists (e.g., Lost tab variations). EAC handles this gracefully.
+- Facility upgrades can cause the Astronaut Complex UI to rebuild; EAC attempts to re-sync hiring/cap behavior automatically.
+
+---
+
+## Troubleshooting
+
+### Where to find logs
+
+Check `KSP.log` for lines starting with:
+
+- `[EAC]`
+
+### Enable verbose logging
+
+In **Difficulty Options → EAC → Debug**, enable:
+
+- Verbose UI logs
+- Verbose aging logs
+
+Use verbose logging only when troubleshooting.
+
+---
+
+## Planned / Ideas
+
+- [Add your roadmap items here]
+
+---
+
+## License
+
+[Choose a license: MIT / GPLv3 / CC-BY / ARR etc. Put full text in LICENSE file.]
+
+---
+
+## Credits
+
+- Kerbal Space Program by Squad / Private Division
+- Thanks to the KSP modding community
