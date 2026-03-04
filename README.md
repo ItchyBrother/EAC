@@ -96,7 +96,7 @@ Typical stored items include:
 
 ## Compatibility
 
-- Built for **Kerbal Space Program [your target version]**
+- Built for **Kerbal Space Program 1.12** but should work with earlier version.
 - Intended to be compatible with stock Astronaut Complex UI.
 - Other mods that heavily replace Astronaut Complex UI may conflict.
 
@@ -129,15 +129,20 @@ Use verbose logging only when troubleshooting.
 ---
 
 ## Planned / Ideas
-- [Add your roadmap items here]
+- Currently no plans...we'll see how the mod is received and what the KSP community would like in maybe future releases.
 
 ---
 
 ## License
-[Choose a license: MIT / GPLv3 / CC-BY / ARR etc. Put full text in LICENSE file.]
+MIT License.  You are free to use.  I guarantee nothing other than this will take up disk space.  
+
+* By downloading this mod you agree to hold me harmless of any issues that may or may not occur.  (e.g. you will not hold me liable for defects cause by the software)
+* If you reuse or modify any of my code, you must include the copyright and license with that code.
+* You are free to reuse and modify - just give credit where credit is due.
+* You are free to distribute my code.
 
 ---
 
 ## Credits
 - Kerbal Space Program by Squad / Private Division
-- Thanks to the KSP modding community
+- Thanks to the KSP modding community especially linuxgurugamer who indirectly inspired me.
