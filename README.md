@@ -96,7 +96,7 @@ Typical stored items include:
 
 ## Compatibility
 
-- Built for **Kerbal Space Program 1.12** but should work with earlier version.
+- Built for **Kerbal Space Program 1.12** but should work with earlier versions.
 - Intended to be compatible with stock Astronaut Complex UI.
 - Other mods that heavily replace Astronaut Complex UI may conflict.
 
