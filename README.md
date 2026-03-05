@@ -148,3 +148,9 @@ MIT License.  You are free to use.  I guarantee nothing other than this will tak
 ## Credits
 - Kerbal Space Program by Squad / Private Division
 - Thanks to the KSP modding community especially linuxgurugamer who indirectly inspired me.
+
+---
+
+## Thank you!
+Thank you for downloading my mod.  I appreciate your support and look forward to your constructive feedback.  
+I'd love to hear how you are using it!
