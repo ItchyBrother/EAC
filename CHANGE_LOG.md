@@ -1,7 +1,7 @@
 # Enhanced Astronaut Complex (EAC)
 
 * 2026-0306: 1.0.1.0 for KSP >= 1.12.X
-  - Fixed issue with slow Framerate.
+  - Fixed issue with slow Framerate. (Clean install improved FPS by 20+FPS)
   - Further Optmize code
   - Reorder tabs in Astronaut Complex to Available/Assigned/Retired/Lost
   - Added cost to recall retired Kerbals (configurable)
