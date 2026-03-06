@@ -1,23 +1,7 @@
-// RosterRotation - AstronautComplexRetiredTab (2026-02-23d)
-//
-// Root cause of ActivateList NullReferenceException (confirmed by diagnostic dump):
-//   UIListToggleController has a UIList[] lists field with 4 entries (one per original tab).
-//   After we add "Tab Retired" as the 5th toggle, UIListToggleController.Start() hooks
-//   ActivateList(i) to each toggle in order. When Tab Retired is clicked, ActivateList(4)
-//   fires. lists[4] does not exist → NullReferenceException.
-//
-// Fix: In TryRegisterWithToggleController, directly access the "lists" field (known name
-//   from diagnostic), extend it to length+1, and place our cloned UIList at index 4.
-//   UIListToggleController then manages all scroll list visibility natively — no more
-//   fighting with it from the outside.
-//
-// Tab detection: poll UIListToggleController.currentList (known field name from diagnostic).
-//   When currentList == _retiredTabIndex → show IMGUI overlay (RetiredTabSelected = true).
-//
-// Toggle listener strategy: call RemoveAllListeners() to clear the stale template listener
-//   that the clone inherited (which called ActivateList with the WRONG index). Do NOT add
-//   our own listener — UIListToggleController.Start() will add a fresh ActivateList(4)
-//   listener on the next Start() call. We detect activation via currentList polling.
+// EAC - AstronautComplexRetiredTab
+// Adds a "Retired" tab to the Astronaut Complex between Assigned and Lost.
+// PERF FIX: FastHideWorker throttled to 1s (was every frame with heavy reflection).
+// PERF FIX: Root discovery results cached (was scanning all Transforms every 0.4s).
 
 using System;
 using System.Collections;
@@ -28,10 +12,6 @@ using UnityEngine;
 
 namespace RosterRotation
 {
-    // -----------------------------------------------------------------------
-    // Simple click proxy — checks mouse position against tab bounds every frame,
-    // no EventSystems dependency required.
-    // -----------------------------------------------------------------------
     public class RetiredTabClickProxy : MonoBehaviour
     {
         public Transform RetiredScrollList;
@@ -61,32 +41,24 @@ namespace RosterRotation
                 Screen.height - Event.current.mousePosition.y);
             if (RectTransformUtility.RectangleContainsScreenPoint(_rt, screenPos, _uiCamera))
             {
-                //RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: OnGUI click detected.");
                 ACPatches.RetiredTabShowing = true;
-                ACPatches.RetiredTabShowTime = UnityEngine.Time.realtimeSinceStartup;
+                ACPatches.RetiredTabShowTime = Time.realtimeSinceStartup;
                 HighlightOurTab(true);
                 OnClicked?.Invoke();
                 ShowRetiredList();
             }
         }
 
-        private void Update() { /* ACPatch.Prefix_ActivateList handles switch-away */ }
-
-        // Called by ACPatches when a native tab's ActivateList fires while we're showing
         public void HandleNativeTabActivated(int index)
         {
-            RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: native ActivateList(" + index + ") → hiding retired.");
             HighlightOurTab(false);
-            if (RetiredScrollList != null)
-                RetiredScrollList.gameObject.SetActive(false);
-            // Restore ALL native scroll lists — ShowRetiredList hid them as whole GameObjects
-            // but KSP's ActivateList only restores their contents, not the GameObject itself
+            if (RetiredScrollList != null) RetiredScrollList.gameObject.SetActive(false);
             if (VesselScrollRect != null)
                 for (int i = 0; i < VesselScrollRect.childCount; i++)
                 {
                     Transform ch = VesselScrollRect.GetChild(i);
                     if (ch == null || ch == RetiredScrollList) continue;
-                    if (ch.name.StartsWith("scrollList_", System.StringComparison.OrdinalIgnoreCase))
+                    if (ch.name.StartsWith("scrollList_", StringComparison.OrdinalIgnoreCase))
                         ch.gameObject.SetActive(true);
                 }
             OnNativeTabActivated?.Invoke();
@@ -95,83 +67,128 @@ namespace RosterRotation
         private void HighlightOurTab(bool on)
         {
             if (OurTab == null) return;
-            const System.Reflection.BindingFlags f =
-                System.Reflection.BindingFlags.Instance |
-                System.Reflection.BindingFlags.Public |
-                System.Reflection.BindingFlags.NonPublic;
+            const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             foreach (Component c in OurTab.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
                 var colorProp = c.GetType().GetProperty("color", f);
                 if (colorProp == null || colorProp.PropertyType != typeof(Color)) continue;
-                try
-                {
-                    colorProp.SetValue(c, on ? new Color(1f,1f,1f,1f) : new Color(1f,1f,1f,0.5f), null);
-                }
-                catch { }
+                try { colorProp.SetValue(c, on ? new Color(1f,1f,1f,1f) : new Color(1f,1f,1f,0.5f), null); } catch { }
             }
-            RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: HighlightOurTab(" + on + ")");
-        }
-
-        internal void ShowRetiredListNextFrame()
-        {
-            StartCoroutine(ShowRetiredListDeferred());
-        }
-
-        private IEnumerator ShowRetiredListDeferred()
-        {
-            // Wait one frame so Unity's layout system processes the newly cloned rows
-            // before we make them visible. Without this, row backgrounds aren't sized yet
-            // and appear as missing borders.
-            yield return null;
-            ShowRetiredList();
         }
 
         internal void ShowRetiredList()
         {
-            if (RetiredScrollList == null) { RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: ShowRetiredList — RetiredScrollList is NULL"); return; }
+            if (RetiredScrollList == null) return;
             ACPatches.RetiredTabShowing = true;
-            ACPatches.RetiredTabShowTime = UnityEngine.Time.realtimeSinceStartup;
+            ACPatches.RetiredTabShowTime = Time.realtimeSinceStartup;
 
-            // Dump VesselScrollRect children so we know their actual names
-            if (VesselScrollRect != null)
-            {
-                var sb = new System.Text.StringBuilder("[RosterRotation] RetiredTabClickProxy: VesselScrollRect children: ");
-                for (int i = 0; i < VesselScrollRect.childCount; i++)
-                {
-                    Transform ch = VesselScrollRect.GetChild(i);
-                    if (ch != null) sb.Append(ch.name).Append("(active=").Append(ch.gameObject.activeSelf).Append(") ");
-                }
-                RRLog.Verbose(sb.ToString());
-            }
-
-            // Hide all scrollList_ siblings
             if (VesselScrollRect != null)
                 for (int i = 0; i < VesselScrollRect.childCount; i++)
                 {
                     Transform ch = VesselScrollRect.GetChild(i);
                     if (ch == null || ch == RetiredScrollList) continue;
-                    if (ch.name.StartsWith("scrollList_", System.StringComparison.OrdinalIgnoreCase))
-                    {
+                    if (ch.name.StartsWith("scrollList_", StringComparison.OrdinalIgnoreCase))
                         ch.gameObject.SetActive(false);
-                        RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: hid " + ch.name);
-                    }
                 }
             RetiredScrollList.gameObject.SetActive(true);
-            // OnEnable fires on SetActive(true) and collapses row positions — reposition first, then wire.
+            // Immediately destroy UIHoverPanel components that OnEnable just re-initialized.
+            // Must happen before rewire since UIHoverPanel.Update() can hide Button GOs.
+            NeuterUIHoverPanelsOnRows(RetiredScrollList);
             ACPatches.RepositionRetiredRows(RetiredScrollList);
             ACPatches.RewireTooltipsInRetiredList(RetiredScrollList);
-            RRLog.Verbose("[RosterRotation] RetiredTabClickProxy: ShowRetiredList() — retired list active=" + RetiredScrollList.gameObject.activeSelf + " path=" + GetPath(RetiredScrollList));
+            ACPatches.ReenableRetiredButtons(RetiredScrollList);
+            // Deferred rewire: SetActive(true) fires OnEnable on tooltip components,
+            // which resets their registration with KSP's tooltip manager. The immediate
+            // rewire above may fail if the tooltip system hasn't settled yet.
+            // Re-run after one frame to catch any that were reset.
+            StartCoroutine(DeferredRewire());
         }
 
-        private string GetPath(Transform t)
+        private System.Collections.IEnumerator DeferredRewire()
         {
-            if (t == null) return "<null>";
-            string path = t.name;
-            Transform p = t.parent;
-            int g = 0;
-            while (p != null && g++ < 10) { path = p.name + "/" + path; p = p.parent; }
-            return path;
+            yield return null;
+            if (RetiredScrollList != null && RetiredScrollList.gameObject.activeInHierarchy)
+            {
+                // Kill UIHoverPanel components — their OnEnable repopulates hoverObjects
+                // which causes Update() to hide the Button GO every frame, blocking tooltips.
+                // Field-clearing doesn't survive re-activation, so destroy the component entirely.
+                NeuterUIHoverPanelsOnRows(RetiredScrollList);
+                ACPatches.RewireTooltipsInRetiredList(RetiredScrollList);
+                ACPatches.ReenableRetiredButtons(RetiredScrollList);
+            }
+            yield return new WaitForSeconds(0.3f);
+            if (RetiredScrollList != null && RetiredScrollList.gameObject.activeInHierarchy)
+            {
+                NeuterUIHoverPanelsOnRows(RetiredScrollList);
+                ACPatches.RewireTooltipsInRetiredList(RetiredScrollList);
+                ACPatches.ReenableRetiredButtons(RetiredScrollList);
+            }
+        }
+
+        /// <summary>
+        /// Neuters UIHoverPanel on each retired row WITHOUT destroying it.
+        /// UIHoverPanel must stay alive because KSP's tooltip system routes hover events
+        /// through it. We just clear hoverObjects so its Update() stops hiding the Button GO.
+        /// Does NOT destroy EventTriggerForwarder — it's needed for tooltip event delivery.
+        /// This must be re-applied every time the tab is shown because OnEnable repopulates
+        /// the internal state from serialized data.
+        /// </summary>
+        private static void NeuterUIHoverPanelsOnRows(Transform list)
+        {
+            if (list == null) return;
+            int neutered = 0;
+            const BindingFlags bf = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            for (int i = 0; i < list.childCount; i++)
+            {
+                Transform row = list.GetChild(i);
+                if (row == null || !row.gameObject.activeSelf) continue;
+
+                // Find UIHoverPanel on the row
+                Component uhp = null;
+                foreach (Component c in row.GetComponents<Component>())
+                {
+                    if (c != null && c.GetType().Name == "UIHoverPanel") { uhp = c; break; }
+                }
+                if (uhp == null) continue;
+
+                Type t = uhp.GetType();
+
+                // Clear hoverObjects so Update() stops calling SetActive(false) on Button GO
+                foreach (string fieldName in new[] { "hoverObjects", "_hoverObjects", "HoverObjects" })
+                {
+                    var hoF = t.GetField(fieldName, bf);
+                    if (hoF == null) continue;
+                    var hoVal = hoF.GetValue(uhp);
+                    if (hoVal == null) break;
+                    var clearM = hoVal.GetType().GetMethod("Clear", BindingFlags.Instance | BindingFlags.Public);
+                    if (clearM != null) try { clearM.Invoke(hoVal, null); } catch { }
+                    break;
+                }
+
+                // CRITICAL: Disable the UIHoverPanel component entirely.
+                // Clearing hoverObjects isn't enough — OnEnable repopulates them from
+                // serialized data, and Update() runs between our clear passes.
+                // With enabled=false, Unity skips Update/LateUpdate so it can never
+                // hide the Button GO again. Tooltips work independently via
+                // UIStateButtonTooltip which registers directly with TooltipController.
+                var enabledP = t.GetProperty("enabled", bf);
+                if (enabledP != null) try { enabledP.SetValue(uhp, false, null); } catch { }
+
+                neutered++;
+
+                // Force Button GO active in case UIHoverPanel.OnEnable already hid it
+                foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
+                {
+                    if (ch.name == "Button" && !ch.gameObject.activeSelf)
+                    {
+                        ch.gameObject.SetActive(true);
+                        break;
+                    }
+                }
+            }
+            if (neutered > 0)
+                RRLog.Verbose("[EAC] NeuterUIHoverPanelsOnRows: neutered " + neutered + " rows");
         }
 
         public void WireToggle(object onValueChanged) { }
@@ -180,60 +197,43 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class AstronautComplexRetiredTab : MonoBehaviour
     {
-        private const string LOGP = "[RosterRotation] AC RetiredTab: ";
+        private const string LOGP = "[EAC] AC RetiredTab: ";
 
-        // --- Roots ---
+        // Cached roots (no longer re-scanned every tick)
         private Transform _tabsRoot;
         private Transform _vesselScrollRect;
+        private bool _rootsSearched;
 
-        // --- UIListToggleController (KSP native, on Tabs root) ---
         private Component _toggleController;
-        private FieldInfo _listsField;       // UIList[] lists
-        private FieldInfo _currentListField; // Int32 currentList
-        private int _retiredTabIndex = -1;   // index in lists[] that is ours
+        private FieldInfo _listsField;
+        private FieldInfo _currentListField;
+        private int _retiredTabIndex = -1;
         private bool _registeredWithController;
         private bool _controllerRegistrationFailed;
 
-        // --- Our tab ---
         private GameObject _tabRetiredGO;
-        private object _retiredToggleComp;    // UnityEngine.UI.Toggle (reflection)
-        private bool _toggleListenersCleared; // true once RemoveAllListeners() was called
-
-        // --- Our scroll list ---
+        private object _retiredToggleComp;
+        private bool _toggleListenersCleared;
         private Transform _scrollListRetired;
 
-        // --- State ---
-        // Static flag read by AstronautComplexACPatch to protect retired list from being hidden
         public static bool RetiredTabShowing => ACPatches.RetiredTabShowing;
-
         private bool _retiredTabActive;
         private RetiredTabClickProxy _retiredProxy;
         private int _lastBadgeCount = -1;
-        private bool _diagnosticsDumped;
-
-        // -----------------------------------------------------------------------
-        // Unity lifecycle
-        // -----------------------------------------------------------------------
+        private bool _setupComplete;
 
         private void Start()
         {
-            // Ensure the handful of Harmony hooks that this mod relies on are applied.
-            // NOTE: HarmonyPatches.cs is not included in the .csproj, so we do it here.
             try
             {
                 var h = new Harmony("RosterRotation.Patches");
                 AstronautComplexACPatch.Apply(h);
                 KerbalRosterHook.Apply(h);
-
-                RRLog.Verbose(LOGP + "Harmony hooks ensured (ACPatch + KerbalRosterHook).");
             }
-            catch (Exception ex)
-            {
-                RRLog.Error(LOGP + "Harmony fallback apply failed: " + ex);
-            }
+            catch (Exception ex) { RRLog.Error(LOGP + "Harmony fallback apply failed: " + ex); }
 
             StartCoroutine(SetupWorker());
-            StartCoroutine(FastHideWorker());
+            StartCoroutine(ThrottledHideWorker());
         }
 
         private void Update()
@@ -242,73 +242,62 @@ namespace RosterRotation
                 try { DetectTabSelection(); } catch { }
         }
 
-        // -----------------------------------------------------------------------
-        // Setup coroutine (0.4s tick)
-        // -----------------------------------------------------------------------
-
+        // ── Setup coroutine (runs until complete, then stops) ──────────────────
         private IEnumerator SetupWorker()
         {
             var wait = new WaitForSeconds(0.4f);
-            while (true)
+            while (!_setupComplete)
             {
                 yield return wait;
                 try { DoSetupTick(); }
                 catch (Exception ex) { RRLog.Error(LOGP + "SetupWorker exception: " + ex); }
             }
+            // After setup, only update badge every 2s
+            var slowWait = new WaitForSeconds(2f);
+            while (true)
+            {
+                yield return slowWait;
+                if (_tabRetiredGO != null) UpdateRetiredBadge();
+            }
         }
 
         private void DoSetupTick()
         {
-            // Phase 1: find roots
-            if (_tabsRoot == null) _tabsRoot = FindTabsRoot();
-            if (_vesselScrollRect == null) _vesselScrollRect = FindVesselScrollRect();
+            if (!_rootsSearched)
+            {
+                _tabsRoot = FindTabsRoot();
+                _vesselScrollRect = FindVesselScrollRect();
+                if (_tabsRoot != null && _vesselScrollRect != null)
+                    _rootsSearched = true;
+            }
 
-            // Phase 2: find UIListToggleController
             if (_toggleController == null && _tabsRoot != null)
                 _toggleController = FindToggleController(_tabsRoot);
 
-            // Phase 3: cache controller fields (by known name from diagnostic)
             if (_toggleController != null && _listsField == null)
                 CacheControllerFields();
 
-            // Phase 4: create tab + scroll list
             if (_tabsRoot != null && _tabRetiredGO == null)
                 TryCreateRetiredTab();
 
             if (_vesselScrollRect != null && _scrollListRetired == null)
                 TryCreateRetiredScrollList();
 
-            // Phase 5: register with UIListToggleController (extend lists[])
             if (!_registeredWithController && !_controllerRegistrationFailed &&
                 _listsField != null && _scrollListRetired != null && _tabRetiredGO != null)
                 TryRegisterWithToggleController();
 
-            // Phase 6: clear stale toggle listeners from cloned template tab
             if (_tabRetiredGO != null && !_toggleListenersCleared)
                 TryClearStaleToggleListeners();
 
-            // Phase 7: badge
-            if (_tabRetiredGO != null)
-                UpdateRetiredBadge();
-
-            // Phase 8: one-shot diagnostics
-            if (_tabRetiredGO != null && _toggleListenersCleared && !_diagnosticsDumped)
-            {
-                _diagnosticsDumped = true;
-                DumpACDiagnostics();
-            }
-
-            // Phase 9: tab selection now handled in Update()
-            // DetectTabSelection();
+            if (_tabRetiredGO != null && _toggleListenersCleared && _registeredWithController)
+                _setupComplete = true;
         }
 
-        // -----------------------------------------------------------------------
-        // Fast coroutine: per-frame hiding of retired rows in Available list
-        // -----------------------------------------------------------------------
-
-        private IEnumerator FastHideWorker()
+        // ── PERF FIX: Throttled hide worker (was every frame, now 1s) ──────────
+        private IEnumerator ThrottledHideWorker()
         {
-            var wait = new WaitForEndOfFrame();
+            var wait = new WaitForSeconds(1.0f);
             while (true)
             {
                 yield return wait;
@@ -321,26 +310,22 @@ namespace RosterRotation
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Root discovery
-        // -----------------------------------------------------------------------
-
-        private Transform FindTabsRoot()
+        // ── Root discovery (cached after first find) ───────────────────────────
+        private static Transform FindTabsRoot()
         {
             Transform best = null; int bestScore = -1;
             foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
             {
                 if (t == null || !string.Equals(t.name, "Tabs", StringComparison.Ordinal)) continue;
                 if (t.Find("Tab Available") == null && t.Find("Tab Assigned") == null) continue;
-                int score = 0;
+                int score = t.childCount;
                 if (GetPath(t).IndexOf("AstronautComplex", StringComparison.OrdinalIgnoreCase) >= 0) score += 10;
-                score += t.childCount;
                 if (score > bestScore) { best = t; bestScore = score; }
             }
             return best;
         }
 
-        private Transform FindVesselScrollRect()
+        private static Transform FindVesselScrollRect()
         {
             Transform best = null; int bestScore = -1;
             foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
@@ -369,78 +354,49 @@ namespace RosterRotation
             return null;
         }
 
-        // -----------------------------------------------------------------------
-        // Cache known controller fields (names confirmed by diagnostic dump)
-        // -----------------------------------------------------------------------
-
         private void CacheControllerFields()
         {
             Type ct = _toggleController.GetType();
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            _listsField       = ct.GetField("lists",       flags);
+            _listsField = ct.GetField("lists", flags);
             _currentListField = ct.GetField("currentList", flags);
-
-            if (_listsField == null)
-                RRLog.Warn(LOGP + "UIListToggleController: 'lists' field not found.");
-            if (_currentListField == null)
-                RRLog.Warn(LOGP + "UIListToggleController: 'currentList' field not found.");
         }
 
-        // -----------------------------------------------------------------------
-        // Extend UIList[] lists  ← THE core fix for the NullReferenceException crash
-        //
-        // UIListToggleController.ActivateList(index) does lists[index].Show() (approx).
-        // There are 4 built-in entries (Available=0, Assigned=1, Applicants=2, KIA=3).
-        // Our tab becomes sibling index 4. When clicked, ActivateList(4) fires.
-        // Without lists[4], that crashes. We extend the array with our UIList component.
-        // -----------------------------------------------------------------------
-
+        // ── Register with UIListToggleController ───────────────────────────────
+        // Appends our UIList at the END of the lists[] array.
+        // Tab visual order (Available/Assigned/Retired/Lost) is handled by
+        // SetSiblingIndex on the tab button GO — the lists array order must NOT
+        // change because Lost's toggle is already wired to ActivateList(2).
+        // Our RetiredTabClickProxy handles retired tab clicks independently.
         private void TryRegisterWithToggleController()
         {
             try
             {
                 var oldArr = _listsField.GetValue(_toggleController) as Array;
-                if (oldArr == null)
-                {
-                    RRLog.Warn(LOGP + "lists field is null — cannot register.");
-                    _controllerRegistrationFailed = true;
-                    return;
-                }
+                if (oldArr == null) { _controllerRegistrationFailed = true; return; }
 
-                // Already extended (e.g. called twice)
-                if (oldArr.Length > 4)
+                // Already extended
+                if (oldArr.Length > 3)
                 {
                     _retiredTabIndex = oldArr.Length - 1;
                     _registeredWithController = true;
-                    RRLog.Verbose(LOGP + "lists[] already extended (length=" + oldArr.Length + "), retired index=" + _retiredTabIndex);
                     return;
                 }
 
-                // Find the UIList component on our cloned scroll list
                 Component ourUIList = FindUIListComp(_scrollListRetired);
-                if (ourUIList == null)
-                {
-                    RRLog.Warn(LOGP + "No UIList component found on scrollList_retired.");
-                    _controllerRegistrationFailed = true;
-                    return;
-                }
+                if (ourUIList == null) { _controllerRegistrationFailed = true; return; }
 
-                // Extend the array
+                // Append at end: [Available(0), Assigned(1), Lost(2), Retired(3)]
                 Type elemType = oldArr.GetType().GetElementType();
                 var newArr = Array.CreateInstance(elemType, oldArr.Length + 1);
                 Array.Copy(oldArr, newArr, oldArr.Length);
                 newArr.SetValue(ourUIList, oldArr.Length);
-                _listsField.SetValue(_toggleController, newArr);
 
+                _listsField.SetValue(_toggleController, newArr);
                 _retiredTabIndex = oldArr.Length;
                 _registeredWithController = true;
 
-                RRLog.Verbose(LOGP + "Extended UIListToggleController.lists[] to " + newArr.Length +
-                          " entries. Retired tab index=" + _retiredTabIndex +
-                          " UIList=" + ourUIList.GetType().Name);
-
-                // Expose index to Harmony patch in AstronautComplexACPatch
-                //AstronautComplexACPatch.RetiredTabListIndex = _retiredTabIndex;
+                RRLog.Verbose(LOGP + "Extended lists[] to " + newArr.Length + ", retired index=" + _retiredTabIndex);
             }
             catch (Exception ex)
             {
@@ -449,132 +405,17 @@ namespace RosterRotation
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Clear stale toggle listeners from the cloned template tab.
-        //
-        // The cloned tab inherits the template's persistent onValueChanged listener.
-        // That listener calls ActivateList(template_index) — the wrong index for our tab.
-        // Removing it lets UIListToggleController.Start() add a fresh ActivateList(4) later.
-        // We do NOT add our own toggle listener; we detect selection via currentList polling.
-        // -----------------------------------------------------------------------
-
         private void TryClearStaleToggleListeners()
         {
             _retiredToggleComp = FindToggleOnGO(_tabRetiredGO);
-            if (_retiredToggleComp == null)
-            {
-                RRLog.Warn(LOGP + "No Toggle component found on Tab Retired.");
-                _toggleListenersCleared = true;
-                return;
-            }
-
-            // NOTE: We do NOT call RemoveAllListeners here anymore.
-            // The cloned tab's stale listener (ActivateList(wrong_index)) is acceptable —
-            // our RetiredTabClickProxy.OnToggleValueChanged fires AFTER it and handles correctly.
-            // RemoveAllListeners would also strip ToggleGroup's internal listener.
-
-            SetBoolReflect(_retiredToggleComp, "interactable", true);
-
-            // DO NOT rejoin ToggleGroup here — it causes ActivateList cascades
-
+            if (_retiredToggleComp != null)
+                SetBoolReflect(_retiredToggleComp, "interactable", true);
             _toggleListenersCleared = true;
-            RRLog.Verbose(LOGP + "Cleared stale toggle listeners from Tab Retired.");
         }
-
-        private void TryRejoinToggleGroup()
-        {
-            if (_tabRetiredGO == null || _tabsRoot == null) return;
-            try
-            {
-                const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                object nativeGroup = null;
-                for (int i = 0; i < _tabsRoot.childCount; i++)
-                {
-                    Transform t = _tabsRoot.GetChild(i);
-                    if (t == null || t.gameObject == _tabRetiredGO) continue;
-                    foreach (Component c in t.GetComponentsInChildren<Component>(true))
-                    {
-                        if (c == null) continue;
-                        var gp = c.GetType().GetProperty("group", f);
-                        if (gp == null) continue;
-                        nativeGroup = gp.GetValue(c, null);
-                        if (nativeGroup != null) break;
-                    }
-                    if (nativeGroup != null) break;
-                }
-                if (nativeGroup == null) { RRLog.Warn(LOGP + "TryRejoinToggleGroup: no group found."); return; }
-
-                foreach (Component c in _tabRetiredGO.GetComponentsInChildren<Component>(true))
-                {
-                    if (c == null) continue;
-                    var gp = c.GetType().GetProperty("group", f);
-                    if (gp == null || !gp.CanWrite) continue;
-                    gp.SetValue(c, nativeGroup, null);
-                    RRLog.Verbose(LOGP + "Re-joined ToggleGroup after clearing listeners.");
-                    return;
-                }
-            }
-            catch (Exception ex) { RRLog.Error(LOGP + "TryRejoinToggleGroup failed: " + ex); }
-        }
-
-        private void TryAddToggleListener(object onValueChanged)
-        {
-            if (onValueChanged == null || _toggleController == null || _retiredTabIndex < 0) return;
-            try
-            {
-                // Find ActivateList(int) on the controller
-                var activateMethod = _toggleController.GetType().GetMethod("ActivateList",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null, new Type[] { typeof(int) }, null);
-                if (activateMethod == null)
-                {
-                    RRLog.Warn(LOGP + "ActivateList method not found for toggle listener.");
-                    return;
-                }
-
-                // We need UnityAction<bool> — get it from the AddListener method signature
-                var addListenerMethod = onValueChanged.GetType().GetMethod("AddListener",
-                    BindingFlags.Instance | BindingFlags.Public);
-                if (addListenerMethod == null)
-                {
-                    RRLog.Warn(LOGP + "AddListener not found on onValueChanged.");
-                    return;
-                }
-
-                Type delegateType = addListenerMethod.GetParameters()[0].ParameterType;
-
-                // Our callback: when isOn==true, call ActivateList(_retiredTabIndex)
-                int capturedIndex = _retiredTabIndex;
-                Component capturedController = _toggleController;
-                MethodInfo capturedActivate = activateMethod;
-
-                Action<bool> action = (isOn) =>
-                {
-                    if (isOn)
-                        try { capturedActivate.Invoke(capturedController, new object[] { capturedIndex }); }
-                        catch (Exception ex) { RRLog.Error(LOGP + "ActivateList invoke failed: " + ex); }
-                };
-
-                Delegate d = Delegate.CreateDelegate(delegateType, action.Target, action.Method);
-                addListenerMethod.Invoke(onValueChanged, new object[] { d });
-                RRLog.Verbose(LOGP + "Added toggle listener → ActivateList(" + capturedIndex + ").");
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error(LOGP + "TryAddToggleListener failed: " + ex);
-            }
-        }
-
-        // -----------------------------------------------------------------------
-        // Tab selection detection via currentList poll
-        // -----------------------------------------------------------------------
 
         private void DetectTabSelection()
         {
-            // Proxy handles showing the retired list directly.
-            // Here we just detect when a native tab reactivates and deselect retired.
             if (!_retiredTabActive || _vesselScrollRect == null) return;
-
             for (int i = 0; i < _vesselScrollRect.childCount; i++)
             {
                 Transform ch = _vesselScrollRect.GetChild(i);
@@ -582,7 +423,6 @@ namespace RosterRotation
                 if (ch.name.IndexOf("scrollList_", StringComparison.OrdinalIgnoreCase) < 0) continue;
                 if (ch.gameObject.activeSelf)
                 {
-                    RRLog.Verbose(LOGP + "Native list '" + ch.name + "' became active → deselect Retired.");
                     _retiredProxy?.HandleNativeTabActivated(-1);
                     OnRetiredTabDeselected();
                     return;
@@ -590,16 +430,11 @@ namespace RosterRotation
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Tab selected / deselected
-        // -----------------------------------------------------------------------
-
         private void OnRetiredTabSelected()
         {
             _retiredTabActive = true;
             ACPatches.RetiredTabShowing = true;
             RosterRotationKSCUI.RetiredTabSelected = true;
-            RRLog.Verbose(LOGP + "Retired tab SELECTED — overlay shown.");
         }
 
         private void OnRetiredTabDeselected()
@@ -607,24 +442,21 @@ namespace RosterRotation
             _retiredTabActive = false;
             ACPatches.RetiredTabShowing = false;
             RosterRotationKSCUI.RetiredTabSelected = false;
-            RRLog.Verbose(LOGP + "Retired tab DESELECTED.");
         }
-
-        // -----------------------------------------------------------------------
-        // Badge
-        // -----------------------------------------------------------------------
 
         private void UpdateRetiredBadge()
         {
-            int count = GetRetiredCount();
+            int count = 0;
+            foreach (var kvp in RosterRotationState.Records)
+                if (kvp.Value != null && kvp.Value.Retired && kvp.Value.DeathUT <= 0) count++;
+
             if (count == _lastBadgeCount) return;
             _lastBadgeCount = count;
 
             foreach (Component c in _tabRetiredGO.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var p = c.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (p == null || p.PropertyType != typeof(string)) continue;
                 string cur = null;
                 try { cur = p.GetValue(c, null) as string; } catch { continue; }
@@ -639,10 +471,7 @@ namespace RosterRotation
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Per-frame: hide retired rows from the active (non-Retired) scroll list
-        // -----------------------------------------------------------------------
-
+        // ── Per-second: hide retired rows from non-Retired list ────────────────
         private void HideRetiredRowsInActiveList()
         {
             Transform activeList = null;
@@ -658,200 +487,88 @@ namespace RosterRotation
             }
             if (activeList == null) return;
 
-            // KSP UIList is flat — rows are direct children, no Viewport/Content wrapper
             Transform content = FindContent(activeList) ?? activeList;
-
-            List<string> retiredNames = GetRetiredNameSet();
+            var retiredNames = RosterRotationState.GetRetiredNames();
             if (retiredNames.Count == 0) return;
 
+            var crewNames = RosterRotationState.GetCrewNameSet();
             for (int i = 0; i < content.childCount; i++)
             {
                 Transform row = content.GetChild(i);
                 if (row == null || !row.gameObject.activeSelf) continue;
-                if (RowContainsRetiredName(row.gameObject, retiredNames))
+                if (RowContainsRetiredName(row.gameObject, retiredNames, crewNames))
                     row.gameObject.SetActive(false);
             }
         }
 
-        // -----------------------------------------------------------------------
-        // Tab creation
-        // -----------------------------------------------------------------------
-
+        // ── Tab creation (inserts between Assigned and Lost) ───────────────────
         private void TryCreateRetiredTab()
         {
             Transform existing = _tabsRoot.Find("Tab Retired");
             if (existing != null) { _tabRetiredGO = existing.gameObject; return; }
 
+            // Clone from Lost tab (last native tab)
             Transform template = _tabsRoot.Find("Tab Lost") ?? _tabsRoot.Find("Tab Available");
-            if (template == null) { RRLog.Verbose(LOGP + "Tab template not found."); return; }
+            if (template == null) return;
+
+            // Find "Tab Assigned" to insert after it
+            Transform assignedTab = _tabsRoot.Find("Tab Assigned");
+            int insertIndex = assignedTab != null ? assignedTab.GetSiblingIndex() + 1 : template.GetSiblingIndex();
 
             GameObject clone = (GameObject)UnityEngine.Object.Instantiate(template.gameObject);
             clone.name = "Tab Retired";
             clone.transform.SetParent(_tabsRoot, false);
-            clone.transform.SetSiblingIndex(template.GetSiblingIndex() + 1);
+            clone.transform.SetSiblingIndex(insertIndex);
             clone.SetActive(true);
 
             _tabRetiredGO = clone;
-            RRLog.Verbose(LOGP + "Created 'Tab Retired' (cloned from '" + template.name + "').");
 
             var proxy = clone.AddComponent<RetiredTabClickProxy>();
-            proxy.RetiredScrollList = null;  // set after scroll list created
+            proxy.RetiredScrollList = null;
             proxy.TabsRoot = _tabsRoot;
             proxy.OurTab = clone.transform;
-            proxy.OnClicked = () => {
-                _retiredTabActive = true;
-                ACPatches.RetiredTabShowing = true;
-                RRLog.Verbose(LOGP + "RetiredTabClickProxy: clicked!");
-                OnRetiredTabSelected();
-            };
-            proxy.OnNativeTabActivated = () => {
-                _retiredTabActive = false;
-                ACPatches.RetiredTabShowing = false;
-                OnRetiredTabDeselected();
-            };
+            proxy.OnClicked = () => { _retiredTabActive = true; ACPatches.RetiredTabShowing = true; OnRetiredTabSelected(); };
+            proxy.OnNativeTabActivated = () => { _retiredTabActive = false; ACPatches.RetiredTabShowing = false; OnRetiredTabDeselected(); };
             _retiredProxy = proxy;
             ACPatches.RegisterProxy(proxy);
-
-            // DO NOT join ToggleGroup — it causes ActivateList cascades that fight our proxy
         }
-
-        private void TryJoinToggleGroup(GameObject ourTab, GameObject nativeTab)
-        {
-            try
-            {
-                const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-                // Find the ToggleGroup from any native tab toggle
-                object nativeGroup = null;
-                Component nativeToggle = null;
-                foreach (Component c in nativeTab.GetComponentsInChildren<Component>(true))
-                {
-                    if (c == null) continue;
-                    var groupProp = c.GetType().GetProperty("group", f);
-                    if (groupProp == null) continue;
-                    nativeGroup = groupProp.GetValue(c, null);
-                    if (nativeGroup != null) { nativeToggle = c; break; }
-                }
-
-                if (nativeGroup == null)
-                {
-                    RRLog.Warn(LOGP + "TryJoinToggleGroup: no ToggleGroup found on native tab.");
-                    return;
-                }
-
-                // Assign same group to our tab's toggle
-                foreach (Component c in ourTab.GetComponentsInChildren<Component>(true))
-                {
-                    if (c == null) continue;
-                    var groupProp = c.GetType().GetProperty("group", f);
-                    if (groupProp == null || !groupProp.CanWrite) continue;
-                    groupProp.SetValue(c, nativeGroup, null);
-                    RRLog.Verbose(LOGP + "Joined ToggleGroup on Tab Retired.");
-                    return;
-                }
-                RRLog.Warn(LOGP + "TryJoinToggleGroup: no Toggle found on our tab.");
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error(LOGP + "TryJoinToggleGroup failed: " + ex);
-            }
-        }
-
-        // -----------------------------------------------------------------------
-        // Scroll list creation
-        // -----------------------------------------------------------------------
 
         private void TryCreateRetiredScrollList()
         {
             if (_vesselScrollRect == null) return;
-
             Transform existing = _vesselScrollRect.Find("scrollList_retired");
             if (existing != null) { _scrollListRetired = existing; return; }
 
-            // Prefer scrollList_Available as template — it has the correct
-            // Viewport/Content hierarchy. Fall back to any other scrollList_ if needed.
             Transform template = null;
-            Transform fallback = null;
             for (int i = 0; i < _vesselScrollRect.childCount; i++)
             {
                 var ch = _vesselScrollRect.GetChild(i);
-                if (ch?.name == null) continue;
-                if (string.Equals(ch.name, "scrollList_retired", StringComparison.OrdinalIgnoreCase)) continue;
-                if (string.Equals(ch.name, "scrollList_Available", StringComparison.Ordinal))
-                { template = ch; break; }
-                if (ch.name.IndexOf("scrollList_", StringComparison.OrdinalIgnoreCase) >= 0 && fallback == null)
-                    fallback = ch;
+                if (ch?.name == null || ch.name == "scrollList_retired") continue;
+                if (string.Equals(ch.name, "scrollList_Available", StringComparison.Ordinal)) { template = ch; break; }
+                if (template == null && ch.name.IndexOf("scrollList_", StringComparison.OrdinalIgnoreCase) >= 0) template = ch;
             }
-            if (template == null) template = fallback;
             if (template == null) return;
 
             GameObject clone = (GameObject)UnityEngine.Object.Instantiate(template.gameObject);
             clone.name = "scrollList_retired";
             clone.transform.SetParent(_vesselScrollRect, false);
 
-            // Clear any rows copied from the template
             Transform content = FindContent(clone.transform);
             if (content != null)
                 for (int i = content.childCount - 1; i >= 0; i--)
                     Destroy(content.GetChild(i).gameObject);
 
-            // Start inactive — UIListToggleController will show/hide it based on tab selection
             clone.SetActive(false);
             _scrollListRetired = clone.transform;
-            RRLog.Verbose(LOGP + "Created scrollList_retired (cloned from '" + template.name + "').");
 
-            // Wire proxy references now that scroll list exists
             if (_retiredProxy != null)
             {
                 _retiredProxy.RetiredScrollList = _scrollListRetired;
                 _retiredProxy.VesselScrollRect = _vesselScrollRect;
             }
-            RRLog.Verbose(LOGP + "scrollList_retired path: " + GetPath(_scrollListRetired));
-            RRLog.Verbose(LOGP + "_vesselScrollRect path: " + GetPath(_vesselScrollRect));
         }
 
-        // -----------------------------------------------------------------------
-        // Diagnostics (Assembly-CSharp only, v3)
-        // -----------------------------------------------------------------------
-
-        private void DumpACDiagnostics()
-        {
-            try
-            {
-                RRLog.Verbose(LOGP + "=== DIAGNOSTIC DUMP (v3) ===");
-                RRLog.Verbose(LOGP + "Registration: " + (_registeredWithController ? "OK, index=" + _retiredTabIndex : "FAILED"));
-                RRLog.Verbose(LOGP + "currentList field: " + (_currentListField != null ? "found" : "NOT FOUND"));
-                RRLog.Verbose(LOGP + "scrollList_retired UIList: " +
-                    (_scrollListRetired != null ? (FindUIListComp(_scrollListRetired) != null ? "found" : "NOT FOUND") : "no scroll list"));
-                RRLog.Verbose(LOGP + "=== END DIAGNOSTIC DUMP ===");
-            }
-            catch (Exception ex) { RRLog.Error(LOGP + "DumpACDiagnostics failed: " + ex); }
-        }
-
-        // -----------------------------------------------------------------------
-        // Data helpers
-        // -----------------------------------------------------------------------
-
-        private int GetRetiredCount()
-        {
-            int n = 0;
-            foreach (var kvp in RosterRotationState.Records)
-                if (kvp.Value != null && kvp.Value.Retired) n++;
-            return n;
-        }
-
-        private List<string> GetRetiredNameSet()
-        {
-            var names = new List<string>();
-            foreach (var kvp in RosterRotationState.Records)
-                if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
-            return names;
-        }
-
-        // -----------------------------------------------------------------------
-        // Reflection helpers
-        // -----------------------------------------------------------------------
-
+        // ── Helpers ────────────────────────────────────────────────────────────
         private static Component FindUIListComp(Transform root)
         {
             if (root == null) return null;
@@ -861,16 +578,13 @@ namespace RosterRotation
                 string tn = c.GetType().FullName ?? c.GetType().Name;
                 if (tn.IndexOf("UIList", StringComparison.OrdinalIgnoreCase) >= 0) return c;
             }
-            // Check direct children only (some builds put UIList on a child)
             for (int i = 0; i < root.childCount; i++)
-            {
                 foreach (Component c in root.GetChild(i).GetComponents<Component>())
                 {
                     if (c == null) continue;
                     string tn = c.GetType().FullName ?? c.GetType().Name;
                     if (tn.IndexOf("UIList", StringComparison.OrdinalIgnoreCase) >= 0) return c;
                 }
-            }
             return null;
         }
 
@@ -880,33 +594,11 @@ namespace RosterRotation
             foreach (Component c in go.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("isOn",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var p = c.GetType().GetProperty("isOn", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (p == null || p.PropertyType != typeof(bool)) continue;
-                if (GetMemberValueReflect(c, "onValueChanged") != null) return c;
+                return c;
             }
             return null;
-        }
-
-        private static object GetMemberValueReflect(object obj, string name)
-        {
-            if (obj == null) return null;
-            var t = obj.GetType();
-            try { var p = t.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); if (p != null) return p.GetValue(obj, null); } catch { }
-            try { var f = t.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); if (f != null) return f.GetValue(obj); } catch { }
-            return null;
-        }
-
-        private static void InvokeVoidNoArgs(object obj, string method)
-        {
-            if (obj == null) return;
-            try
-            {
-                var m = obj.GetType().GetMethod(method,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (m != null) m.Invoke(obj, null);
-            }
-            catch { }
         }
 
         private static void SetBoolReflect(object obj, string name, bool value)
@@ -914,8 +606,7 @@ namespace RosterRotation
             if (obj == null) return;
             try
             {
-                var p = obj.GetType().GetProperty(name,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var p = obj.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (p?.CanWrite == true) p.SetValue(obj, value, null);
             }
             catch { }
@@ -931,18 +622,19 @@ namespace RosterRotation
             return null;
         }
 
-        private static bool RowContainsRetiredName(GameObject row, List<string> names)
+        // Optimized: accepts pre-built crew name set to avoid rebuilding per row
+        private static bool RowContainsRetiredName(GameObject row, List<string> retiredNames, HashSet<string> crewNames)
         {
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var p = c.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 if (p == null || p.PropertyType != typeof(string)) continue;
                 string s = null;
                 try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-                foreach (string n in names) if (s == n) return true;
+                if (string.IsNullOrEmpty(s) || !crewNames.Contains(s)) continue;
+                for (int i = 0; i < retiredNames.Count; i++)
+                    if (s == retiredNames[i]) return true;
             }
             return false;
         }

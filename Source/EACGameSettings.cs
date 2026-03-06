@@ -138,6 +138,7 @@ namespace RosterRotation
                 EACStateBridge.SetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
                 EACStateBridge.SetDouble("TrainingRDPerStar", trn.TrainingRDPerStar);
                 EACStateBridge.SetDouble("TrainingBaseFundsCost", trn.TrainingBaseFundsCost);
+                EACStateBridge.SetDouble("RecallFundsCostMultiplier", trn.RecallFundsCostMultiplier);
 
                 // Aging
                 if (ag.RetirementAgeMax < ag.RetirementAgeMin) ag.RetirementAgeMax = ag.RetirementAgeMin;
@@ -188,6 +189,7 @@ namespace RosterRotation
                 trn.TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
                 trn.TrainingRDPerStar       = (float)EACStateBridge.GetDouble("TrainingRDPerStar", trn.TrainingRDPerStar);
                 trn.TrainingBaseFundsCost   = (float)EACStateBridge.GetDouble("TrainingBaseFundsCost", trn.TrainingBaseFundsCost);
+                trn.RecallFundsCostMultiplier = (float)EACStateBridge.GetDouble("RecallFundsCostMultiplier", trn.RecallFundsCostMultiplier);
 
                 // Aging
                 ag.AgingEnabled       = EACStateBridge.GetBool("AgingEnabled", ag.AgingEnabled);
@@ -333,6 +335,13 @@ namespace RosterRotation
             autoPersistance = true)]
         public float TrainingBaseFundsCost = 62000f;
 
+        [GameParameters.CustomFloatParameterUI(
+            "Recall cost mult.",
+            toolTip = "Multiplier applied to hire cost for recalling retired kerbals. 0 = free recall. No R&D cost.",
+            minValue = 0f, maxValue = 5f, stepCount = 51,
+            autoPersistance = true)]
+        public float RecallFundsCostMultiplier = 1.0f;
+
         protected override void PullFromState()
         {
             TrainingInitialDays     = EACStateBridge.GetInt("TrainingInitialDays", 30);
@@ -340,6 +349,7 @@ namespace RosterRotation
             TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", 1.0);
             TrainingRDPerStar       = (float)EACStateBridge.GetDouble("TrainingRDPerStar", 10.0);
             TrainingBaseFundsCost   = (float)EACStateBridge.GetDouble("TrainingBaseFundsCost", 62000);
+            RecallFundsCostMultiplier = (float)EACStateBridge.GetDouble("RecallFundsCostMultiplier", 1.0);
         }
 
         protected override void PushToState()
@@ -349,6 +359,7 @@ namespace RosterRotation
             EACStateBridge.SetDouble("TrainingFundsMultiplier", TrainingFundsMultiplier);
             EACStateBridge.SetDouble("TrainingRDPerStar", TrainingRDPerStar);
             EACStateBridge.SetDouble("TrainingBaseFundsCost", TrainingBaseFundsCost);
+            EACStateBridge.SetDouble("RecallFundsCostMultiplier", RecallFundsCostMultiplier);
         }
     }
 

@@ -77,11 +77,13 @@ namespace RosterRotation
         // So we delay one frame and confirm the AstronautComplex UI actually exists in Resources.
         public static void Open_Postfix()
         {
+            ACOpenCache.Invalidate();
             AstronautComplexProbeRunner.RequestOpenCheck();
         }
 
         public static void Close_Postfix()
         {
+            ACOpenCache.Invalidate();
             if (AstronautComplexWatcher.IsOpen)
             {
                 AstronautComplexWatcher.IsOpen = false;
@@ -97,6 +99,8 @@ namespace RosterRotation
     public class AstronautComplexProbeRunner : MonoBehaviour
     {
         private static AstronautComplexProbeRunner _instance;
+        private static Type _acType;
+        private static bool _typeSearched;
         private bool _pendingOpenCheck;
 
         private void Awake() => _instance = this;
@@ -107,20 +111,46 @@ namespace RosterRotation
                 _instance._pendingOpenCheck = true;
         }
 
+        private static bool HasActiveAstronautComplexScreen()
+        {
+            try
+            {
+                if (!_typeSearched)
+                {
+                    _typeSearched = true;
+                    var asm = AssemblyLoader.loadedAssemblies
+                        .Select(a => a.assembly)
+                        .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+                    if (asm != null)
+                        _acType = asm.GetType("KSP.UI.Screens.AstronautComplex");
+                }
+
+                if (_acType == null) return false;
+
+                var all = Resources.FindObjectsOfTypeAll(_acType);
+                foreach (var obj in all)
+                {
+                    var mb = obj as MonoBehaviour;
+                    if (mb != null && mb.isActiveAndEnabled && mb.gameObject != null && mb.gameObject.activeInHierarchy)
+                        return true;
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
         private void Update()
         {
             if (!_pendingOpenCheck) return;
             _pendingOpenCheck = false;
 
-            // Confirm AC UI exists (even if inactive)
-            bool found = Resources.FindObjectsOfTypeAll<GameObject>()
-                .Any(go => go != null && go.name != null &&
-                           go.name.IndexOf("AstronautComplex", StringComparison.OrdinalIgnoreCase) >= 0);
-
-            if (found && !AstronautComplexWatcher.IsOpen)
+            bool found = HasActiveAstronautComplexScreen();
+            if (AstronautComplexWatcher.IsOpen != found)
             {
-                AstronautComplexWatcher.IsOpen = true;
-                //RRLog.Verbose("[RosterRotation] AstronautComplexWatcher: IsOpen=True");
+                AstronautComplexWatcher.IsOpen = found;
+                ACOpenCache.Invalidate();
+                //RRLog.Verbose($"[RosterRotation] AstronautComplexWatcher: IsOpen={found}");
             }
         }
     }

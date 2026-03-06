@@ -1,12 +1,6 @@
-// RosterRotation - AstronautComplexACPatch (2026-02-23k)
-//
-// CHANGES from 2026-02-23j:
-//   - Re-added Prefix_AddItem_Available (dropped in j): blocks retired kerbals
-//     from being added to the Available list when KSP rebuilds it.
-//   - Removed _bypassPrefix complexity (no longer needed since we use row-clone
-//     strategy, not swap strategy).
-//   - Cleaned up: back to 4 patches (ActivateList, AddItem_Available,
-//     CreateAvailableList, UpdateCrewCounts).
+// EAC - AstronautComplexACPatch
+// Harmony patches for the KSP Astronaut Complex UI.
+// PERF: Uses cached retired names and crew name sets to avoid per-frame allocations.
 
 using System;
 using System.Reflection;
@@ -189,6 +183,7 @@ namespace RosterRotation
             try
             {
                 double nowUT = Planetarium.GetUniversalTime();
+                int rowCount = 0, tooltipWired = 0, prefabFound = 0, prefabRewired = 0;
                 foreach (Transform row in retiredList)
                 {
                     if (row == null) continue;
@@ -197,6 +192,7 @@ namespace RosterRotation
                     foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                         if (ch.name == "Button") { btnT = ch; break; }
                     if (btnT == null) continue;
+                    rowCount++;
 
                     // Get components from Button GO
                     Component uisb = null, btn = null, btnImg = null, tooltip = null;
@@ -243,6 +239,7 @@ namespace RosterRotation
                     }
 
                     if (tooltip == null) continue;
+                    tooltipWired++;
 
                     // RequireInteractable = false so tooltip fires without a valid selectableBase
                     foreach (string fn in new[] { "RequireInteractable", "requireInteractable" })
@@ -260,23 +257,35 @@ namespace RosterRotation
                         if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch { }
                     }
 
-                    // Wire tooltipPrefab if null
+                    // Wire tooltipPrefab — ALWAYS re-wire on every rewire pass.
+                    // After AC close/reopen, the old prefab reference is a destroyed Unity object:
+                    // non-null in C# but dead in Unity. Must use Unity's == null to detect this.
                     var prefabF = tooltip.GetType().GetField("tooltipPrefab",
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     if (prefabF != null)
                     {
                         var prefabVal = prefabF.GetValue(tooltip);
-                        if (prefabVal == null)
+                        // Unity null check: catches both C# null AND destroyed Unity objects
+                        bool prefabDead = (prefabVal is UnityEngine.Object uObj) ? (uObj == null) : (prefabVal == null);
+                        if (prefabDead)
                         {
+                            bool found = false;
                             foreach (Component tc in UnityEngine.Object.FindObjectsOfType(tooltip.GetType()))
                             {
                                 if (tc == tooltip || tc == null) continue;
                                 var pf = prefabF.GetValue(tc);
-                                if (pf != null) { try { prefabF.SetValue(tooltip, pf); prefabVal = pf; } catch { } break; }
+                                if (pf is UnityEngine.Object pfObj && pfObj != null)
+                                {
+                                    try { prefabF.SetValue(tooltip, pf); prefabRewired++; found = true; } catch { }
+                                    break;
+                                }
                             }
+                            if (!found)
+                                RRLog.Verbose("[EAC] RewireTooltips: could not find live tooltip prefab for row");
                         }
                         else
                         {
+                            prefabFound++;
                         }
                     }
 
@@ -301,6 +310,81 @@ namespace RosterRotation
                         try { enabledP.SetValue(tooltip, true, null); } catch { }
                     }
 
+                    // ── Tooltip chain diagnostics (verbose logging) ──
+                    if (RRLog.VerboseEnabled)
+                    {
+                        var sb = new System.Text.StringBuilder("[EAC] TooltipDiag row='");
+                        sb.Append(row.name).Append("': ");
+
+                        // Button GO active?
+                        sb.Append("btnGO=").Append(btnT.gameObject.activeSelf ? "ON" : "OFF").Append(" ");
+
+                        // Tooltip enabled?
+                        bool ttEnabled = false;
+                        if (enabledP != null) try { ttEnabled = (bool)enabledP.GetValue(tooltip, null); } catch { }
+                        sb.Append("ttEnabled=").Append(ttEnabled).Append(" ");
+
+                        // Prefab alive?
+                        var pfF = tooltip.GetType().GetField("tooltipPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (pfF != null)
+                        {
+                            var pfVal = pfF.GetValue(tooltip);
+                            bool pfAlive = (pfVal is UnityEngine.Object pfObj) ? (pfObj != null) : (pfVal != null);
+                            sb.Append("prefab=").Append(pfAlive ? "LIVE" : "DEAD").Append(" ");
+                        }
+
+                        // selectableBase alive?
+                        var selF = tooltip.GetType().GetField("selectableBase", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (selF != null)
+                        {
+                            var selVal = selF.GetValue(tooltip);
+                            bool selAlive = (selVal is UnityEngine.Object selObj) ? (selObj != null) : (selVal != null);
+                            sb.Append("selBase=").Append(selAlive ? "LIVE" : "DEAD").Append(" ");
+                        }
+
+                        // stateButton alive?
+                        var sbF = tooltip.GetType().GetField("stateButton", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (sbF != null)
+                        {
+                            var sbVal = sbF.GetValue(tooltip);
+                            bool sbAlive = (sbVal is UnityEngine.Object sbObj) ? (sbObj != null) : (sbVal != null);
+                            sb.Append("stateBtn=").Append(sbAlive ? "LIVE" : "DEAD").Append(" ");
+                        }
+
+                        // RequireInteractable?
+                        var riF = tooltip.GetType().GetField("RequireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                               ?? tooltip.GetType().GetField("requireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        if (riF != null) try { sb.Append("reqInteract=").Append(riF.GetValue(tooltip)).Append(" "); } catch { }
+
+                        // UIHoverPanel on row?
+                        bool uhpFound = false, uhpEnabled = false;
+                        foreach (Component c in row.GetComponents<Component>())
+                        {
+                            if (c != null && c.GetType().Name == "UIHoverPanel")
+                            {
+                                uhpFound = true;
+                                var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+                                if (ep != null) try { uhpEnabled = (bool)ep.GetValue(c, null); } catch { }
+                                break;
+                            }
+                        }
+                        sb.Append("uhp=").Append(uhpFound ? (uhpEnabled ? "ENABLED" : "disabled") : "NONE").Append(" ");
+
+                        // DragObject has EventTriggerForwarder?
+                        bool etfFound = false;
+                        for (int di = 0; di < row.childCount; di++)
+                        {
+                            var dragObj = row.GetChild(di);
+                            if (dragObj == null || dragObj.name != "DragObject") continue;
+                            foreach (Component c in dragObj.GetComponents<Component>())
+                                if (c != null && c.GetType().Name == "EventTriggerForwarder") { etfFound = true; break; }
+                            break;
+                        }
+                        sb.Append("etf=").Append(etfFound ? "YES" : "NO");
+
+                        RRLog.Verbose(sb.ToString());
+                    }
+
                     // Re-apply retired kerbal stars AFTER SetActive(true).
                     // OnEnable resets UIStateImage.currentStateIndex to 0, so we must set it again
                     // after activation using our effective (decayed) star count.
@@ -318,10 +402,11 @@ namespace RosterRotation
                     }
                     catch { }
                 }
+                RRLog.Verbose("[EAC] RewireTooltips: rows=" + rowCount + " tooltips=" + tooltipWired + " prefabs=" + prefabFound + " rewired=" + prefabRewired);
             }
             catch (Exception ex)
             {
-                RRLog.WarnOnce("ac.rewire.fail", "[RosterRotation] RewireTooltipsInRetiredList failed: " + ex.Message);
+                RRLog.WarnOnce("ac.rewire.fail", "RewireTooltipsInRetiredList failed: " + ex.Message);
             }
         }
 
@@ -404,9 +489,6 @@ namespace RosterRotation
                     Type t = c.GetType();
 
                     // Swap backgroundNormal to the hover sprite so the border is always visible.
-                    // UIHoverPanel.PointerExit() writes backgroundNormal back to backgroundImage.sprite;
-                    // with backgroundNormal = backgroundHover both enter and exit show the border.
-                    // hoverEnabled stays TRUE so onPointerEnter still fires for tooltip delivery.
                     var bgNF = t.GetField("backgroundNormal",
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     var bgHF = t.GetField("backgroundHover",
@@ -435,19 +517,15 @@ namespace RosterRotation
                                 var spriteP = img.GetType().GetProperty("sprite",
                                     BindingFlags.Instance | BindingFlags.Public);
                                 if (spriteP != null) spriteP.SetValue(img, hoverSprite, null);
-                                var enabledP = img.GetType().GetProperty("enabled",
+                                var enabledP2 = img.GetType().GetProperty("enabled",
                                     BindingFlags.Instance | BindingFlags.Public);
-                                if (enabledP != null) enabledP.SetValue(img, true, null);
+                                if (enabledP2 != null) enabledP2.SetValue(img, true, null);
                             }
                         }
                         catch { }
                     }
 
-                    // CRITICAL: Clear hoverObjects so UIHoverPanel.PointerExit() stops calling
-                    // SetActive(false) on the Button GO.  In stock AC rows the Button is in this
-                    // list so it only appears on hover; for our Recall button we always want it
-                    // visible.  Clearing the list has no effect on tooltip delivery (that uses
-                    // onPointerEnter, gated by hoverEnabled which stays true).
+                    // Clear hoverObjects so PointerExit() stops calling SetActive(false) on Button GO.
                     foreach (string fieldName in new[] { "hoverObjects", "_hoverObjects", "HoverObjects" })
                     {
                         var hoF = t.GetField(fieldName,
@@ -455,37 +533,31 @@ namespace RosterRotation
                         if (hoF == null) continue;
                         var hoVal = hoF.GetValue(c);
                         if (hoVal == null) break;
-                        // Clear via reflection — works for List<T> or array
                         var clearM = hoVal.GetType().GetMethod("Clear",
                             BindingFlags.Instance | BindingFlags.Public);
                         if (clearM != null)
-                        {
-                            try { clearM.Invoke(hoVal, null); }
-                            catch { }
-                        }
+                            try { clearM.Invoke(hoVal, null); } catch { }
                         break;
                     }
+
+                    // CRITICAL: Disable UIHoverPanel entirely so its Update() never runs.
+                    // This is the definitive fix — clearing hoverObjects alone is a race condition
+                    // because OnEnable repopulates them from serialized data on each SetActive(true).
+                    var enabledP = t.GetProperty("enabled",
+                        BindingFlags.Instance | BindingFlags.Public);
+                    if (enabledP != null) try { enabledP.SetValue(c, false, null); } catch { }
 
                     break;
                 }
 
-                // Destroy EventTriggerForwarder from DragObject.
-                for (int i = 0; i < row.transform.childCount; i++)
-                {
-                    Transform dragObj = row.transform.GetChild(i);
-                    if (dragObj == null || dragObj.name != "DragObject") continue;
-                    foreach (Component c in dragObj.GetComponents<Component>())
-                    {
-                        if (c == null || c.GetType().Name != "EventTriggerForwarder") continue;
-                        UnityEngine.Object.DestroyImmediate(c);
-                        break;
-                    }
-                    break;
-                }
+                // DO NOT destroy EventTriggerForwarder from DragObject.
+                // EventTriggerForwarder relays PointerEnter events from DragObject (the raycast
+                // target) to Button (where UIStateButtonTooltip lives). Without it, hover events
+                // never reach the tooltip system and tooltips stop working after AC close/reopen.
             }
             catch (Exception ex)
             {
-                RRLog.Warn("[RosterRotation] DestroyUIHoverPanel failed: " + ex.Message);
+                RRLog.Warn("[EAC] DisableUIHoverPanel failed: " + ex.Message);
             }
         }
 
@@ -995,15 +1067,23 @@ private static void EnsureMaxCrewCached()
                                 continue; // already cloned this kerbal
                             }
 
+                            // Skip dead kerbals — they belong in the Lost tab, not Retired
+                            if (preCheckName != null
+                                && RosterRotationState.Records.TryGetValue(preCheckName, out var preRec)
+                                && preRec != null && preRec.DeathUT > 0)
+                            {
+                                continue;
+                            }
+
                             GameObject clone = UnityEngine.Object.Instantiate(row.gameObject, retiredList);
                             clone.SetActive(true);
 
                             // DestroyImmediate — regular Destroy is deferred to end-of-frame,
                             // meaning CrewListItem runs one more Update() and resets our star/label changes.
+                            // Keep TooltipController_CrewAC alive — it provides the kerbal info popup on hover.
                             var toDestroy = new System.Collections.Generic.List<Component>();
                             foreach (Component c in clone.GetComponentsInChildren<Component>(true))
-                                if (c != null && (c.GetType().Name == "CrewListItem"
-                                               || c.GetType().Name == "TooltipController_CrewAC"))
+                                if (c != null && c.GetType().Name == "CrewListItem")
                                     toDestroy.Add(c);
                             foreach (var c in toDestroy)
                                 try { UnityEngine.Object.DestroyImmediate(c); } catch { }
@@ -1615,10 +1695,7 @@ private static void FixAvailableBadge(GameObject acGo,
         // ---------------------------------------------------------------
         private static System.Collections.Generic.List<string> GetRetiredNames()
         {
-            var names = new System.Collections.Generic.List<string>();
-            foreach (var kvp in RosterRotationState.Records)
-                if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
-            return names;
+            return RosterRotationState.GetRetiredNames();
         }
 
         private static int GetRetiredCrewCount()
@@ -1664,70 +1741,20 @@ private static void FixAvailableBadge(GameObject acGo,
             if (string.IsNullOrEmpty(name)) return null;
             var roster = HighLogic.CurrentGame?.CrewRoster;
             if (roster == null) return null;
-
-            // Fast path: scan the main Crew list.
             try
             {
                 if (roster.Crew != null)
                     foreach (var k in roster.Crew)
                         if (k != null && k.name == name) return k;
-            }
-            catch { }
-
-            // Try any method that looks like Get*(string) -> ProtoCrewMember
-            try
-            {
-                var ms = roster.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                foreach (var m in ms)
+                // Also check full roster (Dead/Missing kerbals)
+                for (int i = 0; i < roster.Count; i++)
                 {
-                    if (m == null) continue;
-                    if (m.ReturnType != typeof(ProtoCrewMember)) continue;
-                    var ps = m.GetParameters();
-                    if (ps == null || ps.Length != 1 || ps[0].ParameterType != typeof(string)) continue;
-                    try
-                    {
-                        var res = m.Invoke(roster, new object[] { name }) as ProtoCrewMember;
-                        if (res != null && res.name == name) return res;
-                    }
-                    catch { }
+                    ProtoCrewMember pcm;
+                    try { pcm = roster[i]; } catch { continue; }
+                    if (pcm != null && pcm.name == name) return pcm;
                 }
             }
             catch { }
-
-            // Reflection fallback: scan any IEnumerable<ProtoCrewMember> properties/fields.
-            try
-            {
-                foreach (var p in roster.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (p == null || !p.CanRead) continue;
-                    var pt = p.PropertyType;
-                    if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(pt)) continue;
-                    if (!pt.IsGenericType) continue;
-                    var ga = pt.GetGenericArguments();
-                    if (ga == null || ga.Length != 1 || ga[0] != typeof(ProtoCrewMember)) continue;
-                    object val = null;
-                    try { val = p.GetValue(roster, null); } catch { continue; }
-                    if (val is System.Collections.IEnumerable e)
-                        foreach (var o in e)
-                            if (o is ProtoCrewMember k && k != null && k.name == name) return k;
-                }
-                foreach (var f in roster.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (f == null) continue;
-                    var ft = f.FieldType;
-                    if (!typeof(System.Collections.IEnumerable).IsAssignableFrom(ft)) continue;
-                    if (!ft.IsGenericType) continue;
-                    var ga = ft.GetGenericArguments();
-                    if (ga == null || ga.Length != 1 || ga[0] != typeof(ProtoCrewMember)) continue;
-                    object val = null;
-                    try { val = f.GetValue(roster); } catch { continue; }
-                    if (val is System.Collections.IEnumerable e)
-                        foreach (var o in e)
-                            if (o is ProtoCrewMember k && k != null && k.name == name) return k;
-                }
-            }
-            catch { }
-
             return null;
         }
 
@@ -1993,14 +2020,16 @@ private static void FixAvailableBadge(GameObject acGo,
         private static string GetKerbalNameFromRowAllRoster(GameObject row)
         {
             if (row == null || HighLogic.CurrentGame?.CrewRoster == null) return null;
-            var names = new System.Collections.Generic.HashSet<string>();
+            // Build lookup once (cheaper than per-component)
             var roster = HighLogic.CurrentGame.CrewRoster;
+            var names = new System.Collections.Generic.HashSet<string>();
             for (int i = 0; i < roster.Count; i++)
             {
                 ProtoCrewMember pcm;
                 try { pcm = roster[i]; } catch { continue; }
                 if (pcm != null) names.Add(pcm.name);
             }
+            if (names.Count == 0) return null;
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
@@ -2105,11 +2134,9 @@ private static void FixAvailableBadge(GameObject acGo,
         // a known crew member name — same pattern used by RowContainsName).
         private static string GetKerbalNameFromRow(GameObject row)
         {
-            if (row == null || HighLogic.CurrentGame?.CrewRoster == null) return null;
-            // Build a quick lookup of known crew names
-            var names = new System.Collections.Generic.HashSet<string>();
-            foreach (var pcm in HighLogic.CurrentGame.CrewRoster.Crew)
-                if (pcm != null) names.Add(pcm.name);
+            if (row == null) return null;
+            var names = RosterRotationState.GetCrewNameSet();
+            if (names.Count == 0) return null;
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
@@ -2612,20 +2639,26 @@ private static void FixAvailableBadge(GameObject acGo,
                         if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch { }
                     }
 
-                    // Wire tooltipPrefab if null — copy from any working instance in scene
+                    // Wire tooltipPrefab — check for both null AND destroyed Unity objects
                     var prefabF = tooltip.GetType().GetField("tooltipPrefab",
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (prefabF != null && prefabF.GetValue(tooltip) == null)
+                    if (prefabF != null)
                     {
-                        foreach (Component tc in UnityEngine.Object.FindObjectsOfType(tooltip.GetType()))
+                        var pfVal = prefabF.GetValue(tooltip);
+                        bool pfDead = (pfVal is UnityEngine.Object pfObj) ? (pfObj == null) : (pfVal == null);
+                        if (pfDead)
                         {
-                            if (tc == tooltip) continue;
-                            var pf = prefabF.GetValue(tc);
-                            if (pf != null) { try { prefabF.SetValue(tooltip, pf); } catch { } break; }
+                            foreach (Component tc in UnityEngine.Object.FindObjectsOfType(tooltip.GetType()))
+                            {
+                                if (tc == tooltip) continue;
+                                var pf = prefabF.GetValue(tc);
+                                if (pf is UnityEngine.Object livePf && livePf != null)
+                                { try { prefabF.SetValue(tooltip, pf); } catch { } break; }
+                            }
                         }
                     }
 
-                    // Set tooltipStates text: index 0 = "Cannot Recall", index 1 = "Recall Kerbal"
+                    // Set tooltipStates text: index 0 = "Cannot Recall", index 1 = "Recall Kerbal (cost)"
                     var tsF = tooltip.GetType().GetField("tooltipStates",
                         BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                     if (tsF != null)
@@ -2633,11 +2666,14 @@ private static void FixAvailableBadge(GameObject acGo,
                         var arr = tsF.GetValue(tooltip) as System.Array;
                         if (arr != null)
                         {
+                            double rCost = 0;
+                            try { rCost = RosterRotationKSCUI.GetRecallFundsCost(); } catch { }
+                            string costStr = rCost > 0 ? $" ({rCost:N0})" : "";
                             for (int si = 0; si < arr.Length; si++)
                             {
                                 var entry = arr.GetValue(si);
                                 if (entry == null) continue;
-                                string tipText = si == 0 ? "Cannot Recall" : "Recall Kerbal";
+                                string tipText = si == 0 ? "Cannot Recall" : ("Recall Kerbal" + costStr);
                                 bool tipSet = false;
                                 foreach (string fn in new[] { "tooltipText", "text", "tip", "message", "content", "label" })
                                 {
@@ -2761,21 +2797,47 @@ private static void FixAvailableBadge(GameObject acGo,
                 if (ACPatches.GetCachedMaxCrew() < int.MaxValue)
                 {
                     int active = 0;
+                    int retiredSkipped = 0, deadSkipped = 0, applicantSkipped = 0;
                     if (HighLogic.CurrentGame?.CrewRoster != null)
                         foreach (var pcm in HighLogic.CurrentGame.CrewRoster.Crew)
                         {
                             if (pcm == null) continue;
-                            if (RosterRotationState.Records.TryGetValue(pcm.name, out var pr) && pr != null && pr.Retired) continue;
+                            if (pcm.type == ProtoCrewMember.KerbalType.Applicant) { applicantSkipped++; continue; }
+                            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                                pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) { deadSkipped++; continue; }
+                            if (RosterRotationState.Records.TryGetValue(pcm.name, out var pr) && pr != null && pr.Retired) { retiredSkipped++; continue; }
                             active++;
                         }
-                    if (active >= ACPatches.GetCachedMaxCrew())
+                    int maxCrew = ACPatches.GetCachedMaxCrew();
+                    RRLog.Verbose("[EAC] RecallCheck: active=" + active + " max=" + maxCrew
+                        + " retiredSkipped=" + retiredSkipped + " deadSkipped=" + deadSkipped
+                        + " applicantSkipped=" + applicantSkipped);
+                    if (active >= maxCrew)
                     {
-                        ScreenMessages.PostScreenMessage("Cannot recall " + kerbal.name + " — crew roster is full.", 4f, ScreenMessageStyle.UPPER_CENTER);
+                        ScreenMessages.PostScreenMessage("Cannot recall " + kerbal.name + " — crew roster is full (" + active + "/" + maxCrew + ").", 4f, ScreenMessageStyle.UPPER_CENTER);
                         return;
                     }
                 }
 
+                // Check recall funds cost
+                double recallCost = RosterRotationKSCUI.GetRecallFundsCost();
+                if (recallCost > 0)
+                {
+                    double funds = 0;
+                    try { funds = Funding.Instance?.Funds ?? 0; } catch { }
+                    if (funds < recallCost)
+                    {
+                        ScreenMessages.PostScreenMessage(
+                            "Cannot recall " + kerbal.name + " — insufficient funds (need √" + recallCost.ToString("N0") + ").",
+                            4f, ScreenMessageStyle.UPPER_CENTER);
+                        return;
+                    }
+                    try { Funding.Instance?.AddFunds(-recallCost, TransactionReasons.CrewRecruited); } catch { }
+                }
+
                 rec.Retired = false;
+                RosterRotationState.InvalidateRetiredCache();
+                RosterRotationKSCUI.InvalidateCrewCapacityCache();
 
                 if (kerbal.type == ProtoCrewMember.KerbalType.Tourist ||
                     kerbal.type == ProtoCrewMember.KerbalType.Unowned)
@@ -2802,7 +2864,8 @@ private static void FixAvailableBadge(GameObject acGo,
 
                 try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
 
-                ScreenMessages.PostScreenMessage(kerbal.name + " recalled — 30-day refresher training begins.", 4f, ScreenMessageStyle.UPPER_CENTER);
+                string costMsg = recallCost > 0 ? " (√" + recallCost.ToString("N0") + ")" : "";
+                ScreenMessages.PostScreenMessage(kerbal.name + " recalled — 30-day refresher training begins." + costMsg, 4f, ScreenMessageStyle.UPPER_CENTER);
 
                 // Rebuild lists and immediately update status labels so the row shows
                 // "In refresher training Xd Xh Xm" instead of "Available for next mission".
