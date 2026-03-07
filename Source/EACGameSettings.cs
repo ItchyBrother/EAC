@@ -6,7 +6,8 @@ namespace RosterRotation
 {
     // EAC Difficulty Options layout:
     //   - One left-menu entry: "EAC"
-    //   - Three panels across the top row: General (incl. Messages + Debug), Training, Aging
+    //   - Three panels across the top row: General, Training, Aging
+    //   - Debug toggles remain in the General panel under a "Debug" heading
     // This avoids KSP splitting the section into "EAC (1)", "EAC (2)" pages when too many panels exist.
 
     internal static class EACStateBridge
@@ -208,58 +209,72 @@ namespace RosterRotation
         [GameParameters.CustomParameterUI(
             "Use Kerbin time",
             toolTip = "If enabled: 6-hour days, 426-day years. If disabled: 24-hour days, 365-day years.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool UseKerbinTime = true;
 
         // Messages: channels
         [GameParameters.CustomParameterUI(
             "HUD",
             toolTip = "Post notifications to the on-screen HUD ticker.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyHUD = true;
 
         [GameParameters.CustomParameterUI(
             "Message App",
             toolTip = "Post notifications to KSP's Message App (persistent messages).",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyMessageApp = true;
 
         // Messages: categories
         [GameParameters.CustomParameterUI(
             "Birthdays",
             toolTip = "Enable birthday notifications.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyBirthdays = true;
 
         [GameParameters.CustomParameterUI(
             "Training",
             toolTip = "Enable training-related notifications.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyTraining = true;
 
         [GameParameters.CustomParameterUI(
             "Retirement",
             toolTip = "Enable retirement-related notifications.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyRetirement = true;
 
         [GameParameters.CustomParameterUI(
             "Deaths",
             toolTip = "Enable death notifications.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool NotifyDeaths = true;
 
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "",
+            lines = 1,
+            autoPersistance = false)]
+        public string DebugSpacer = "";
+
         // Debug
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "Debug",
+            lines = 1,
+            autoPersistance = false)]
+        public string DebugHeading = "";
+
         [GameParameters.CustomParameterUI(
             "Verbose UI logs",
             toolTip = "Enable extra UI logs (Retired tab, list rebuilds, etc).",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool VerboseUILogs = false;
 
         [GameParameters.CustomParameterUI(
             "Verbose aging logs",
             toolTip = "Enable extra aging-related logs (birthdays/retirement checks).",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool VerboseAgingLogs = false;
 
         protected override void PullFromState()
@@ -280,6 +295,9 @@ namespace RosterRotation
 
         protected override void PushToState()
         {
+            bool oldVerbose = EACStateBridge.GetBool("VerboseLogging", false);
+            bool oldAgeVerbose = EACStateBridge.GetBool("VerboseAgeLogging", false);
+
             EACStateBridge.SetBool("UseKerbinDays", UseKerbinTime);
 
             EACStateBridge.SetBool("NotifyHUD", NotifyHUD);
@@ -292,6 +310,9 @@ namespace RosterRotation
 
             EACStateBridge.SetBool("VerboseLogging", VerboseUILogs);
             EACStateBridge.SetBool("VerboseAgeLogging", VerboseAgingLogs);
+
+            if (oldVerbose != VerboseUILogs || oldAgeVerbose != VerboseAgingLogs)
+                RosterRotationState.VerboseSettingsDirty = true;
         }
     }
 
@@ -304,42 +325,42 @@ namespace RosterRotation
             "Init days",
             toolTip = "Initial onboarding training duration (days).",
             minValue = 0, maxValue = 365, stepSize = 1,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public int TrainingInitialDays = 30;
 
         [GameParameters.CustomIntParameterUI(
             "Days / star",
             toolTip = "Training duration (days) per experience star gained.",
             minValue = 0, maxValue = 365, stepSize = 1,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public int TrainingStarDays = 30;
 
         [GameParameters.CustomFloatParameterUI(
             "Funds mult.",
             toolTip = "Multiplier applied to computed training costs.",
             minValue = 0f, maxValue = 10f, stepCount = 101,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public float TrainingFundsMultiplier = 1.0f;
 
         [GameParameters.CustomFloatParameterUI(
             "R&D / star",
             toolTip = "R&D points per star (if applicable in your career setup).",
             minValue = 0f, maxValue = 200f, stepCount = 201,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public float TrainingRDPerStar = 10.0f;
 
         [GameParameters.CustomFloatParameterUI(
             "Base funds",
             toolTip = "Base training cost in Funds before modifiers.",
             minValue = 0f, maxValue = 500000f, stepCount = 201,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public float TrainingBaseFundsCost = 62000f;
 
         [GameParameters.CustomFloatParameterUI(
             "Recall cost mult.",
             toolTip = "Multiplier applied to hire cost for recalling retired kerbals. 0 = free recall. No R&D cost.",
             minValue = 0f, maxValue = 5f, stepCount = 51,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public float RecallFundsCostMultiplier = 1.0f;
 
         protected override void PullFromState()
@@ -371,28 +392,28 @@ namespace RosterRotation
         [GameParameters.CustomParameterUI(
             "Enable aging",
             toolTip = "If enabled, kerbals age, retire, and may die after retirement.",
-            autoPersistance = true)]
+            autoPersistance = false)]
         public bool AgingEnabled = true;
 
         [GameParameters.CustomIntParameterUI(
             "Retire min",
             toolTip = "Minimum retirement age (years).",
             minValue = 18, maxValue = 120, stepSize = 1,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public int RetirementAgeMin = 48;
 
         [GameParameters.CustomIntParameterUI(
             "Retire max",
             toolTip = "Maximum retirement age (years). A random retirement age is chosen in [min,max].",
             minValue = 18, maxValue = 120, stepSize = 1,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public int RetirementAgeMax = 55;
 
         [GameParameters.CustomIntParameterUI(
             "Retired death min",
             toolTip = "Minimum age at which retired kerbals may die (years).",
             minValue = 18, maxValue = 200, stepSize = 1,
-            autoPersistance = true)]
+            autoPersistance = false)]
         public int RetiredDeathAgeMin = 55;
 
         protected override void PullFromState()

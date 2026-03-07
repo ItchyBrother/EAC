@@ -25,35 +25,45 @@ namespace RosterRotation
                 else if (node.HasNode(NodeNameOld)) root = node.GetNode(NodeNameOld);
                 else root = node;
 
-                bool loadedFromParams = EACGameSettings.TryApplyToStateFromGameParams();
-                if (!loadedFromParams)
+                // --- Settings ---
+                // ALWAYS load from our Settings node first — it's the reliable source of truth.
+                // GameParameters.CustomParams may not have loaded the saved values yet when
+                // OnLoad fires (KSP load order: ScenarioModule.OnLoad runs before GameParameters
+                // fully deserializes custom param nodes). Only use GameParams as primary source
+                // if our Settings node doesn't exist (brand new game with no save data).
+                if (root.HasNode("Settings"))
                 {
-                    if (root.HasNode("Settings"))
+                    var s = root.GetNode("Settings");
+                    RosterRotationState.RestDays = PD(s.GetValue("restDays"), 14);
+                    RosterRotationState.UseKerbinDays = PB(s.GetValue("useKerbinDays"), true);
+                    RosterRotationState.TrainingInitialDays = PI(s.GetValue("trainingInitialDays"), 30);
+                    RosterRotationState.TrainingStarDays = PI(s.GetValue("trainingStarDays"), 30);
+                    RosterRotationState.TrainingFundsMultiplier = PD(s.GetValue("trainingFundsMultiplier"), 1.0);
+                    RosterRotationState.TrainingRDPerStar = PD(s.GetValue("trainingRDPerStar"), 10.0);
+                    RosterRotationState.TrainingBaseFundsCost = PD(s.GetValue("trainingBaseFundsCost"), 62000);
+                    RosterRotationState.RecallFundsCostMultiplier = PD(s.GetValue("recallFundsCostMultiplier"), 1.0);
+                    RosterRotationState.AgingEnabled = PB(s.GetValue("agingEnabled"), true);
+                    RosterRotationState.DeathNotificationsEnabled = PB(s.GetValue("deathNotificationsEnabled"), true);
+                    RosterRotationState.HudNotificationsEnabled = PB(s.GetValue("hudNotificationsEnabled"), true);
+                    RosterRotationState.MessageAppNotificationsEnabled = PB(s.GetValue("messageAppNotificationsEnabled"), true);
+                    RosterRotationState.BirthdayNotificationsEnabled = PB(s.GetValue("birthdayNotificationsEnabled"), true);
+                    RosterRotationState.TrainingNotificationsEnabled = PB(s.GetValue("trainingNotificationsEnabled"), true);
+                    RosterRotationState.RetirementNotificationsEnabled = PB(s.GetValue("retirementNotificationsEnabled"), true);
+                    RosterRotationState.RetirementAgeMin = PI(s.GetValue("retirementAgeMin"), 48);
+                    RosterRotationState.RetirementAgeMax = PI(s.GetValue("retirementAgeMax"), 55);
+                    RosterRotationState.RetiredDeathAgeMin = PI(s.GetValue("retiredDeathAgeMin"), 55);
+                    if (!RosterRotationState.VerboseSettingsDirty)
                     {
-                        var s = root.GetNode("Settings");
-                        RosterRotationState.RestDays = PD(s.GetValue("restDays"), 14);
-                        RosterRotationState.UseKerbinDays = PB(s.GetValue("useKerbinDays"), true);
-                        RosterRotationState.TrainingInitialDays = PI(s.GetValue("trainingInitialDays"), 30);
-                        RosterRotationState.TrainingStarDays = PI(s.GetValue("trainingStarDays"), 30);
-                        RosterRotationState.TrainingFundsMultiplier = PD(s.GetValue("trainingFundsMultiplier"), 1.0);
-                        RosterRotationState.TrainingRDPerStar = PD(s.GetValue("trainingRDPerStar"), 10.0);
-                        RosterRotationState.TrainingBaseFundsCost = PD(s.GetValue("trainingBaseFundsCost"), 62000);
-                        RosterRotationState.RecallFundsCostMultiplier = PD(s.GetValue("recallFundsCostMultiplier"), 1.0);
-                        RosterRotationState.AgingEnabled = PB(s.GetValue("agingEnabled"), true);
-                        RosterRotationState.DeathNotificationsEnabled = PB(s.GetValue("deathNotificationsEnabled"), true);
-                        RosterRotationState.HudNotificationsEnabled = PB(s.GetValue("hudNotificationsEnabled"), true);
-                        RosterRotationState.MessageAppNotificationsEnabled = PB(s.GetValue("messageAppNotificationsEnabled"), true);
-                        RosterRotationState.BirthdayNotificationsEnabled = PB(s.GetValue("birthdayNotificationsEnabled"), true);
-                        RosterRotationState.TrainingNotificationsEnabled = PB(s.GetValue("trainingNotificationsEnabled"), true);
-                        RosterRotationState.RetirementNotificationsEnabled = PB(s.GetValue("retirementNotificationsEnabled"), true);
-                        RosterRotationState.RetirementAgeMin = PI(s.GetValue("retirementAgeMin"), 48);
-                        RosterRotationState.RetirementAgeMax = PI(s.GetValue("retirementAgeMax"), 55);
-                        RosterRotationState.RetiredDeathAgeMin = PI(s.GetValue("retiredDeathAgeMin"), 55);
                         RosterRotationState.VerboseLogging = PB(s.GetValue("verboseLogging"), false);
                         RosterRotationState.VerboseAgeLogging = PB(s.GetValue("verboseAgeLogging"), false);
                     }
-                    EACGameSettings.TrySyncGameParamsFromState();
+
+                    RRLog.Info($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}");
                 }
+
+                // Push our loaded state into GameParameters so the Difficulty Options UI
+                // shows the correct values when the player opens it.
+                EACGameSettings.TrySyncGameParamsFromState();
 
                 if (!root.HasNode("Record")) return;
 
@@ -126,6 +136,7 @@ namespace RosterRotation
                 s.AddValue("retiredDeathAgeMin", RosterRotationState.RetiredDeathAgeMin.ToString(ci));
                 s.AddValue("verboseLogging", RosterRotationState.VerboseLogging.ToString(ci));
                 s.AddValue("verboseAgeLogging", RosterRotationState.VerboseAgeLogging.ToString(ci));
+                RosterRotationState.VerboseSettingsDirty = false;
 
                 foreach (var kvp in RosterRotationState.Records)
                 {

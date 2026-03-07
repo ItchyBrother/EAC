@@ -84,6 +84,7 @@ namespace RosterRotation
         public static int  RetiredDeathAgeMin        = 55;
         public static bool VerboseLogging    = false;
         public static bool VerboseAgeLogging = false;
+        public static bool VerboseSettingsDirty = false;
 
         // Field aliases for EACStateBridge reflection access
         public static bool NotifyHUD { get => HudNotificationsEnabled; set => HudNotificationsEnabled = value; }
@@ -266,25 +267,75 @@ namespace RosterRotation
         private static bool _typeSearched;
         private static float _lastCheckTime = -10f;
         private static bool _lastResult;
-        private const float CACHE_DURATION = 0.25f;
+        private const float CACHE_DURATION_OPEN = 0.5f;
+
+        private static MonoBehaviour _cachedACInstance;
+
+        // When true, we've confirmed the AC is closed and won't scan again
+        // until Invalidate() is called (which the Harmony hooks do on dialog open/close).
+        private static bool _confirmedClosed;
+
+        internal static int PollCount;
+        internal static int ExpensiveScanCount;
+        internal static float TotalScanMs;
+        internal static int CacheHitCount;
 
         public static bool IsOpen
         {
             get
             {
+                // If we've confirmed closed and no hook has invalidated us, return false immediately.
+                // This is the critical optimization: ZERO cost when AC is closed.
+                if (_confirmedClosed) return false;
+
                 float now = Time.realtimeSinceStartup;
-                if (now - _lastCheckTime < CACHE_DURATION) return _lastResult;
+                float cacheDur = _lastResult ? CACHE_DURATION_OPEN : 0f; // no throttle for "not found" — just confirm once
+                if (now - _lastCheckTime < cacheDur) return _lastResult;
                 _lastCheckTime = now;
+                PollCount++;
                 _lastResult = CheckOpen();
+
+                // If scan found nothing, mark confirmed closed — no more scanning until hook fires
+                if (!_lastResult) _confirmedClosed = true;
+
                 return _lastResult;
             }
         }
 
-        public static void Invalidate() => _lastCheckTime = -10f;
+        /// <summary>
+        /// Called by Harmony hooks when AC dialog lifecycle events fire (Start/Awake/OnDestroy/OnDisable).
+        /// Clears the confirmed-closed flag so the next IsOpen check will do one scan.
+        /// </summary>
+        public static void Invalidate()
+        {
+            _lastCheckTime = -10f;
+            _cachedACInstance = null;
+            _confirmedClosed = false;
+        }
 
         private static bool CheckOpen()
         {
             if (HighLogic.LoadedScene != GameScenes.SPACECENTER) return false;
+
+            // Fast path: cached reference alive and active
+            if (_cachedACInstance != null)
+            {
+                try
+                {
+                    if (_cachedACInstance.isActiveAndEnabled &&
+                        _cachedACInstance.gameObject != null &&
+                        _cachedACInstance.gameObject.activeInHierarchy)
+                    {
+                        CacheHitCount++;
+                        return true;
+                    }
+                }
+                catch { }
+                _cachedACInstance = null;
+                return false;
+            }
+
+            // Slow path: one-time scan after Invalidate()
             try
             {
                 if (!_typeSearched)
@@ -297,16 +348,77 @@ namespace RosterRotation
                 }
                 if (_acType == null) return false;
 
+                float t0 = Time.realtimeSinceStartup;
                 var all = Resources.FindObjectsOfTypeAll(_acType);
+                float elapsed = (Time.realtimeSinceStartup - t0) * 1000f;
+                ExpensiveScanCount++;
+                TotalScanMs += elapsed;
+
                 foreach (var obj in all)
                 {
                     var mb = obj as MonoBehaviour;
                     if (mb != null && mb.isActiveAndEnabled && mb.gameObject != null && mb.gameObject.activeInHierarchy)
+                    {
+                        _cachedACInstance = mb;
                         return true;
+                    }
                 }
             }
             catch { }
             return false;
+        }
+    }
+
+
+    [KSPAddon(KSPAddon.Startup.MainMenu, true)]
+    public class EACSettingsPersistenceHook : MonoBehaviour
+    {
+        private bool _saveQueued;
+
+        private void Awake()
+        {
+            DontDestroyOnLoad(this);
+            GameEvents.OnGameSettingsApplied.Add(OnGameSettingsApplied);
+        }
+
+        private void OnDestroy()
+        {
+            GameEvents.OnGameSettingsApplied.Remove(OnGameSettingsApplied);
+        }
+
+        private void OnGameSettingsApplied()
+        {
+            if (_saveQueued) return;
+            StartCoroutine(DeferredSavePersistent());
+        }
+
+        private System.Collections.IEnumerator DeferredSavePersistent()
+        {
+            _saveQueued = true;
+
+            // Let KSP finish applying GameParameters before we mirror to scenario state.
+            yield return null;
+            yield return null;
+
+            try
+            {
+                if (HighLogic.CurrentGame == null || string.IsNullOrEmpty(HighLogic.SaveFolder))
+                    yield break;
+
+                if (!EACGameSettings.TryApplyToStateFromGameParams())
+                    RRLog.Warn("[EAC] Settings applied, but EAC parameters could not be mirrored to state before save.");
+
+                RRLog.Info("[EAC] Settings applied; forcing persistent.sfs save.");
+                GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
+            }
+            catch (Exception ex)
+            {
+                RRLog.Error("[EAC] Failed to save settings on Apply/Accept: " + ex);
+            }
+            finally
+            {
+                _saveQueued = false;
+            }
         }
     }
 
@@ -433,11 +545,6 @@ namespace RosterRotation
 
         private const float UiCacheSeconds = 0.25f;
         private static float _lastCrewCapacityCacheRT = -10f;
-        internal static void InvalidateCrewCapacityCache()
-        {
-            _lastCrewCapacityCacheRT = -10f;
-            _lastHireCostCacheRT = -10f;
-        }
         private static int _cachedActiveNonRetiredCount;
         private static int _cachedMaxCrew = int.MaxValue;
         private static float _lastHireCostCacheRT = -10f;
@@ -479,6 +586,38 @@ namespace RosterRotation
             GameEvents.onGUIApplicationLauncherDestroyed.Add(OnAppLauncherDestroyed);
             GameEvents.onKerbalTypeChange.Add(OnKerbalTypeChange);
             StartCoroutine(StartupDelayed());
+            StartCoroutine(PerfProfilerCoroutine());
+        }
+
+        /// <summary>
+        /// Periodic performance logger — dumps EAC overhead stats every 30s when verbose logging is on.
+        /// Helps identify which subsystems are consuming frame time.
+        /// </summary>
+        private System.Collections.IEnumerator PerfProfilerCoroutine()
+        {
+            RRLog.Info("[EAC] PerfProfiler started (reports every 10s when verbose logging is on)");
+            yield return new WaitForSeconds(5f);
+            var wait = new WaitForSeconds(10f);
+            while (true)
+            {
+                if (RRLog.VerboseEnabled)
+                {
+                    var sb = new System.Text.StringBuilder("[EAC] PerfReport: ");
+                    sb.Append("ACOpenPolls=").Append(ACOpenCache.PollCount);
+                    sb.Append(" CacheHits=").Append(ACOpenCache.CacheHitCount);
+                    sb.Append(" ExpensiveScans=").Append(ACOpenCache.ExpensiveScanCount);
+                    sb.Append(" ScanMs=").Append(ACOpenCache.TotalScanMs.ToString("F1"));
+                    sb.Append(" FPS=").Append((1f / Time.unscaledDeltaTime).ToString("F1"));
+
+                    ACOpenCache.PollCount = 0;
+                    ACOpenCache.CacheHitCount = 0;
+                    ACOpenCache.ExpensiveScanCount = 0;
+                    ACOpenCache.TotalScanMs = 0;
+
+                    RRLog.Info(sb.ToString());
+                }
+                yield return wait;
+            }
         }
 
         private System.Collections.IEnumerator StartupDelayed()
@@ -1263,6 +1402,12 @@ namespace RosterRotation
             _lastCrewCapacityCacheRT = -10f;  // force crew count refresh
             InvalidateCrewCapacityCache();
             CrewRandRAdapter.InvalidateVacationCache();
+        }
+
+        internal static void InvalidateCrewCapacityCache()
+        {
+            _lastCrewCapacityCacheRT = -10f;
+            _lastHireCostCacheRT = -10f;
         }
 
         private List<RosterRowData> GetRosterRowsCached(KerbalRoster roster, double now)

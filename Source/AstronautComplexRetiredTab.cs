@@ -242,33 +242,83 @@ namespace RosterRotation
                 try { DetectTabSelection(); } catch { }
         }
 
-        // ── Setup coroutine (runs until complete, then stops) ──────────────────
+        // ── Setup coroutine ──────────────────────────────────────────────────────
+        // Runs setup until complete, then monitors for AC UI destruction (close/reopen).
+        // When the AC dialog is destroyed by KSP, our cloned tab and scroll list die with it.
+        // We detect this via the cached _tabRetiredGO becoming null and re-run setup.
         private IEnumerator SetupWorker()
         {
             var wait = new WaitForSeconds(0.4f);
-            while (!_setupComplete)
-            {
-                yield return wait;
-                try { DoSetupTick(); }
-                catch (Exception ex) { RRLog.Error(LOGP + "SetupWorker exception: " + ex); }
-            }
-            // After setup, only update badge every 2s
             var slowWait = new WaitForSeconds(2f);
+
             while (true)
             {
-                yield return slowWait;
-                if (_tabRetiredGO != null) UpdateRetiredBadge();
+                // Phase 1: Setup loop — runs until tabs are created
+                while (!_setupComplete)
+                {
+                    yield return wait;
+                    try { DoSetupTick(); }
+                    catch (Exception ex) { RRLog.Error(LOGP + "SetupWorker exception: " + ex); }
+                }
+
+                // Phase 2: Monitor loop — badge updates + detect destroyed UI
+                while (_setupComplete)
+                {
+                    yield return slowWait;
+
+                    // Check if our tab was destroyed (AC dialog was closed/reopened by KSP).
+                    // Unity overloads == so destroyed objects compare equal to null.
+                    if (_tabRetiredGO == null)
+                    {
+                        RRLog.Verbose(LOGP + "Tab destroyed — resetting setup for next AC open.");
+                        ResetSetupState();
+                        break; // Back to Phase 1
+                    }
+
+                    UpdateRetiredBadge();
+                }
             }
+        }
+
+        /// <summary>Clears all cached state so setup runs fresh on next AC open.</summary>
+        private void ResetSetupState()
+        {
+            _tabsRoot = null;
+            _vesselScrollRect = null;
+            _rootsSearched = false;
+            _toggleController = null;
+            _listsField = null;
+            _currentListField = null;
+            _retiredTabIndex = -1;
+            _registeredWithController = false;
+            _controllerRegistrationFailed = false;
+            _tabRetiredGO = null;
+            _retiredToggleComp = null;
+            _toggleListenersCleared = false;
+            _scrollListRetired = null;
+            _retiredTabActive = false;
+            _retiredProxy = null;
+            _lastBadgeCount = -1;
+            _setupComplete = false;
         }
 
         private void DoSetupTick()
         {
             if (!_rootsSearched)
             {
+                float t0 = Time.realtimeSinceStartup;
                 _tabsRoot = FindTabsRoot();
                 _vesselScrollRect = FindVesselScrollRect();
+                float elapsed = (Time.realtimeSinceStartup - t0) * 1000f;
                 if (_tabsRoot != null && _vesselScrollRect != null)
+                {
                     _rootsSearched = true;
+                    RRLog.Verbose(LOGP + $"Root discovery took {elapsed:F1}ms");
+                }
+                else
+                {
+                    return; // Don't proceed if roots not found
+                }
             }
 
             if (_toggleController == null && _tabsRoot != null)
@@ -294,7 +344,7 @@ namespace RosterRotation
                 _setupComplete = true;
         }
 
-        // ── PERF FIX: Throttled hide worker (was every frame, now 1s) ──────────
+        // ── PERF: Only hides retired rows when AC is open ───────────────────────
         private IEnumerator ThrottledHideWorker()
         {
             var wait = new WaitForSeconds(1.0f);

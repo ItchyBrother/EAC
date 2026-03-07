@@ -23,40 +23,52 @@ namespace RosterRotation
 
                 if (asm == null)
                 {
-                    RRLog.Error("[RosterRotation] AstronautComplexHook: Assembly-CSharp not found.");
+                    RRLog.Error("[EAC] AstronautComplexHook: Assembly-CSharp not found.");
                     return;
                 }
 
-                // In your log, this was the working type:
-                // AstronautComplexFacility
-                var t = asm.GetTypes().FirstOrDefault(x => x.Name == "AstronautComplexFacility");
-                if (t == null)
+                // Patch 1: AstronautComplexFacility (the KSC building object)
+                var facilityType = asm.GetTypes().FirstOrDefault(x => x.Name == "AstronautComplexFacility");
+                if (facilityType == null)
                 {
-                    // fallback: name contains Astronaut + Complex
-                    t = asm.GetTypes().FirstOrDefault(x =>
+                    facilityType = asm.GetTypes().FirstOrDefault(x =>
                     {
                         var n = x.FullName ?? x.Name;
                         return n.IndexOf("Astronaut", StringComparison.OrdinalIgnoreCase) >= 0 &&
                                n.IndexOf("Complex", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                               typeof(MonoBehaviour).IsAssignableFrom(x);
+                               typeof(MonoBehaviour).IsAssignableFrom(x) &&
+                               n.IndexOf("Facility", StringComparison.OrdinalIgnoreCase) >= 0;
                     });
                 }
 
-                if (t == null)
+                if (facilityType != null)
                 {
-                    //RRLog.Error("[RosterRotation] AstronautComplexHook: no Astronaut Complex type found.");
-                    return;
+                    PatchIfExists(h, facilityType, "Start", nameof(AstronautComplexHookPatches.Open_Postfix));
+                    PatchIfExists(h, facilityType, "OnDestroy", nameof(AstronautComplexHookPatches.Close_Postfix));
+                    PatchIfExists(h, facilityType, "OnDisable", nameof(AstronautComplexHookPatches.Close_Postfix));
                 }
 
-                //RRLog.Verbose($"[RosterRotation] AstronautComplexHook: using type {t.FullName}");
-
-                PatchIfExists(h, t, "Start", nameof(AstronautComplexHookPatches.Open_Postfix));
-                PatchIfExists(h, t, "OnDestroy", nameof(AstronautComplexHookPatches.Close_Postfix));
-                PatchIfExists(h, t, "OnDisable", nameof(AstronautComplexHookPatches.Close_Postfix));
+                // Patch 2: KSP.UI.Screens.AstronautComplex (the dialog UI)
+                // This is what actually opens/closes when the player clicks the building.
+                // Patching it ensures ACOpenCache.Invalidate() fires immediately on dialog
+                // open/close, eliminating the 0-3 second button appearance delay.
+                var dialogType = asm.GetType("KSP.UI.Screens.AstronautComplex");
+                if (dialogType != null)
+                {
+                    PatchIfExists(h, dialogType, "Start", nameof(AstronautComplexHookPatches.Open_Postfix));
+                    PatchIfExists(h, dialogType, "Awake", nameof(AstronautComplexHookPatches.Open_Postfix));
+                    PatchIfExists(h, dialogType, "OnDestroy", nameof(AstronautComplexHookPatches.Close_Postfix));
+                    PatchIfExists(h, dialogType, "OnDisable", nameof(AstronautComplexHookPatches.Close_Postfix));
+                    RRLog.Verbose("[EAC] AstronautComplexHook: patched AC dialog UI lifecycle.");
+                }
+                else
+                {
+                    RRLog.Warn("[EAC] AstronautComplexHook: KSP.UI.Screens.AstronautComplex not found — button may appear with delay.");
+                }
             }
             catch (Exception ex)
             {
-                RRLog.Error($"[RosterRotation] AstronautComplexHook.Apply failed: {ex}");
+                RRLog.Error($"[EAC] AstronautComplexHook.Apply failed: {ex}");
             }
         }
 
