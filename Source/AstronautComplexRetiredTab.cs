@@ -73,7 +73,7 @@ namespace RosterRotation
                 if (c == null) continue;
                 var colorProp = c.GetType().GetProperty("color", f);
                 if (colorProp == null || colorProp.PropertyType != typeof(Color)) continue;
-                try { colorProp.SetValue(c, on ? new Color(1f,1f,1f,1f) : new Color(1f,1f,1f,0.5f), null); } catch { }
+                try { colorProp.SetValue(c, on ? new Color(1f,1f,1f,1f) : new Color(1f,1f,1f,0.5f), null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:76", "Suppressed exception in AstronautComplexRetiredTab.cs:76", ex); }
             }
         }
 
@@ -162,7 +162,7 @@ namespace RosterRotation
                     var hoVal = hoF.GetValue(uhp);
                     if (hoVal == null) break;
                     var clearM = hoVal.GetType().GetMethod("Clear", BindingFlags.Instance | BindingFlags.Public);
-                    if (clearM != null) try { clearM.Invoke(hoVal, null); } catch { }
+                    if (clearM != null) try { clearM.Invoke(hoVal, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:165", "Suppressed exception in AstronautComplexRetiredTab.cs:165", ex); }
                     break;
                 }
 
@@ -173,7 +173,7 @@ namespace RosterRotation
                 // hide the Button GO again. Tooltips work independently via
                 // UIStateButtonTooltip which registers directly with TooltipController.
                 var enabledP = t.GetProperty("enabled", bf);
-                if (enabledP != null) try { enabledP.SetValue(uhp, false, null); } catch { }
+                if (enabledP != null) try { enabledP.SetValue(uhp, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:176", "Suppressed exception in AstronautComplexRetiredTab.cs:176", ex); }
 
                 neutered++;
 
@@ -239,7 +239,7 @@ namespace RosterRotation
         private void Update()
         {
             if (_toggleListenersCleared)
-                try { DetectTabSelection(); } catch { }
+                try { DetectTabSelection(); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:242", "Suppressed exception in AstronautComplexRetiredTab.cs:242", ex); }
         }
 
         // ── Setup coroutine ──────────────────────────────────────────────────────
@@ -328,7 +328,11 @@ namespace RosterRotation
                 CacheControllerFields();
 
             if (_tabsRoot != null && _tabRetiredGO == null)
+            {
                 TryCreateRetiredTab();
+                if (_tabRetiredGO != null)
+                    UpdateRetiredBadge(force: true);
+            }
 
             if (_vesselScrollRect != null && _scrollListRetired == null)
                 TryCreateRetiredScrollList();
@@ -356,7 +360,7 @@ namespace RosterRotation
                     if (!_retiredTabActive && _vesselScrollRect != null)
                         HideRetiredRowsInActiveList();
                 }
-                catch { }
+                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:363", "Suppressed exception in AstronautComplexRetiredTab.cs:363", ex); }
             }
         }
 
@@ -372,6 +376,8 @@ namespace RosterRotation
                 if (GetPath(t).IndexOf("AstronautComplex", StringComparison.OrdinalIgnoreCase) >= 0) score += 10;
                 if (score > bestScore) { best = t; bestScore = score; }
             }
+            if (best == null)
+                RRLog.WarnOnce("ac.retiredtab.tabsroot.missing", LOGP + "Could not locate Tabs root in Astronaut Complex UI.");
             return best;
         }
 
@@ -390,17 +396,27 @@ namespace RosterRotation
                 }
                 if (score > bestScore) { best = t; bestScore = score; }
             }
+            if (best == null)
+                RRLog.WarnOnce("ac.retiredtab.vesselscroll.missing", LOGP + "Could not locate VesselScrollRect in Astronaut Complex UI.");
             return best;
         }
 
         private static Component FindToggleController(Transform tabsRoot)
         {
+            if (tabsRoot == null)
+            {
+                RRLog.WarnOnce("ac.retiredtab.togglecontroller.tabsrootnull", LOGP + "Cannot locate toggle controller because Tabs root is null.");
+                return null;
+            }
+
             foreach (Component c in tabsRoot.GetComponents<Component>())
             {
                 if (c == null) continue;
                 string fn = c.GetType().FullName ?? c.GetType().Name;
                 if (fn.IndexOf("UIListToggleController", StringComparison.OrdinalIgnoreCase) >= 0) return c;
             }
+
+            RRLog.WarnOnce("ac.retiredtab.togglecontroller.missing", LOGP + "Tabs root found, but UIListToggleController was not present.");
             return null;
         }
 
@@ -494,13 +510,13 @@ namespace RosterRotation
             RosterRotationKSCUI.RetiredTabSelected = false;
         }
 
-        private void UpdateRetiredBadge()
+        private void UpdateRetiredBadge(bool force = false)
         {
             int count = 0;
             foreach (var kvp in RosterRotationState.Records)
                 if (kvp.Value != null && kvp.Value.Retired && kvp.Value.DeathUT <= 0) count++;
 
-            if (count == _lastBadgeCount) return;
+            if (!force && count == _lastBadgeCount) return;
             _lastBadgeCount = count;
 
             foreach (Component c in _tabRetiredGO.GetComponentsInChildren<Component>(true))
@@ -515,7 +531,7 @@ namespace RosterRotation
                     cur.IndexOf("Lost", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     cur.IndexOf("Available", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    try { p.SetValue(c, "Retired[" + count + "]", null); } catch { }
+                    try { p.SetValue(c, "Retired[" + count + "]", null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:522", "Suppressed exception in AstronautComplexRetiredTab.cs:522", ex); }
                     return;
                 }
             }
@@ -572,6 +588,10 @@ namespace RosterRotation
             clone.SetActive(true);
 
             _tabRetiredGO = clone;
+
+            // The tab is cloned from Lost, so rewrite its label immediately.
+            // Without this, the UI can briefly show two "Lost" tabs until the periodic badge updater runs.
+            UpdateRetiredBadge(force: true);
 
             var proxy = clone.AddComponent<RetiredTabClickProxy>();
             proxy.RetiredScrollList = null;
@@ -654,12 +674,8 @@ namespace RosterRotation
         private static void SetBoolReflect(object obj, string name, bool value)
         {
             if (obj == null) return;
-            try
-            {
-                var p = obj.GetType().GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p?.CanWrite == true) p.SetValue(obj, value, null);
-            }
-            catch { }
+            if (!ReflectionUtils.TrySetPropertyValue(obj, obj.GetType(), value, LOGP + "SetBoolReflect(" + name + ")", name))
+                RRLog.VerboseOnce("ac.retiredtab.setbool.missing." + name, LOGP + "Property '" + name + "' was not writable on toggle component.");
         }
 
         private static Transform FindContent(Transform root)
@@ -669,6 +685,9 @@ namespace RosterRotation
             if (t != null) return t;
             foreach (Transform x in root.GetComponentsInChildren<Transform>(true))
                 if (x != null && string.Equals(x.name, "Content", StringComparison.Ordinal)) return x;
+
+            if ((root.name ?? string.Empty).IndexOf("scrollList_", StringComparison.OrdinalIgnoreCase) >= 0)
+                RRLog.VerboseOnce("ac.retiredtab.content.missing." + root.name, LOGP + "Could not find Content transform under '" + GetPath(root) + "'. Using root transform as fallback.");
             return null;
         }
 

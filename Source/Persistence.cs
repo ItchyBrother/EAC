@@ -33,33 +33,13 @@ namespace RosterRotation
                 // if our Settings node doesn't exist (brand new game with no save data).
                 if (root.HasNode("Settings"))
                 {
-                    var s = root.GetNode("Settings");
-                    RosterRotationState.RestDays = PD(s.GetValue("restDays"), 14);
-                    RosterRotationState.UseKerbinDays = PB(s.GetValue("useKerbinDays"), true);
-                    RosterRotationState.TrainingInitialDays = PI(s.GetValue("trainingInitialDays"), 30);
-                    RosterRotationState.TrainingStarDays = PI(s.GetValue("trainingStarDays"), 30);
-                    RosterRotationState.TrainingFundsMultiplier = PD(s.GetValue("trainingFundsMultiplier"), 1.0);
-                    RosterRotationState.TrainingRDPerStar = PD(s.GetValue("trainingRDPerStar"), 10.0);
-                    RosterRotationState.TrainingBaseFundsCost = PD(s.GetValue("trainingBaseFundsCost"), 62000);
-                    RosterRotationState.RecallFundsCostMultiplier = PD(s.GetValue("recallFundsCostMultiplier"), 1.0);
-                    RosterRotationState.AgingEnabled = PB(s.GetValue("agingEnabled"), true);
-                    RosterRotationState.DeathNotificationsEnabled = PB(s.GetValue("deathNotificationsEnabled"), true);
-                    RosterRotationState.HudNotificationsEnabled = PB(s.GetValue("hudNotificationsEnabled"), true);
-                    RosterRotationState.MessageAppNotificationsEnabled = PB(s.GetValue("messageAppNotificationsEnabled"), true);
-                    RosterRotationState.BirthdayNotificationsEnabled = PB(s.GetValue("birthdayNotificationsEnabled"), true);
-                    RosterRotationState.TrainingNotificationsEnabled = PB(s.GetValue("trainingNotificationsEnabled"), true);
-                    RosterRotationState.RetirementNotificationsEnabled = PB(s.GetValue("retirementNotificationsEnabled"), true);
-                    RosterRotationState.RetirementAgeMin = PI(s.GetValue("retirementAgeMin"), 48);
-                    RosterRotationState.RetirementAgeMax = PI(s.GetValue("retirementAgeMax"), 55);
-                    RosterRotationState.RetiredDeathAgeMin = PI(s.GetValue("retiredDeathAgeMin"), 55);
-                    if (!RosterRotationState.VerboseSettingsDirty)
-                    {
-                        RosterRotationState.VerboseLogging = PB(s.GetValue("verboseLogging"), false);
-                        RosterRotationState.VerboseAgeLogging = PB(s.GetValue("verboseAgeLogging"), false);
-                    }
+                    var settings = KerbalRecordPersistence.ReadSettings(root.GetNode("Settings"));
+                    KerbalRecordPersistence.ApplySettingsToState(settings, RosterRotationState.VerboseSettingsDirty);
 
-                    RRLog.Info($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}");
+                    RRLog.Verbose($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
+
+                CrashSeverityState.LoadPendingCrewRandRExtensions(root);
 
                 // Push our loaded state into GameParameters so the Difficulty Options UI
                 // shows the correct values when the player opens it.
@@ -69,34 +49,8 @@ namespace RosterRotation
 
                 foreach (ConfigNode rNode in root.GetNodes("Record"))
                 {
-                    string name = rNode.GetValue("name");
-                    if (string.IsNullOrEmpty(name)) continue;
-
-                    var rec = new RosterRotationState.KerbalRecord
-                    {
-                        OriginalTrait = rNode.GetValue("originalTrait"),
-                        OriginalType = ParseKerbalType(rNode.GetValue("originalType"), ProtoCrewMember.KerbalType.Crew),
-                        Flights = PI(rNode.GetValue("flights"), 0),
-                        LastFlightUT = PD(rNode.GetValue("lastFlightUT"), 0),
-                        RestUntilUT = PD(rNode.GetValue("restUntilUT"), 0),
-                        Retired = PB(rNode.GetValue("retired"), false),
-                        RetiredUT = PD(rNode.GetValue("retiredUT"), 0),
-                        ExperienceAtRetire = PI(rNode.GetValue("experienceAtRetire"), 0),
-                        MissionStartUT = PD(rNode.GetValue("missionStartUT"), 0),
-                        Training = (TrainingType)PI(rNode.GetValue("trainingType"), 0),
-                        TrainingTargetLevel = PI(rNode.GetValue("trainingTargetLevel"), 0),
-                        GrantedLevel = PI(rNode.GetValue("grantedLevel"), -1),
-                        BirthUT = PD(rNode.GetValue("birthUT"), 0),
-                        NaturalRetirementUT = PD(rNode.GetValue("naturalRetirementUT"), 0),
-                        RetirementDelayYears = PI(rNode.GetValue("retirementDelayYears"), 0),
-                        RetirementWarned = PB(rNode.GetValue("retirementWarned"), false),
-                        RetirementScheduled = PB(rNode.GetValue("retirementScheduled"), false),
-                        RetirementScheduledUT = PD(rNode.GetValue("retirementScheduledUT"), 0),
-                        DeathUT = PD(rNode.GetValue("deathUT"), 0),
-                        TrainingEndUT = PD(rNode.GetValue("trainingEndUT"), 0),
-                        LastAgedYears = PI(rNode.GetValue("lastAgedYears"), -1),
-                    };
-                    RosterRotationState.Records[name] = rec;
+                    if (KerbalRecordPersistence.TryReadRecord(rNode, out string name, out var rec))
+                        RosterRotationState.Records[name] = rec;
                 }
                 RosterRotationState.InvalidateRetiredCache();
                 RRLog.Info($"Loaded {RosterRotationState.Records.Count} kerbal records.");
@@ -116,60 +70,106 @@ namespace RosterRotation
                 var s = root.AddNode("Settings");
                 var ci = CultureInfo.InvariantCulture;
 
-                s.AddValue("restDays", RosterRotationState.RestDays.ToString(ci));
-                s.AddValue("useKerbinDays", RosterRotationState.UseKerbinDays.ToString(ci));
-                s.AddValue("trainingInitialDays", RosterRotationState.TrainingInitialDays.ToString(ci));
-                s.AddValue("trainingStarDays", RosterRotationState.TrainingStarDays.ToString(ci));
-                s.AddValue("trainingFundsMultiplier", RosterRotationState.TrainingFundsMultiplier.ToString(ci));
-                s.AddValue("trainingRDPerStar", RosterRotationState.TrainingRDPerStar.ToString(ci));
-                s.AddValue("trainingBaseFundsCost", RosterRotationState.TrainingBaseFundsCost.ToString(ci));
-                s.AddValue("recallFundsCostMultiplier", RosterRotationState.RecallFundsCostMultiplier.ToString(ci));
-                s.AddValue("agingEnabled", RosterRotationState.AgingEnabled.ToString(ci));
-                s.AddValue("deathNotificationsEnabled", RosterRotationState.DeathNotificationsEnabled.ToString(ci));
-                s.AddValue("hudNotificationsEnabled", RosterRotationState.HudNotificationsEnabled.ToString(ci));
-                s.AddValue("messageAppNotificationsEnabled", RosterRotationState.MessageAppNotificationsEnabled.ToString(ci));
-                s.AddValue("birthdayNotificationsEnabled", RosterRotationState.BirthdayNotificationsEnabled.ToString(ci));
-                s.AddValue("trainingNotificationsEnabled", RosterRotationState.TrainingNotificationsEnabled.ToString(ci));
-                s.AddValue("retirementNotificationsEnabled", RosterRotationState.RetirementNotificationsEnabled.ToString(ci));
-                s.AddValue("retirementAgeMin", RosterRotationState.RetirementAgeMin.ToString(ci));
-                s.AddValue("retirementAgeMax", RosterRotationState.RetirementAgeMax.ToString(ci));
-                s.AddValue("retiredDeathAgeMin", RosterRotationState.RetiredDeathAgeMin.ToString(ci));
-                s.AddValue("verboseLogging", RosterRotationState.VerboseLogging.ToString(ci));
-                s.AddValue("verboseAgeLogging", RosterRotationState.VerboseAgeLogging.ToString(ci));
+                KerbalRecordPersistence.WriteSettingsNode(s, KerbalRecordPersistence.CaptureSettingsFromState(), ci);
                 RosterRotationState.VerboseSettingsDirty = false;
+
+                CrashSeverityState.SavePendingCrewRandRExtensions(root);
 
                 foreach (var kvp in RosterRotationState.Records)
                 {
                     var r = kvp.Value;
                     ConfigNode rNode = root.AddNode("Record");
-                    rNode.AddValue("name", kvp.Key);
-                    if (!string.IsNullOrEmpty(r.OriginalTrait)) rNode.AddValue("originalTrait", r.OriginalTrait);
-                    rNode.AddValue("originalType", ((int)r.OriginalType).ToString(ci));
-                    rNode.AddValue("flights", r.Flights.ToString(ci));
-                    rNode.AddValue("lastFlightUT", r.LastFlightUT.ToString("R", ci));
-                    rNode.AddValue("restUntilUT", r.RestUntilUT.ToString("R", ci));
-                    rNode.AddValue("retired", r.Retired.ToString(ci));
-                    rNode.AddValue("retiredUT", r.RetiredUT.ToString("R", ci));
-                    rNode.AddValue("experienceAtRetire", r.ExperienceAtRetire.ToString(ci));
-                    rNode.AddValue("missionStartUT", r.MissionStartUT.ToString("R", ci));
-                    rNode.AddValue("trainingType", ((int)r.Training).ToString(ci));
-                    rNode.AddValue("trainingTargetLevel", r.TrainingTargetLevel.ToString(ci));
-                    if (r.GrantedLevel >= 0) rNode.AddValue("grantedLevel", r.GrantedLevel.ToString(ci));
-                    if (r.TrainingEndUT > 0) rNode.AddValue("trainingEndUT", r.TrainingEndUT.ToString("R", ci));
-                    if (r.LastAgedYears >= 0)
-                    {
-                        rNode.AddValue("birthUT", r.BirthUT.ToString("R", ci));
-                        rNode.AddValue("naturalRetirementUT", r.NaturalRetirementUT.ToString("R", ci));
-                        rNode.AddValue("retirementDelayYears", r.RetirementDelayYears.ToString(ci));
-                        rNode.AddValue("retirementWarned", r.RetirementWarned.ToString(ci));
-                        rNode.AddValue("retirementScheduled", r.RetirementScheduled.ToString(ci));
-                        if (r.RetirementScheduledUT > 0) rNode.AddValue("retirementScheduledUT", r.RetirementScheduledUT.ToString("R", ci));
-                        if (r.DeathUT > 0) rNode.AddValue("deathUT", r.DeathUT.ToString("R", ci));
-                        rNode.AddValue("lastAgedYears", r.LastAgedYears.ToString(ci));
-                    }
+                    int recoveredFlights = GetRecoveredFlightCountFromRoster(kvp.Key, r.Flights);
+                    r.Flights = recoveredFlights;
+                    KerbalRecordPersistence.WriteRecordNode(rNode, kvp.Key, r, ci);
                 }
             }
             catch (Exception ex) { RRLog.Error($"OnSave failed: {ex}"); }
+        }
+
+        private static int GetRecoveredFlightCountFromRoster(string kerbalName, int fallback)
+        {
+            if (string.IsNullOrEmpty(kerbalName) || HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null)
+                return fallback;
+
+            try
+            {
+                var roster = HighLogic.CurrentGame.CrewRoster;
+                for (int i = 0; i < roster.Count; i++)
+                {
+                    ProtoCrewMember pcm;
+                    try { pcm = roster[i]; }
+                    catch { continue; }
+
+                    if (pcm == null || !string.Equals(pcm.name, kerbalName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    ConfigNode kerbalNode = new ConfigNode("KERBAL");
+                    try
+                    {
+                        pcm.Save(kerbalNode);
+                    }
+                    catch
+                    {
+                        return fallback;
+                    }
+
+                    int recoveredFlights = CountRecoveredFlightsFromKerbalNode(kerbalNode);
+                    return recoveredFlights >= 0 ? recoveredFlights : fallback;
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Persistence.cs:229", "Suppressed exception in Persistence.cs:229", ex); }
+
+            return fallback;
+        }
+
+        private static int CountRecoveredFlightsFromKerbalNode(ConfigNode kerbalNode)
+        {
+            if (kerbalNode == null)
+                return -1;
+
+            // Align with FlightTracker's practical behavior: only count flights that look like
+            // completed vessel missions, not every stray Recover log record. A recovered flight
+            // must have both a Flight,<Body> start entry and a Recover entry for the same flight id.
+            var launchedFlights = new System.Collections.Generic.HashSet<int>();
+            var recoveredFlights = new System.Collections.Generic.HashSet<int>();
+
+            CollectCompletedCareerFlights(kerbalNode.GetNode("CAREER_LOG"), launchedFlights, recoveredFlights);
+            CollectCompletedCareerFlights(kerbalNode.GetNode("careerLog"), launchedFlights, recoveredFlights);
+
+            launchedFlights.IntersectWith(recoveredFlights);
+            return launchedFlights.Count;
+        }
+
+        private static void CollectCompletedCareerFlights(
+            ConfigNode logNode,
+            System.Collections.Generic.HashSet<int> launchedFlights,
+            System.Collections.Generic.HashSet<int> recoveredFlights)
+        {
+            if (logNode == null || launchedFlights == null || recoveredFlights == null)
+                return;
+
+            foreach (ConfigNode.Value value in logNode.values)
+            {
+                if (value == null || string.IsNullOrEmpty(value.name) || string.IsNullOrEmpty(value.value))
+                    continue;
+                if (string.Equals(value.name, "flight", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(value.name, "flights", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (!int.TryParse(value.name, NumberStyles.Integer, CultureInfo.InvariantCulture, out int flightId))
+                    continue;
+
+                string entry = value.value.Trim();
+                if (entry.StartsWith("Flight,", StringComparison.OrdinalIgnoreCase))
+                {
+                    launchedFlights.Add(flightId);
+                    continue;
+                }
+
+                if (entry.StartsWith("Recover", StringComparison.OrdinalIgnoreCase))
+                    recoveredFlights.Add(flightId);
+            }
         }
 
         private static int PI(string s, int fb) => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : fb;

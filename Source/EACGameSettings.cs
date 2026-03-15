@@ -129,11 +129,16 @@ namespace RosterRotation
                 EACStateBridge.SetBool("RetirementNotificationsEnabled", gen.NotifyRetirement);
                 EACStateBridge.SetBool("DeathNotificationsEnabled", gen.NotifyDeaths);
 
+                EACStateBridge.SetBool("PortraitCaptureEnabled", gen.PortraitCaptureEnabled);
+                EACStateBridge.SetBool("CrashPenaltyEnabled", gen.CrashPenaltyEnabled);
+                EACStateBridge.SetBool("MissionDeathEnabled", gen.MissionDeathEnabled);
+
                 // Debug
                 EACStateBridge.SetBool("VerboseLogging", gen.VerboseUILogs);
                 EACStateBridge.SetBool("VerboseAgeLogging", gen.VerboseAgingLogs);
 
                 // Training
+                EACStateBridge.SetBool("TraitGrowthEnabled", trn.TraitGrowth);
                 EACStateBridge.SetInt("TrainingInitialDays", trn.TrainingInitialDays);
                 EACStateBridge.SetInt("TrainingStarDays", trn.TrainingStarDays);
                 EACStateBridge.SetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
@@ -147,6 +152,7 @@ namespace RosterRotation
                 EACStateBridge.SetInt("RetirementAgeMin", ag.RetirementAgeMin);
                 EACStateBridge.SetInt("RetirementAgeMax", ag.RetirementAgeMax);
                 EACStateBridge.SetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
+                EACStateBridge.SetBool("AutoCleanupUnreferencedKerbals", ag.AutoCleanupUnreferencedKerbals);
 
                 return true;
             }
@@ -180,11 +186,16 @@ namespace RosterRotation
                 gen.NotifyRetirement = EACStateBridge.GetBool("RetirementNotificationsEnabled", gen.NotifyRetirement);
                 gen.NotifyDeaths     = EACStateBridge.GetBool("DeathNotificationsEnabled", gen.NotifyDeaths);
 
+                gen.PortraitCaptureEnabled = EACStateBridge.GetBool("PortraitCaptureEnabled", gen.PortraitCaptureEnabled);
+                gen.CrashPenaltyEnabled = EACStateBridge.GetBool("CrashPenaltyEnabled", gen.CrashPenaltyEnabled);
+                gen.MissionDeathEnabled = EACStateBridge.GetBool("MissionDeathEnabled", gen.MissionDeathEnabled);
+
                 // Debug
                 gen.VerboseUILogs    = EACStateBridge.GetBool("VerboseLogging", gen.VerboseUILogs);
                 gen.VerboseAgingLogs = EACStateBridge.GetBool("VerboseAgeLogging", gen.VerboseAgingLogs);
 
                 // Training
+                trn.TraitGrowth            = EACStateBridge.GetBool("TraitGrowthEnabled", trn.TraitGrowth);
                 trn.TrainingInitialDays     = EACStateBridge.GetInt("TrainingInitialDays", trn.TrainingInitialDays);
                 trn.TrainingStarDays        = EACStateBridge.GetInt("TrainingStarDays", trn.TrainingStarDays);
                 trn.TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
@@ -197,6 +208,7 @@ namespace RosterRotation
                 ag.RetirementAgeMin   = EACStateBridge.GetInt("RetirementAgeMin", ag.RetirementAgeMin);
                 ag.RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", ag.RetirementAgeMax);
                 ag.RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
+                ag.AutoCleanupUnreferencedKerbals = EACStateBridge.GetBool("AutoCleanupUnreferencedKerbals", ag.AutoCleanupUnreferencedKerbals);
 
                 return true;
             }
@@ -250,6 +262,25 @@ namespace RosterRotation
             autoPersistance = false)]
         public bool NotifyDeaths = true;
 
+        [GameParameters.CustomParameterUI(
+            "Portrait capture",
+            toolTip = "Capture visible in-flight kerbal portraits for Hall of History. Disable to stop the flight-scene portrait capture watcher from doing capture work.",
+            autoPersistance = false)]
+        public bool PortraitCaptureEnabled = true;
+
+
+        [GameParameters.CustomParameterUI(
+            "Crash penalty",
+            toolTip = "Enable crash injury and medical-retirement penalties on vessel recovery.",
+            autoPersistance = false)]
+        public bool CrashPenaltyEnabled = true;
+
+        [GameParameters.CustomParameterUI(
+            "Mission old-age deaths",
+            toolTip = "Allow assigned Kerbals past retirement age to die on mission from age and mission stress.",
+            autoPersistance = false)]
+        public bool MissionDeathEnabled = false;
+
         [GameParameters.CustomStringParameterUI(
             "",
             title = "",
@@ -288,6 +319,9 @@ namespace RosterRotation
             NotifyTraining     = EACStateBridge.GetBool("TrainingNotificationsEnabled", true);
             NotifyRetirement   = EACStateBridge.GetBool("RetirementNotificationsEnabled", true);
             NotifyDeaths       = EACStateBridge.GetBool("DeathNotificationsEnabled", true);
+            PortraitCaptureEnabled = EACStateBridge.GetBool("PortraitCaptureEnabled", true);
+            CrashPenaltyEnabled = EACStateBridge.GetBool("CrashPenaltyEnabled", true);
+            MissionDeathEnabled = EACStateBridge.GetBool("MissionDeathEnabled", false);
 
             VerboseUILogs      = EACStateBridge.GetBool("VerboseLogging", false);
             VerboseAgingLogs   = EACStateBridge.GetBool("VerboseAgeLogging", false);
@@ -307,6 +341,9 @@ namespace RosterRotation
             EACStateBridge.SetBool("TrainingNotificationsEnabled", NotifyTraining);
             EACStateBridge.SetBool("RetirementNotificationsEnabled", NotifyRetirement);
             EACStateBridge.SetBool("DeathNotificationsEnabled", NotifyDeaths);
+            EACStateBridge.SetBool("PortraitCaptureEnabled", PortraitCaptureEnabled);
+            EACStateBridge.SetBool("CrashPenaltyEnabled", CrashPenaltyEnabled);
+            EACStateBridge.SetBool("MissionDeathEnabled", MissionDeathEnabled);
 
             EACStateBridge.SetBool("VerboseLogging", VerboseUILogs);
             EACStateBridge.SetBool("VerboseAgeLogging", VerboseAgingLogs);
@@ -320,6 +357,12 @@ namespace RosterRotation
     public class EACGameSettings_Training : EACParamsBase
     {
         public override string Title => "Training";
+
+        [GameParameters.CustomParameterUI(
+            "Trait Growth",
+            toolTip = "Allow level-training completions and veteran recoveries to slightly increase Courage and reduce Stupidity.",
+            autoPersistance = false)]
+        public bool TraitGrowth = false;
 
         [GameParameters.CustomIntParameterUI(
             "Init days",
@@ -365,6 +408,7 @@ namespace RosterRotation
 
         protected override void PullFromState()
         {
+            TraitGrowth             = EACStateBridge.GetBool("TraitGrowthEnabled", false);
             TrainingInitialDays     = EACStateBridge.GetInt("TrainingInitialDays", 30);
             TrainingStarDays        = EACStateBridge.GetInt("TrainingStarDays", 30);
             TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", 1.0);
@@ -375,6 +419,7 @@ namespace RosterRotation
 
         protected override void PushToState()
         {
+            EACStateBridge.SetBool("TraitGrowthEnabled", TraitGrowth);
             EACStateBridge.SetInt("TrainingInitialDays", TrainingInitialDays);
             EACStateBridge.SetInt("TrainingStarDays", TrainingStarDays);
             EACStateBridge.SetDouble("TrainingFundsMultiplier", TrainingFundsMultiplier);
@@ -416,12 +461,19 @@ namespace RosterRotation
             autoPersistance = false)]
         public int RetiredDeathAgeMin = 55;
 
+        [GameParameters.CustomParameterUI(
+            "Auto-clean unreferenced retired/dead kerbals",
+            toolTip = "CAUTION! Backup your persistent file! If enabled retired/dead Kerbals not referenced will be removed.",
+            autoPersistance = false)]
+        public bool AutoCleanupUnreferencedKerbals = false;
+
         protected override void PullFromState()
         {
             AgingEnabled       = EACStateBridge.GetBool("AgingEnabled", true);
             RetirementAgeMin   = EACStateBridge.GetInt("RetirementAgeMin", 48);
             RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", 55);
             RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", 55);
+            AutoCleanupUnreferencedKerbals = EACStateBridge.GetBool("AutoCleanupUnreferencedKerbals", false);
         }
 
         protected override void PushToState()
@@ -432,6 +484,7 @@ namespace RosterRotation
             EACStateBridge.SetInt("RetirementAgeMin", RetirementAgeMin);
             EACStateBridge.SetInt("RetirementAgeMax", RetirementAgeMax);
             EACStateBridge.SetInt("RetiredDeathAgeMin", RetiredDeathAgeMin);
+            EACStateBridge.SetBool("AutoCleanupUnreferencedKerbals", AutoCleanupUnreferencedKerbals);
         }
     }
 }

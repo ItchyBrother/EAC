@@ -15,11 +15,22 @@
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="RRLog.cs" />
+    <Compile Include="ReflectionUtils.cs" />
+    <Compile Include="KspTimeMath.cs" />
+    <Compile Include="CareerRules.cs" />
+    <Compile Include="KerbalRecordPersistence.cs" />
+    <Compile Include="HallOfHistoryRules.cs" />
+    <Compile Include="SaveScheduler.cs" />
+    <Compile Include="Mod.State.cs" />
+    <Compile Include="Mod.SettingsPersistence.cs" />
+    <Compile Include="Mod.ACButtons.cs" />
     <Compile Include="Mod.cs" />
     <Compile Include="Persistence.cs" />
     <Compile Include="EACGameSettings.cs" />
     <Compile Include="HarmonyPatches.cs" />
     <Compile Include="AstronautComplexACPatch.cs" />
+    <Compile Include="AstronautComplexACPatch.Tooltips.cs" />
+    <Compile Include="AstronautComplexACPatch.Rows.cs" />
     <Compile Include="AstronautComplexHook.cs" />
     <Compile Include="AstronautComplexRetiredTab.cs" />
     <Compile Include="KerbalRosterHook.cs" />
@@ -27,7 +38,14 @@
     <Compile Include="CrewDialogHook.cs" />
     <Compile Include="CrewRandRAdapter.cs" />
     <Compile Include="CrewRandRWriter.cs" />
+    <Compile Include="CrashSeverity.cs" />
     <Compile Include="LaunchBlocker.cs" />
+    <Compile Include="RetiredKerbalCleanup.cs" />
+    <Compile Include="HallOfHistoryWindow.cs" />
+    <Compile Include="HallOfHistoryWindow.Portraits.cs" />
+    <Compile Include="HallOfHistoryWindow.DataTypes.cs" />
+    <Compile Include="EACPortraitCaptureWatcher.cs" />
+    <Compile Include="EACPortraitRenderer.cs" />
   </ItemGroup>
 
   <ItemGroup>

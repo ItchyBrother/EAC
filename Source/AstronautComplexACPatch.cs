@@ -3,6 +3,7 @@
 // PERF: Uses cached retired names and crew name sets to avoid per-frame allocations.
 
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -128,11 +129,16 @@ namespace RosterRotation
 
         private static Type[] SafeGetTypes(System.Reflection.Assembly a)
         {
-            try { return a.GetTypes(); } catch { return new Type[0]; }
+            try { return a.GetTypes(); }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("acpatch.safegettypes", "[EAC] ACPatch: failed to enumerate assembly types; using empty type list.", ex);
+                return new Type[0];
+            }
         }
     }
 
-    internal static class ACPatches
+    internal static partial class ACPatches
     {
         // UIListToggleController
         private static FieldInfo _tcListsField;
@@ -175,431 +181,6 @@ namespace RosterRotation
             _retiredProxy = proxy;
         }
 
-        // Called by RetiredTabClickProxy.ShowRetiredList() AFTER SetActive(true).
-        // OnEnable() resets wired fields on UIStateButtonTooltip, so we must re-wire after activation.
-        public static void RewireTooltipsInRetiredList(Transform retiredList)
-        {
-            if (retiredList == null) return;
-            try
-            {
-                double nowUT = Planetarium.GetUniversalTime();
-                int rowCount = 0, tooltipWired = 0, prefabFound = 0, prefabRewired = 0;
-                foreach (Transform row in retiredList)
-                {
-                    if (row == null) continue;
-                    // Find Button GO (for UIStateButton and Button)
-                    Transform btnT = null;
-                    foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
-                        if (ch.name == "Button") { btnT = ch; break; }
-                    if (btnT == null) continue;
-                    rowCount++;
-
-                    // Get components from Button GO
-                    Component uisb = null, btn = null, btnImg = null, tooltip = null;
-                    foreach (Component c in btnT.GetComponents<Component>())
-                    {
-                        if (c == null) continue;
-                        if (c.GetType().Name == "UIStateButton")        uisb    = c;
-                        if (c.GetType().Name == "Button")               btn     = c;
-                        if (c.GetType().Name == "Image")                btnImg  = c;
-                        if (c.GetType().Name == "UIStateButtonTooltip") tooltip = c;
-                    }
-
-                    // UIStateButtonTooltip stays on Button — EventTriggerForwarder forwards
-                    // PointerEnter from DragObject (raycast target) down to Button.
-
-                    // --- Re-apply UIStateButton state (OnEnable resets currentStateIndex to 0) ---
-                    int correctStateIdx = 0;
-                    string correctStateName = "X";
-                    if (uisb != null && btnImg != null)
-                    {
-                        var spriteProp = btnImg.GetType().GetProperty("sprite", BindingFlags.Instance | BindingFlags.Public);
-                        if (spriteProp != null)
-                        {
-                            var sprite = spriteProp.GetValue(btnImg, null) as UnityEngine.Object;
-                            if (sprite != null && sprite.name != null && sprite.name.EndsWith("_v", System.StringComparison.OrdinalIgnoreCase))
-                            {
-                                correctStateIdx = 1;
-                                correctStateName = "V";
-                            }
-                        }
-
-                        var csiF = uisb.GetType().GetField("currentStateIndex",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (csiF != null) try { csiF.SetValue(uisb, correctStateIdx); } catch { }
-
-                        var csF = uisb.GetType().GetField("currentState",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (csF != null) try { csF.SetValue(uisb, correctStateName); } catch { }
-
-                        var ssF = uisb.GetType().GetField("stateSet",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (ssF != null) try { ssF.SetValue(uisb, true); } catch { }
-
-                    }
-
-                    if (tooltip == null) continue;
-                    tooltipWired++;
-
-                    // RequireInteractable = false so tooltip fires without a valid selectableBase
-                    foreach (string fn in new[] { "RequireInteractable", "requireInteractable" })
-                    {
-                        var f = tooltip.GetType().GetField(fn,
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (f != null) try { f.SetValue(tooltip, false); break; } catch { }
-                    }
-
-                    // Wire stateButton so tooltip reads currentStateIndex
-                    if (uisb != null)
-                    {
-                        var sbF = tooltip.GetType().GetField("stateButton",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch { }
-                    }
-
-                    // Wire tooltipPrefab — ALWAYS re-wire on every rewire pass.
-                    // After AC close/reopen, the old prefab reference is a destroyed Unity object:
-                    // non-null in C# but dead in Unity. Must use Unity's == null to detect this.
-                    var prefabF = tooltip.GetType().GetField("tooltipPrefab",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (prefabF != null)
-                    {
-                        var prefabVal = prefabF.GetValue(tooltip);
-                        // Unity null check: catches both C# null AND destroyed Unity objects
-                        bool prefabDead = (prefabVal is UnityEngine.Object uObj) ? (uObj == null) : (prefabVal == null);
-                        if (prefabDead)
-                        {
-                            bool found = false;
-                            foreach (Component tc in UnityEngine.Object.FindObjectsOfType(tooltip.GetType()))
-                            {
-                                if (tc == tooltip || tc == null) continue;
-                                var pf = prefabF.GetValue(tc);
-                                if (pf is UnityEngine.Object pfObj && pfObj != null)
-                                {
-                                    try { prefabF.SetValue(tooltip, pf); prefabRewired++; found = true; } catch { }
-                                    break;
-                                }
-                            }
-                            if (!found)
-                                RRLog.Verbose("[EAC] RewireTooltips: could not find live tooltip prefab for row");
-                        }
-                        else
-                        {
-                            prefabFound++;
-                        }
-                    }
-
-                    // Wire selectableBase to Button so interactable check passes
-                    if (btn != null)
-                    {
-                        var selF = tooltip.GetType().GetField("selectableBase",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (selF != null) try { selF.SetValue(tooltip, btn); } catch { }
-                    }
-
-                    // Force OnEnable by cycling enabled false→true. UIStateButtonTooltip
-                    // registers itself with KSP's tooltip manager in OnEnable. When the
-                    // scroll list was SetActive(false) the GO went inactive and OnDisable
-                    // fired, deregistering it. Just setting enabled=true won't re-register
-                    // because the property setter only fires OnEnable if value changes from
-                    // false to true — so we must explicitly cycle it.
-                    var enabledP = tooltip.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                    if (enabledP != null)
-                    {
-                        try { enabledP.SetValue(tooltip, false, null); } catch { }
-                        try { enabledP.SetValue(tooltip, true, null); } catch { }
-                    }
-
-                    // ── Tooltip chain diagnostics (verbose logging) ──
-                    if (RRLog.VerboseEnabled)
-                    {
-                        var sb = new System.Text.StringBuilder("[EAC] TooltipDiag row='");
-                        sb.Append(row.name).Append("': ");
-
-                        // Button GO active?
-                        sb.Append("btnGO=").Append(btnT.gameObject.activeSelf ? "ON" : "OFF").Append(" ");
-
-                        // Tooltip enabled?
-                        bool ttEnabled = false;
-                        if (enabledP != null) try { ttEnabled = (bool)enabledP.GetValue(tooltip, null); } catch { }
-                        sb.Append("ttEnabled=").Append(ttEnabled).Append(" ");
-
-                        // Prefab alive?
-                        var pfF = tooltip.GetType().GetField("tooltipPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (pfF != null)
-                        {
-                            var pfVal = pfF.GetValue(tooltip);
-                            bool pfAlive = (pfVal is UnityEngine.Object pfObj) ? (pfObj != null) : (pfVal != null);
-                            sb.Append("prefab=").Append(pfAlive ? "LIVE" : "DEAD").Append(" ");
-                        }
-
-                        // selectableBase alive?
-                        var selF = tooltip.GetType().GetField("selectableBase", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (selF != null)
-                        {
-                            var selVal = selF.GetValue(tooltip);
-                            bool selAlive = (selVal is UnityEngine.Object selObj) ? (selObj != null) : (selVal != null);
-                            sb.Append("selBase=").Append(selAlive ? "LIVE" : "DEAD").Append(" ");
-                        }
-
-                        // stateButton alive?
-                        var sbF = tooltip.GetType().GetField("stateButton", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (sbF != null)
-                        {
-                            var sbVal = sbF.GetValue(tooltip);
-                            bool sbAlive = (sbVal is UnityEngine.Object sbObj) ? (sbObj != null) : (sbVal != null);
-                            sb.Append("stateBtn=").Append(sbAlive ? "LIVE" : "DEAD").Append(" ");
-                        }
-
-                        // RequireInteractable?
-                        var riF = tooltip.GetType().GetField("RequireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                               ?? tooltip.GetType().GetField("requireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (riF != null) try { sb.Append("reqInteract=").Append(riF.GetValue(tooltip)).Append(" "); } catch { }
-
-                        // UIHoverPanel on row?
-                        bool uhpFound = false, uhpEnabled = false;
-                        foreach (Component c in row.GetComponents<Component>())
-                        {
-                            if (c != null && c.GetType().Name == "UIHoverPanel")
-                            {
-                                uhpFound = true;
-                                var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                                if (ep != null) try { uhpEnabled = (bool)ep.GetValue(c, null); } catch { }
-                                break;
-                            }
-                        }
-                        sb.Append("uhp=").Append(uhpFound ? (uhpEnabled ? "ENABLED" : "disabled") : "NONE").Append(" ");
-
-                        // DragObject has EventTriggerForwarder?
-                        bool etfFound = false;
-                        for (int di = 0; di < row.childCount; di++)
-                        {
-                            var dragObj = row.GetChild(di);
-                            if (dragObj == null || dragObj.name != "DragObject") continue;
-                            foreach (Component c in dragObj.GetComponents<Component>())
-                                if (c != null && c.GetType().Name == "EventTriggerForwarder") { etfFound = true; break; }
-                            break;
-                        }
-                        sb.Append("etf=").Append(etfFound ? "YES" : "NO");
-
-                        RRLog.Verbose(sb.ToString());
-                    }
-
-                    // Re-apply retired kerbal stars AFTER SetActive(true).
-                    // OnEnable resets UIStateImage.currentStateIndex to 0, so we must set it again
-                    // after activation using our effective (decayed) star count.
-                    try
-                    {
-                        string kName = GetKerbalNameFromRow(row.gameObject);
-                        if (!string.IsNullOrEmpty(kName)
-                            && RosterRotationState.Records.TryGetValue(kName, out var rec)
-                            && rec != null)
-                        {
-                            ProtoCrewMember k = FindKerbalByName(kName);
-                            int effStars = GetRetiredEffectiveStarsSafe(k, rec, nowUT);
-                            SetStarsState(row.gameObject, effStars);
-                        }
-                    }
-                    catch { }
-                }
-                RRLog.Verbose("[EAC] RewireTooltips: rows=" + rowCount + " tooltips=" + tooltipWired + " prefabs=" + prefabFound + " rewired=" + prefabRewired);
-            }
-            catch (Exception ex)
-            {
-                RRLog.WarnOnce("ac.rewire.fail", "RewireTooltipsInRetiredList failed: " + ex.Message);
-            }
-        }
-
-        public static void RepositionRetiredRows(Transform retiredList)
-        {
-            if (retiredList == null) return;
-            try
-            {
-                // Do NOT call ForceUpdateCanvases — it triggers UIStateImage/UIHoverPanel
-                // OnEnable/Rebuild callbacks that undo our sprite and enable state settings.
-                // VLG and CSF are already disabled so no layout system competes with us.
-
-                // Read rowH from sizeDelta (set during cloning), not rect.height (layout-driven).
-                float rowH = LastRetiredRowH > 1f ? LastRetiredRowH : 72f;
-                for (int i = 0; i < retiredList.childCount; i++)
-                {
-                    Transform row = retiredList.GetChild(i);
-                    if (row == null || !row.gameObject.activeSelf) continue;
-                    RectTransform rt = row.GetComponent<RectTransform>();
-                    if (rt != null && rt.sizeDelta.y > 1f && rt.sizeDelta.y <= 120f)
-                    {
-                        rowH = rt.sizeDelta.y;
-                        break;
-                    }
-                }
-                LastRetiredRowH = rowH;
-
-                float yOffset = 0f;
-                int count = 0;
-                for (int i = 0; i < retiredList.childCount; i++)
-                {
-                    Transform row = retiredList.GetChild(i);
-                    if (row == null || !row.gameObject.activeSelf) continue;
-                    RectTransform rt = row.GetComponent<RectTransform>();
-                    if (rt == null) continue;
-                    rt.anchorMin        = new Vector2(0f, 1f);
-                    rt.anchorMax        = new Vector2(1f, 1f);
-                    rt.pivot            = new Vector2(0.5f, 1f);
-                    rt.anchoredPosition = new Vector2(0f, yOffset);
-                    rt.sizeDelta        = new Vector2(0f, rowH);
-                    yOffset -= rowH;
-                    count++;
-                    // Ensure UIHoverPanel is disabled on every display pass
-                    DisableUIHoverPanel(row.gameObject);
-                }
-
-                RectTransform listRT = retiredList.GetComponent<RectTransform>();
-                if (listRT != null && count > 0)
-                    listRT.sizeDelta = new Vector2(listRT.sizeDelta.x, rowH * count);
-            }
-            catch (Exception ex)
-            {
-                RRLog.Warn("[RosterRotation] RepositionRetiredRows failed: " + ex.Message);
-            }
-        }
-
-        // UIHoverPanel field dump revealed:
-        //   backgroundImage  — the Image whose sprite it toggles (DragObject.Image)
-        //   backgroundNormal — transparent sprite shown when NOT hovered
-        //   backgroundHover  — visible border sprite shown when hovered
-        //   hoverEnabled     — gates the sprite swap AND the onPointerEnter delegate
-        //   onPointerEnter/Exit — delegates the tooltip system subscribes to
-        //
-        // The border disappears because PointerExit sets backgroundImage.sprite = backgroundNormal
-        // (transparent). The tooltip fires via onPointerEnter delegate when hoverEnabled=true.
-        //
-        // Fix: swap backgroundNormal = backgroundHover sprite so BOTH enter and exit write
-        // the visible sprite. Keep hoverEnabled=true so onPointerEnter fires for tooltips.
-        // Also destroy EventTriggerForwarder (holds UIHoverPanel ref, was forwarding hover-
-        // highlight events — no longer needed since UIHoverPanel is handling itself).
-        public static void DestroyUIHoverPanel(GameObject row)
-        {
-            if (row == null) return;
-            try
-            {
-                foreach (Component c in row.GetComponents<Component>())
-                {
-                    if (c == null || c.GetType().Name != "UIHoverPanel") continue;
-
-                    Type t = c.GetType();
-
-                    // Swap backgroundNormal to the hover sprite so the border is always visible.
-                    var bgNF = t.GetField("backgroundNormal",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var bgHF = t.GetField("backgroundHover",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (bgNF != null && bgHF != null)
-                    {
-                        try
-                        {
-                            var hoverSprite = bgHF.GetValue(c);
-                            if (hoverSprite != null) bgNF.SetValue(c, hoverSprite);
-                        }
-                        catch { }
-                    }
-
-                    // Set backgroundImage.sprite to the hover sprite immediately.
-                    var bgIF = t.GetField("backgroundImage",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (bgIF != null && bgHF != null)
-                    {
-                        try
-                        {
-                            var img = bgIF.GetValue(c);
-                            var hoverSprite = bgHF.GetValue(c);
-                            if (img != null && hoverSprite != null)
-                            {
-                                var spriteP = img.GetType().GetProperty("sprite",
-                                    BindingFlags.Instance | BindingFlags.Public);
-                                if (spriteP != null) spriteP.SetValue(img, hoverSprite, null);
-                                var enabledP2 = img.GetType().GetProperty("enabled",
-                                    BindingFlags.Instance | BindingFlags.Public);
-                                if (enabledP2 != null) enabledP2.SetValue(img, true, null);
-                            }
-                        }
-                        catch { }
-                    }
-
-                    // Clear hoverObjects so PointerExit() stops calling SetActive(false) on Button GO.
-                    foreach (string fieldName in new[] { "hoverObjects", "_hoverObjects", "HoverObjects" })
-                    {
-                        var hoF = t.GetField(fieldName,
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (hoF == null) continue;
-                        var hoVal = hoF.GetValue(c);
-                        if (hoVal == null) break;
-                        var clearM = hoVal.GetType().GetMethod("Clear",
-                            BindingFlags.Instance | BindingFlags.Public);
-                        if (clearM != null)
-                            try { clearM.Invoke(hoVal, null); } catch { }
-                        break;
-                    }
-
-                    // CRITICAL: Disable UIHoverPanel entirely so its Update() never runs.
-                    // This is the definitive fix — clearing hoverObjects alone is a race condition
-                    // because OnEnable repopulates them from serialized data on each SetActive(true).
-                    var enabledP = t.GetProperty("enabled",
-                        BindingFlags.Instance | BindingFlags.Public);
-                    if (enabledP != null) try { enabledP.SetValue(c, false, null); } catch { }
-
-                    break;
-                }
-
-                // DO NOT destroy EventTriggerForwarder from DragObject.
-                // EventTriggerForwarder relays PointerEnter events from DragObject (the raycast
-                // target) to Button (where UIStateButtonTooltip lives). Without it, hover events
-                // never reach the tooltip system and tooltips stop working after AC close/reopen.
-            }
-            catch (Exception ex)
-            {
-                RRLog.Warn("[EAC] DisableUIHoverPanel failed: " + ex.Message);
-            }
-        }
-
-        public static void DisableUIHoverPanel(GameObject row) { DestroyUIHoverPanel(row); }
-        public static void AttachDragObjectFixer(GameObject row) { DestroyUIHoverPanel(row); }
-
-        // Kept for diagnostics only
-        private static void ForceRowImagesVisible(GameObject row, bool dump)
-        {
-            if (dump)
-            {
-                try
-                {
-                    var sb = new System.Text.StringBuilder("[RosterRotation] RowHierarchyDump: " + row.name + "\n");
-                    DumpHierarchy(row.transform, sb, "  ");
-                } catch { }
-            }
-            DisableUIHoverPanel(row);
-        }
-
-        private static void DumpHierarchy(Transform t, System.Text.StringBuilder sb, string indent)
-        {
-            if (t == null || indent.Length > 20) return;
-            sb.Append(indent).Append(t.name).Append(" active=").Append(t.gameObject.activeSelf);
-            foreach (Component c in t.GetComponents<Component>())
-            {
-                if (c == null) continue;
-                string tn = c.GetType().Name;
-                sb.Append(" [").Append(tn);
-                if (tn == "Image" || tn == "RawImage")
-                {
-                    var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                    var cp = c.GetType().GetProperty("color",   BindingFlags.Instance | BindingFlags.Public);
-                    if (ep != null) try { sb.Append(" en=").Append((bool)ep.GetValue(c, null)); } catch { }
-                    if (cp != null) try { var col = (Color)cp.GetValue(c, null); sb.Append(" a=").Append(col.a.ToString("F2")); } catch { }
-                }
-                sb.Append("]");
-            }
-            sb.AppendLine();
-            for (int i = 0; i < t.childCount; i++)
-                DumpHierarchy(t.GetChild(i), sb, indent + "  ");
-        }
 
         public static void CacheToggleControllerFields(Type tcType)
         {
@@ -626,7 +207,7 @@ namespace RosterRotation
             // Fallback: try reading from the cached AC instance directly
             if (_cachedACInstance != null && _maxActiveCrewsField != null)
                 try { return (int)_maxActiveCrewsField.GetValue(_cachedACInstance); }
-                catch { }
+                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:205", "Suppressed exception in AstronautComplexACPatch.cs:205", ex); }
             // Final fallback: ask KSP's GameVariables for the AC-level crew limit
             int cap2 = TryGetMaxCrewFromGameVariables();
             if (cap2 > 0) { _cachedMaxCrew = cap2; return cap2; }
@@ -662,7 +243,7 @@ private static int TryGetMaxCrewFromGameVariables()
             if (cap > 0) return cap;
         }
     }
-    catch { }
+    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:241", "Suppressed exception in AstronautComplexACPatch.cs:241", ex); }
     return 0;
 }
 
@@ -682,7 +263,7 @@ private static void EnsureMaxCrewCached()
                 _cachedMaxCrew = int.MaxValue;
             }
         }
-        catch { }
+        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:261", "Suppressed exception in AstronautComplexACPatch.cs:261", ex); }
         if (_cachedMaxCrew < int.MaxValue) return;
     }
 
@@ -770,7 +351,7 @@ private static void EnsureMaxCrewCached()
                                 null, new Type[] { typeof(bool) }, null);
                         }
                         if (_uiListSetActiveMethod != null)
-                            try { _uiListSetActiveMethod.Invoke(uiList, new object[] { active }); } catch { }
+                            ReflectionUtils.TryInvoke(_uiListSetActiveMethod, uiList, new object[] { active }, "ACPatch.Prefix_ActivateList.SetActive(" + i + ")");
 
                         // Capture the Lost list content from lists[2]'s UIList
                         // lists[i] is a UIList on the TAB BUTTON — we reflect to find content.
@@ -808,7 +389,7 @@ private static void EnsureMaxCrewCached()
                                 }
                             }
                         }
-                        catch { }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:387", "Suppressed exception in AstronautComplexACPatch.cs:387", ex); }
                     }
                 }
 
@@ -997,7 +578,7 @@ private static void EnsureMaxCrewCached()
                         if (tn.Contains("LayoutGroup") || tn.Contains("ContentSizeFitter"))
                         {
                             var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                            if (ep != null) try { ep.SetValue(c, false, null); } catch { }
+                            if (ep != null) try { ep.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:576", "Suppressed exception in AstronautComplexACPatch.cs:576", ex); }
                         }
                     }
                     retiredList = clone.transform;
@@ -1086,7 +667,7 @@ private static void EnsureMaxCrewCached()
                                 if (c != null && c.GetType().Name == "CrewListItem")
                                     toDestroy.Add(c);
                             foreach (var c in toDestroy)
-                                try { UnityEngine.Object.DestroyImmediate(c); } catch { }
+                                try { UnityEngine.Object.DestroyImmediate(c); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:665", "Suppressed exception in AstronautComplexACPatch.cs:665", ex); }
 
                             // Find the kerbal for this row
                             string rowKerbalName = GetKerbalNameFromRow(clone);
@@ -1130,7 +711,7 @@ private static void EnsureMaxCrewCached()
                             // DragObject.Image when no mouse hover is active, killing both the
                             // border visual and GraphicRaycaster hit detection. We don't need
                             // hover highlighting on retired rows.
-                            DisableUIHoverPanel(clone);
+                            NeuterUIHoverPanel(clone);
 
                             RectTransform cloneRT = clone.GetComponent<RectTransform>();
                             if (cloneRT != null)
@@ -1155,7 +736,7 @@ private static void EnsureMaxCrewCached()
                         string typeName = c.GetType().Name;
                         if (typeName.Contains("LayoutGroup") || typeName.Contains("ContentSizeFitter"))
                         {
-                            try { enabledProp.SetValue(c, false, null); } catch { }
+                            try { enabledProp.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:734", "Suppressed exception in AstronautComplexACPatch.cs:734", ex); }
                         }
                     }
 
@@ -1186,8 +767,12 @@ private static void EnsureMaxCrewCached()
                     finally { _populatingRetiredList = false; }
                 } // end if (retiredList != null && availList != null)
 
+                // Add display-only rows for inactive / recovery kerbals that KSP omits from the
+                // Available list when another mod changes rosterStatus away from Available.
+                InjectUnavailableVisibleRows(availList, ROW_H);
+
                 // Available badge is fixed in Postfix_UpdateCrewCounts which runs after KSP sets it
-                // Patch "In training" status text on recalled kerbals in Available list
+                // Patch "In training" / recovery status text on kerbals in Available list
                 PatchAvailableListStatusText();
                 PatchLostListStatusText();
             }
@@ -1217,7 +802,7 @@ private static void EnsureMaxCrewCached()
                         int instCap = (int)_maxActiveCrewsField.GetValue(__instance);
                         if (instCap > 0 && instCap < 10000) _cachedMaxCrew = instCap;
                     }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:800", "Suppressed exception in AstronautComplexACPatch.cs:800", ex); }
                 }
 
                 int corrected = CountActiveNonRetiredCrew();
@@ -1262,6 +847,7 @@ private static void EnsureMaxCrewCached()
                 if (go != null)
                 {
                     FixAvailableBadge(go, GetRetiredNames());
+                    FixLostBadge(go);
 
                     // Fix hire button: KSP disabled it because activeCrews (including retired) >= max.
                     // Now that we've corrected activeCrews, re-enable if the real count is under cap.
@@ -1281,7 +867,7 @@ private static void EnsureMaxCrewCached()
                                 }
                             }
                         }
-                        catch { }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:865", "Suppressed exception in AstronautComplexACPatch.cs:865", ex); }
                     }
 
                     if (_cachedMaxCrew < int.MaxValue)
@@ -1408,7 +994,7 @@ private static void EnsureMaxCrewCached()
 
                 // Immediately refresh the "Active Kerbals" count label too
                 if (_updateCrewCountsMethod != null)
-                    try { _updateCrewCountsMethod.Invoke(_cachedACInstance, null); } catch { }
+                    try { _updateCrewCountsMethod.Invoke(_cachedACInstance, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:992", "Suppressed exception in AstronautComplexACPatch.cs:992", ex); }
 
                 // Always reposition + rewire retired rows even when the tab is not currently visible.
                 // This ensures Recall buttons exist the moment the user switches to the Retired tab
@@ -1606,7 +1192,7 @@ private static void EnsureMaxCrewCached()
                     changed++;
                 }
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:1190", "Suppressed exception in AstronautComplexACPatch.cs:1190", ex); }
         }
     }
 
@@ -1624,10 +1210,15 @@ private static void FixAvailableBadge(GameObject acGo,
                 Transform tab = FindDescendant(acGo.transform, "Tab Available");
                 if (tab == null)
                 {
-                    // Dump all tab names once for diagnosis
-                    RRLog.Warn("[RosterRotation] ACPatch: 'Tab Available' not found. Tabs in scene:");
-                    foreach (Transform t in acGo.transform.GetComponentsInChildren<Transform>(true))
-                        if (t != null && t.name.StartsWith("Tab", StringComparison.OrdinalIgnoreCase))
+                    RRLog.WarnOnce("acpatch.tabavailable.missing", "[RosterRotation] ACPatch: 'Tab Available' not found while fixing Available badge.");
+                    if (RRLog.VerboseEnabled)
+                    {
+                        foreach (Transform t in acGo.transform.GetComponentsInChildren<Transform>(true))
+                        {
+                            if (t != null && t.name.StartsWith("Tab", StringComparison.OrdinalIgnoreCase))
+                                RRLog.VerboseOnce("acpatch.tabavailable.seen." + t.name, "[EAC] ACPatch: saw tab '" + t.name + "' while looking for 'Tab Available'.");
+                        }
+                    }
                     return;
                 }
                 int count = 0;
@@ -1684,7 +1275,7 @@ private static void FixAvailableBadge(GameObject acGo,
                     {
                         p.SetValue(c, newText, null);
                     }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:1268", "Suppressed exception in AstronautComplexACPatch.cs:1268", ex); }
                     return;
                 }
             }
@@ -1704,6 +1295,96 @@ private static void FixAvailableBadge(GameObject acGo,
             foreach (var kvp in RosterRotationState.Records)
                 if (kvp.Value != null && kvp.Value.Retired) n++;
             return n;
+        }
+
+        private static int CountLostCrew()
+        {
+            try
+            {
+                var roster = HighLogic.CurrentGame?.CrewRoster;
+                if (roster == null) return 0;
+
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                for (int i = 0; i < roster.Count; i++)
+                {
+                    ProtoCrewMember pcm;
+                    try { pcm = roster[i]; } catch { continue; }
+                    if (pcm == null) continue;
+                    if (pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
+
+                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                        pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+                    {
+                        names.Add(pcm.name);
+                        continue;
+                    }
+
+                    if (RosterRotationState.Records.TryGetValue(pcm.name, out var rec) && rec != null && rec.DeathUT > 0)
+                        names.Add(pcm.name);
+                }
+
+                foreach (var kvp in RosterRotationState.Records)
+                {
+                    if (kvp.Value != null && kvp.Value.DeathUT > 0)
+                        names.Add(kvp.Key);
+                }
+
+                return names.Count;
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("acpatch.countlost.fail", "[EAC] ACPatch: CountLostCrew failed; returning 0.", ex);
+                return 0;
+            }
+        }
+
+        private static Transform FindDeepChild(Transform root, string name)
+        {
+            if (root == null || string.IsNullOrEmpty(name)) return null;
+            var stack = new Stack<Transform>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                var cur = stack.Pop();
+                if (cur == null) continue;
+                if (string.Equals(cur.name, name, StringComparison.Ordinal)) return cur;
+                for (int i = cur.childCount - 1; i >= 0; i--)
+                {
+                    var child = cur.GetChild(i);
+                    if (child != null) stack.Push(child);
+                }
+            }
+            return null;
+        }
+
+        private static void FixLostBadge(GameObject acGo)
+        {
+            try
+            {
+                if (acGo == null) return;
+                Transform tab = FindDeepChild(acGo.transform, "Tab Lost");
+                if (tab == null) return;
+
+                int count = CountLostCrew();
+                string replacement = "Lost [" + count.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]";
+
+                foreach (Component c in tab.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null) continue;
+                    var p = c.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (p == null || p.PropertyType != typeof(string)) continue;
+                    string cur = null;
+                    try { cur = p.GetValue(c, null) as string; } catch { continue; }
+                    if (string.IsNullOrEmpty(cur)) continue;
+                    if (cur.IndexOf("Lost", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    try { p.SetValue(c, replacement, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:1369", "Suppressed exception in AstronautComplexACPatch.cs:1369", ex); }
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("[RosterRotation] ACPatch: FixLostBadge failed: " + ex.Message);
+            }
         }
 
         // Counts crew that KSP generally treats as 'active' for AC capacity,
@@ -1728,1403 +1409,13 @@ private static void FixAvailableBadge(GameObject acGo,
                 }
                 return n;
             }
-            catch
+            catch (Exception ex)
             {
+                RRLog.VerboseExceptionOnce("acpatch.countactivenonretired.fail", "[EAC] ACPatch: CountActiveNonRetiredCrew failed; returning -1.", ex);
                 return -1;
             }
         }
 
-        // Attempts to locate any kerbal by name in the current game's CrewRoster.
-        // Uses a reflection-based fallback so it works across KSP builds.
-        private static ProtoCrewMember FindKerbalByName(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return null;
-            var roster = HighLogic.CurrentGame?.CrewRoster;
-            if (roster == null) return null;
-            try
-            {
-                if (roster.Crew != null)
-                    foreach (var k in roster.Crew)
-                        if (k != null && k.name == name) return k;
-                // Also check full roster (Dead/Missing kerbals)
-                for (int i = 0; i < roster.Count; i++)
-                {
-                    ProtoCrewMember pcm;
-                    try { pcm = roster[i]; } catch { continue; }
-                    if (pcm != null && pcm.name == name) return pcm;
-                }
-            }
-            catch { }
-            return null;
-        }
-
-        private static int GetRetiredEffectiveStarsSafe(ProtoCrewMember k, RosterRotationState.KerbalRecord r, double nowUT)
-        {
-            if (r == null)
-                return k != null ? (int)k.experienceLevel : 0;
-            if (!r.Retired)
-                return k != null ? (int)k.experienceLevel : 0;
-
-            int starsAtRetire = r.ExperienceAtRetire > 0 ? r.ExperienceAtRetire : (k != null ? (int)k.experienceLevel : 0);
-            if (starsAtRetire <= 0) return 0;
-            double yearSec = RosterRotationState.YearSeconds;
-            if (yearSec <= 0) yearSec = 9201600.0; // fallback
-            int starsLost = (int)((nowUT - r.RetiredUT) / yearSec);
-            return Math.Max(0, starsAtRetire - starsLost);
-        }
-
-        private static void CopyLayoutComponents(Transform source, Transform dest)
-        {
-            // Component type names to copy from source to dest
-            string[] layoutTypes = { "VerticalLayoutGroup", "HorizontalLayoutGroup",
-                                     "ContentSizeFitter", "LayoutElement", "GridLayoutGroup" };
-            const BindingFlags f = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-            foreach (Component sc in source.GetComponents<Component>())
-            {
-                if (sc == null) continue;
-                string tn = sc.GetType().Name;
-                bool isLayout = false;
-                foreach (string lt in layoutTypes) if (tn == lt) { isLayout = true; break; }
-                if (!isLayout) continue;
-
-                // Check if dest already has this type
-                Component dc = dest.GetComponent(sc.GetType());
-                if (dc == null)
-                    dc = dest.gameObject.AddComponent(sc.GetType());
-                if (dc == null) continue;
-
-                // Copy all serializable fields
-                foreach (FieldInfo fi in sc.GetType().GetFields(f))
-                {
-                    if (fi.IsStatic || fi.IsLiteral) continue;
-                    try { fi.SetValue(dc, fi.GetValue(sc)); } catch { }
-                }
-                // Copy public properties that have setters
-                foreach (PropertyInfo pi in sc.GetType().GetProperties(f))
-                {
-                    if (!pi.CanRead || !pi.CanWrite) continue;
-                    try { pi.SetValue(dc, pi.GetValue(sc, null), null); } catch { }
-                }
-            }
-        }
-
-        private static string GetTransformPath(Transform t)
-        {
-            if (t == null) return "<null>";
-            string path = t.name;
-            Transform p = t.parent;
-            int guard = 0;
-            while (p != null && guard++ < 20) { path = p.name + "/" + path; p = p.parent; }
-            return path;
-        }
-
-        private static Transform FindDescendant(Transform root, string name)
-        {
-            if (root == null) return null;
-            foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
-                if (t != null && string.Equals(t.name, name, StringComparison.Ordinal)) return t;
-            return null;
-        }
-
-        /// <summary>
-        /// Discovers the actual Lost list content Transform from the UIListToggleController.
-        /// The lists[] array contains UIList components on the TAB BUTTONS, not the scroll lists.
-        /// We reflect into UIList at index 2 to find its internal content container.
-        /// </summary>
-        private static Transform DiscoverLostListFromController(GameObject acGo)
-        {
-            try
-            {
-                if (_tcListsField == null || acGo == null) return null;
-
-                var tcComponents = acGo.GetComponentsInChildren<Component>(true);
-                object tcInstance = null;
-                foreach (var c in tcComponents)
-                {
-                    if (c == null) continue;
-                    if (c.GetType().Name == "UIListToggleController")
-                    { tcInstance = c; break; }
-                }
-                if (tcInstance == null) return null;
-
-                var lists = _tcListsField.GetValue(tcInstance) as System.Array;
-                if (lists == null) return null;
-
-                for (int i = 0; i < lists.Length; i++)
-                {
-                    object uiList = lists.GetValue(i);
-                    if (uiList == null) continue;
-                    var comp = uiList as Component;
-                }
-
-                // Lost tab is index 2 (Available=0, Assigned=1, Lost=2)
-                const int LOST_INDEX = 2;
-                if (lists.Length <= LOST_INDEX) return null;
-
-                object lostUIList = lists.GetValue(LOST_INDEX);
-                if (lostUIList == null) return null;
-
-                // Reflect into UIList to find its content container
-                // UIList.customListAnchor is the shared scroll content area
-                Type uiListType = lostUIList.GetType();
-                const BindingFlags bf = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-                // Look for customListAnchor first (known field name from diagnostics)
-                FieldInfo anchorField = uiListType.GetField("customListAnchor", bf);
-                if (anchorField != null)
-                {
-                    object val = null;
-                    try { val = anchorField.GetValue(lostUIList); } catch { }
-                    Transform anchor = null;
-                    if (val is Transform t2) anchor = t2;
-                    else if (val is Component c3) anchor = c3.transform;
-                    if (anchor != null)
-                    {
-                        return anchor;
-                    }
-                }
-
-                // Fallback: search all fields for a Transform with dead kerbal rows
-                var lostComp = lostUIList as Component;
-                Transform bestCandidate = null;
-
-                foreach (var field in uiListType.GetFields(bf))
-                {
-                    if (field == null) continue;
-                    Transform candidate = null;
-                    try
-                    {
-                        object val = field.GetValue(lostUIList);
-                        if (val is Transform t2) candidate = t2;
-                        else if (val is Component c3) candidate = c3.transform;
-                        else if (val is GameObject g2) candidate = g2.transform;
-                    }
-                    catch { continue; }
-                    if (candidate == null) continue;
-                    if (lostComp != null && candidate == lostComp.transform) continue; // skip self
-
-                    if (candidate.childCount > 0 && HasDeadKerbalRow(candidate))
-                    {
-                        return candidate;
-                    }
-                    if (bestCandidate == null || candidate.childCount > bestCandidate.childCount)
-                        bestCandidate = candidate;
-                }
-
-                if (bestCandidate != null)
-                {
-                    return bestCandidate;
-                }
-
-                return null;
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error("[RosterRotation] ACPatch: DiscoverLostListFromController failed: " + ex);
-                return null;
-            }
-        }
-
-        /// <summary>
-        /// Given a UIList component (which sits on a TAB BUTTON), reflects into it to find
-        /// the actual content Transform where kerbal rows live.
-        /// </summary>
-        private static Transform FindUIListContent(object uiList)
-        {
-            if (uiList == null) return null;
-            try
-            {
-                Type t = uiList.GetType();
-                const BindingFlags bf = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                var selfComp = uiList as Component;
-
-                // Fast path: known field name from KSP UIList
-                FieldInfo anchorField = t.GetField("customListAnchor", bf);
-                if (anchorField != null)
-                {
-                    object av = null;
-                    try { av = anchorField.GetValue(uiList); } catch { }
-                    Transform anchor = null;
-                    if (av is Transform at) anchor = at;
-                    else if (av is Component ac) anchor = ac.transform;
-                    if (anchor != null && (selfComp == null || anchor != selfComp.transform))
-                        return anchor;
-                }
-
-                // Fallback: search all fields
-                Transform bestCandidate = null;
-
-                foreach (var field in t.GetFields(bf))
-                {
-                    if (field == null) continue;
-                    Transform candidate = null;
-                    try
-                    {
-                        object val = field.GetValue(uiList);
-                        if (val is Transform tr) candidate = tr;
-                        else if (val is Component co) candidate = co.transform;
-                        else if (val is GameObject go) candidate = go.transform;
-                    }
-                    catch { continue; }
-                    if (candidate == null) continue;
-                    if (selfComp != null && candidate == selfComp.transform) continue;
-
-                    // Best match: has dead kerbal rows
-                    if (candidate.childCount > 0 && HasDeadKerbalRow(candidate))
-                        return candidate;
-
-                    // Track largest child as fallback
-                    if (bestCandidate == null || candidate.childCount > bestCandidate.childCount)
-                        bestCandidate = candidate;
-                }
-
-                return bestCandidate;
-            }
-            catch { return null; }
-        }
-
-        /// <summary>
-        /// Returns true if the given list Transform contains a row whose name matches a dead kerbal.
-        /// </summary>
-        private static bool HasDeadKerbalRow(Transform list)
-        {
-            if (list == null || HighLogic.CurrentGame?.CrewRoster == null) return false;
-            var deadNames = new System.Collections.Generic.HashSet<string>();
-            var roster = HighLogic.CurrentGame.CrewRoster;
-            for (int i = 0; i < roster.Count; i++)
-            {
-                ProtoCrewMember pcm;
-                try { pcm = roster[i]; } catch { continue; }
-                if (pcm == null) continue;
-                if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
-                    pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
-                    deadNames.Add(pcm.name);
-            }
-            if (deadNames.Count == 0) return false;
-
-            for (int i = 0; i < list.childCount; i++)
-            {
-                Transform row = list.GetChild(i);
-                if (row == null) continue;
-                string name = GetKerbalNameFromRowAllRoster(row.gameObject);
-                if (name != null && deadNames.Contains(name)) return true;
-            }
-            return false;
-        }
-
-        /// <summary>
-        /// Like GetKerbalNameFromRow but checks ALL roster kerbals (Dead, Missing, Unowned, etc.)
-        /// not just Crew.
-        /// </summary>
-        private static string GetKerbalNameFromRowAllRoster(GameObject row)
-        {
-            if (row == null || HighLogic.CurrentGame?.CrewRoster == null) return null;
-            // Build lookup once (cheaper than per-component)
-            var roster = HighLogic.CurrentGame.CrewRoster;
-            var names = new System.Collections.Generic.HashSet<string>();
-            for (int i = 0; i < roster.Count; i++)
-            {
-                ProtoCrewMember pcm;
-                try { pcm = roster[i]; } catch { continue; }
-                if (pcm != null) names.Add(pcm.name);
-            }
-            if (names.Count == 0) return null;
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (!string.IsNullOrEmpty(s) && names.Contains(s)) return s;
-            }
-            return null;
-        }
-
-        private static bool RowContainsName(GameObject row,
-            System.Collections.Generic.List<string> names)
-        {
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-                foreach (string n in names) if (s == n) return true;
-            }
-            return false;
-        }
-
-        // Targeted replacement: finds "Active Kerbals: N" and replaces N with corrected value.
-        // Much safer than ReplaceFirstInteger which matches digits inside color hex codes.
-        private static string ReplaceActiveKerbalsCount(string text, int corrected)
-        {
-            if (string.IsNullOrEmpty(text)) return text;
-            // Matches "Active Kerbals: " followed by one or more digits
-            int labelIdx = text.IndexOf("Active Kerbals:", StringComparison.OrdinalIgnoreCase);
-            if (labelIdx < 0) return text;
-            int numStart = labelIdx + "Active Kerbals:".Length;
-            // Skip spaces/tabs
-            while (numStart < text.Length && (text[numStart] == ' ' || text[numStart] == '\t')) numStart++;
-            if (numStart >= text.Length || !char.IsDigit(text[numStart])) return text;
-            int numEnd = numStart;
-            while (numEnd < text.Length && char.IsDigit(text[numEnd])) numEnd++;
-            return text.Substring(0, numStart) + corrected + text.Substring(numEnd);
-        }
-
-        private static bool TryParseActiveKerbalsCount(string text, out int count)
-        {
-            count = 0;
-            if (string.IsNullOrEmpty(text)) return false;
-            int labelIdx = text.IndexOf("Active Kerbals:", StringComparison.OrdinalIgnoreCase);
-            if (labelIdx < 0) return false;
-            int numStart = labelIdx + "Active Kerbals:".Length;
-            while (numStart < text.Length && char.IsWhiteSpace(text[numStart])) numStart++;
-            int numEnd = numStart;
-            while (numEnd < text.Length && char.IsDigit(text[numEnd])) numEnd++;
-            if (numEnd <= numStart) return false;
-            return int.TryParse(text.Substring(numStart, numEnd - numStart), out count);
-        }
-
-        // Dumps all component type names and all text property values on a row for diagnostics.
-        private static void DumpRowDiagnostics(GameObject row, string label)
-        {
-            if (row == null) return;
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("[RosterRotation] ACPatch: === ROW DUMP for '" + label + "' ===");
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                string typeName = c.GetType().Name;
-                string goName   = c.gameObject.name;
-                // Try to get text value
-                string textVal = "";
-                var tp = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (tp != null && tp.PropertyType == typeof(string))
-                    try { textVal = " text='" + tp.GetValue(c, null) + "'"; } catch { }
-                // Check for onClick
-                bool hasClick = c.GetType().GetProperty("onClick",
-                    BindingFlags.Instance | BindingFlags.Public) != null;
-                sb.AppendLine("  GO='" + goName + "' comp=" + typeName
-                    + textVal + (hasClick ? " [HAS onClick]" : ""));
-            }
-            sb.AppendLine("[RosterRotation] ACPatch: === END ROW DUMP ===");
-        }
-
-        private static string ReplaceFirstInteger(string text, int oldVal, int newVal)
-        {
-            if (string.IsNullOrEmpty(text)) return text;
-            string oldStr = oldVal.ToString();
-            int idx = text.IndexOf(oldStr, StringComparison.Ordinal);
-            if (idx < 0) return text;
-            bool prevOk = idx == 0 || !char.IsDigit(text[idx - 1]);
-            bool nextOk = idx + oldStr.Length >= text.Length
-                          || !char.IsDigit(text[idx + oldStr.Length]);
-            if (!prevOk || !nextOk) return text;
-            return text.Substring(0, idx) + newVal + text.Substring(idx + oldStr.Length);
-        }
-
-        // Finds the kerbal name displayed in a row (the first Text component whose value is
-        // a known crew member name — same pattern used by RowContainsName).
-        private static string GetKerbalNameFromRow(GameObject row)
-        {
-            if (row == null) return null;
-            var names = RosterRotationState.GetCrewNameSet();
-            if (names.Count == 0) return null;
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (!string.IsNullOrEmpty(s) && names.Contains(s)) return s;
-            }
-            return null;
-        }
-
-        // Replaces the status text on a kerbal row.
-        // Targets the 'label' child GO specifically (where KSP puts status text).
-        private static void ReplaceStatusText(GameObject row, string newText)
-        {
-            if (row == null) return;
-
-            // Primary: find the 'label' GO and set its text directly
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                if (c.gameObject.name != "label") continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                try { p.SetValue(c, newText, null); } catch { }
-                return;
-            }
-
-            // Fallback: pattern-match but skip 'name', 'stats', 'label_courage', 'label_stupidity'
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                string goName = c.gameObject.name ?? "";
-                if (goName == "name" || goName == "stats" ||
-                    goName.StartsWith("label_", StringComparison.Ordinal)) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-                if (IsStatusText(s))
-                {
-                    try { p.SetValue(c, newText, null); } catch { }
-                    return;
-                }
-            }
-        }
-
-        // Returns true if the string looks like a status label (not a kerbal name).
-        private static bool IsStatusText(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return false;
-            return s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("In refresher training", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("In training", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("Retired", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("Age ", StringComparison.OrdinalIgnoreCase) >= 0
-                // Lost tab / Dead / Missing status strings:
-                || s.IndexOf("K.I.A", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("KIA", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("M.I.A", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.IndexOf("Missing", StringComparison.OrdinalIgnoreCase) >= 0
-                || s.Equals("Died", StringComparison.OrdinalIgnoreCase)
-                || s.IndexOf("Died ", StringComparison.OrdinalIgnoreCase) >= 0
-                // KSP placeholder patterns (%.%.%.%.%):
-                || s.IndexOf("%.%", StringComparison.Ordinal) >= 0;
-        }
-
-        // Like ReplaceStatusText but only fires when the text still reads the KSP default
-        // "Available for next mission" — avoids overwriting other mods' status text.
-        private static void ReplaceStatusTextIfDefault(GameObject row, string newText)
-        {
-            if (row == null) return;
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-                // Only replace if it's the vanilla default or already our age-prefixed default
-                if (s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0
-                    || (s.IndexOf("Age ", StringComparison.OrdinalIgnoreCase) >= 0
-                        && s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0))
-                {
-                    try { p.SetValue(c, newText, null); } catch { }
-                    return;
-                }
-            }
-        }
-
-        // Sets the text on the child GO with name `goName` (first TextMeshProUGUI or Text found).
-        private static void SetTextOnGO(GameObject row, string goName, string text)
-        {
-            Transform t = row.transform.Find(goName);
-            if (t == null)
-            {
-                // Try deep search
-                foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
-                    if (ch.name == goName) { t = ch; break; }
-            }
-            if (t == null) { RRLog.Warn("[RosterRotation] ACPatch: SetTextOnGO — GO '" + goName + "' not found."); return; }
-            foreach (Component c in t.GetComponents<Component>())
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p != null && p.PropertyType == typeof(string))
-                {
-                    try { p.SetValue(c, text, null); return; }
-                    catch { }
-                }
-            }
-            RRLog.Warn("[RosterRotation] ACPatch: SetTextOnGO — no text component on '" + goName + "'");
-        }
-
-        private static void SetStarsState(GameObject row, int stars)
-        {
-            // --- 1. XP Slider fill ---
-            bool sliderSet = false;
-            foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
-            {
-                if (ch == null || ch.name != "Slider") continue;
-                if (ch.parent != null && (ch.parent.name.ToLowerInvariant().Contains("courage")
-                                       || ch.parent.name.ToLowerInvariant().Contains("stupidity"))) continue;
-
-                foreach (Component sc in ch.GetComponents<Component>())
-                {
-                    if (sc == null || sc.GetType().Name != "Slider") continue;
-                    try
-                    {
-                        var maxProp = sc.GetType().GetProperty("maxValue", BindingFlags.Instance | BindingFlags.Public);
-                        var valProp = sc.GetType().GetProperty("value",    BindingFlags.Instance | BindingFlags.Public);
-                        if (valProp == null) break;
-                        float maxVal = 5f;
-                        if (maxProp != null) try { maxVal = (float)maxProp.GetValue(sc, null); } catch { }
-                        float sliderVal = (maxVal > 1f) ? (float)stars : (stars / 5f);
-                        valProp.SetValue(sc, sliderVal, null);
-                        sliderSet = true;
-                    }
-                    catch { }
-                    break;
-                }
-
-                Transform fillArea = ch.Find("Fill Area");
-                if (fillArea == null) foreach (Transform fc in ch) { if (fc.name == "Fill Area") { fillArea = fc; break; } }
-                if (fillArea != null)
-                {
-                    Transform fill = fillArea.Find("Fill");
-                    if (fill == null) foreach (Transform fc in fillArea) { fill = fc; break; }
-                    if (fill != null)
-                    {
-                        foreach (Component ic in fill.GetComponents<Component>())
-                        {
-                            if (ic == null || ic.GetType().Name != "Image") continue;
-                            var fillAmtProp = ic.GetType().GetProperty("fillAmount", BindingFlags.Instance | BindingFlags.Public);
-                            if (fillAmtProp != null)
-                                try { fillAmtProp.SetValue(ic, stars / 5f, null); } catch { }
-                            ForceImageVisible(ic);
-                            break;
-                        }
-                    }
-                }
-                if (sliderSet) break;
-            }
-
-            // --- 2. UIStateImage star widget ---
-            // Do NOT use GetComponentsInChildren here — Unity 2019/KSP can silently skip
-            // children of inactive parents even with includeInactive=true.
-            if (TryFindStarsStateImage(row.transform, out Transform starsT, out Component usiComp))
-            {
-                ActivateUpTo(starsT, row.transform);
-
-                // Enable the component itself
-                var enabledP = usiComp.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                if (enabledP != null) try { enabledP.SetValue(usiComp, true, null); } catch { }
-
-                // Dump revealed: image = Image field (the target Image), states = ImageState[6]
-                // ImageState[N] corresponds to N stars. Get the Image from the 'image' field,
-                // then set its sprite from states[stars].sprite (or similar field).
-                var imageF = usiComp.GetType().GetField("image",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                Component imgComp = imageF?.GetValue(usiComp) as Component;
-                // Fallback: find Image on same GO
-                if (imgComp == null)
-                    foreach (Component c in starsT.GetComponents<Component>())
-                        if (c != null && c.GetType().Name == "Image") { imgComp = c; break; }
-
-                if (imgComp != null) ForceImageVisible(imgComp);
-
-                var statesF = usiComp.GetType().GetField("states",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                System.Array arr = null;
-                if (statesF != null) try { arr = statesF.GetValue(usiComp) as System.Array; } catch { }
-                if (arr != null && arr.Length > 0 && imgComp != null)
-                {
-                    int idx = Mathf.Clamp(stars, 0, arr.Length - 1);
-                    var imageState = arr.GetValue(idx);
-                    if (imageState != null)
-                    {
-                        foreach (string sfn in new[] { "sprite", "image", "texture", "tex" })
-                        {
-                            var sf = imageState.GetType().GetField(sfn,
-                                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (sf == null) continue;
-                            var spriteVal = sf.GetValue(imageState);
-                            if (spriteVal == null) continue;
-                            var spriteProp = imgComp.GetType().GetProperty("sprite",
-                                BindingFlags.Instance | BindingFlags.Public);
-                            if (spriteProp != null)
-                                try { spriteProp.SetValue(imgComp, spriteVal, null); } catch { }
-                            break;
-                        }
-                    }
-                }
-
-                // Also call SetState(int) in case it does additional work
-                var setStateM = usiComp.GetType().GetMethod("SetState",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                    null, new Type[] { typeof(int) }, null);
-                if (setStateM != null) try { setStateM.Invoke(usiComp, new object[] { stars }); } catch { }
-
-                // Critically: set currentStateIndex so future OnEnable refreshes to the right sprite.
-                var csiF2 = usiComp.GetType().GetField("currentStateIndex",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (csiF2 != null) try { csiF2.SetValue(usiComp, stars); } catch { }
-            }
-
-            if (!sliderSet)
-                RRLog.WarnOnce("ac.stars.noslider", "[RosterRotation] ACPatch: SetStarsState — XP slider not found.");
-        }
-
-        private static void ForceImageVisible(Component imgComp)
-        {
-            if (imgComp == null) return;
-            var enabledProp = imgComp.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-            if (enabledProp != null) try { enabledProp.SetValue(imgComp, true, null); } catch { }
-            var colorProp = imgComp.GetType().GetProperty("color", BindingFlags.Instance | BindingFlags.Public);
-            if (colorProp != null)
-                try
-                {
-                    var c = colorProp.GetValue(imgComp, null);
-                    if (c is Color col) { col.a = 1f; colorProp.SetValue(imgComp, col, null); }
-                } catch { }
-        }
-
-        // Walks up from a leaf to the given row root and ensures every GO is active.
-        private static void ActivateUpTo(Transform leaf, Transform rowRoot)
-        {
-            Transform t = leaf;
-            int guard = 0;
-            while (t != null && guard++ < 64)
-            {
-                try { t.gameObject.SetActive(true); } catch { }
-                if (t == rowRoot) break;
-                t = t.parent;
-            }
-        }
-
-        // Robustly locates the star UIStateImage in a crew list row.
-        // Does NOT rely on GO name "stars" because KSP UI prefabs vary.
-        // Picks the UIStateImage whose states[] array has >= 6 entries (0..5 stars).
-        private static bool TryFindStarsStateImage(Transform rowRoot, out Transform starsT, out Component uiStateImage)
-        {
-            starsT = null;
-            uiStateImage = null;
-            if (rowRoot == null) return false;
-
-            int bestScore = -1;
-            var stack = new System.Collections.Generic.Stack<Transform>();
-            stack.Push(rowRoot);
-
-            while (stack.Count > 0)
-            {
-                Transform t = null;
-                try { t = stack.Pop(); } catch { break; }
-                if (t == null) continue;
-
-                // Evaluate UIStateImage components on this transform
-                try
-                {
-                    foreach (var c in t.GetComponents<Component>())
-                    {
-                        if (c == null || c.GetType().Name != "UIStateImage") continue;
-                        var statesF = c.GetType().GetField("states",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        System.Array arr = null;
-                        if (statesF != null)
-                            try { arr = statesF.GetValue(c) as System.Array; } catch { }
-                        int len = arr != null ? arr.Length : 0;
-                        if (len < 6) continue;
-
-                        int score = len;
-                        string n = (t.name ?? "").ToLowerInvariant();
-                        if (n == "stars") score += 1000;
-                        else if (n.Contains("star")) score += 500;
-                        if (t.parent != null)
-                        {
-                            string pn = (t.parent.name ?? "").ToLowerInvariant();
-                            if (pn.Contains("star")) score += 50;
-                        }
-
-                        if (score > bestScore)
-                        {
-                            bestScore = score;
-                            starsT = t;
-                            uiStateImage = c;
-                        }
-                    }
-                }
-                catch { }
-
-                // Recurse into children regardless of active state
-                try
-                {
-                    for (int i = 0; i < t.childCount; i++)
-                        stack.Push(t.GetChild(i));
-                }
-                catch { }
-            }
-
-            return uiStateImage != null && starsT != null;
-        }
-
-        // Finds the dismiss "Button" GO (named exactly "Button"), switches UIStateButton state,
-        // sets UIStateButtonTooltip text, and replaces onClick with Recall.
-        private static void WireRecallButton(GameObject row, ProtoCrewMember kerbal, int effStars)
-        {
-            if (row == null || kerbal == null) return;
-            try
-            {
-                // Button GO confirmed named "Button" from row dump.
-                Transform btnT = null;
-                foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
-                    if (ch.name == "Button") { btnT = ch; break; }
-                if (btnT == null) { RRLog.Warn("[RosterRotation] WireRecallButton — 'Button' GO not found for " + kerbal.name); return; }
-
-                bool canRecall = effStars > 0;
-
-                // The Button GO may be inactive (isActiveAndEnabled=False seen in dump).
-                // Force it active — it holds UIStateButton, UIStateButtonTooltip, and Button.
-                btnT.gameObject.SetActive(true);
-
-                // --- Button visual: read sprite directly from UIStateButton.states[] ---
-                // SetState() fails on clones because its Button/Image backing fields don't survive
-                // Instantiate(). Instead, read the target sprite from ButtonState[stateIdx] and
-                // set Image.sprite directly — same pattern used successfully for stars.
-                Component uisb = null;
-                foreach (Component c in btnT.GetComponents<Component>())
-                    if (c != null && c.GetType().Name == "UIStateButton") { uisb = c; break; }
-
-                // Get the Image component on the Button GO (the one that shows X or checkmark)
-                Component btnImgComp = null;
-                foreach (Component c in btnT.GetComponents<Component>())
-                    if (c != null && c.GetType().Name == "Image") { btnImgComp = c; break; }
-
-                if (uisb != null && btnImgComp != null)
-                {
-                    int targetStateIdx = canRecall ? 1 : 0;
-
-                    // Update currentStateIndex so UIStateButtonTooltip reads the correct tooltipStates entry.
-                    // We stopped calling SetState() because its backing fields are null on clones,
-                    // but the tooltip needs currentStateIndex to be correct.
-                    var csiF = uisb.GetType().GetField("currentStateIndex",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (csiF != null) try { csiF.SetValue(uisb, targetStateIdx); } catch { }
-                    var ssF = uisb.GetType().GetField("stateSet",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (ssF != null) try { ssF.SetValue(uisb, true); } catch { }
-
-                    var statesF = uisb.GetType().GetField("states",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (statesF != null)
-                    {
-                        var statesArr = statesF.GetValue(uisb) as System.Array;
-                        if (statesArr != null && statesArr.Length > targetStateIdx)
-                        {
-                            var bstate = statesArr.GetValue(targetStateIdx);
-
-                            // ButtonState fields to try for sprite: sprite, normalSprite, selectedSprite, image
-                            bool spriteSet = false;
-                            foreach (string sfn in new[] { "normal", "sprite", "normalSprite", "selectedSprite", "image", "icon" })
-                            {
-                                if (bstate == null) break;
-                                var sf = bstate.GetType().GetField(sfn,
-                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (sf == null) continue;
-                                var val = sf.GetValue(bstate);
-                                if (val == null) continue;
-                                // Only set if it's actually a sprite type
-                                if (val.GetType().Name != "Sprite") continue;
-                                var spriteProp = btnImgComp.GetType().GetProperty("sprite",
-                                    BindingFlags.Instance | BindingFlags.Public);
-                                if (spriteProp != null)
-                                {
-                                    try
-                                    {
-                                        spriteProp.SetValue(btnImgComp, val, null);
-                                        spriteSet = true;
-                                    }
-                                    catch { }
-                                }
-                                break;
-                            }
-
-                            // Also try a ColorBlock — ButtonState may tint the image instead of/as well as swap sprite
-                            foreach (string cfn in new[] { "color", "normalColor", "tintColor" })
-                            {
-                                if (bstate == null) break;
-                                var cf = bstate.GetType().GetField(cfn,
-                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (cf == null) continue;
-                                var val = cf.GetValue(bstate);
-                                if (val == null || !(val is Color)) continue;
-                                var colorProp = btnImgComp.GetType().GetProperty("color",
-                                    BindingFlags.Instance | BindingFlags.Public);
-                                if (colorProp != null)
-                                    try { colorProp.SetValue(btnImgComp, val, null); }
-                                    catch { }
-                                break;
-                            }
-
-                            if (!spriteSet)
-                                RRLog.Warn("[RosterRotation] ACPatch: could not set Button sprite for " + kerbal.name + " — check ButtonState DUMP above for field names.");
-                        }
-                    }
-                }
-                // canRecall=false: state 0 = orange X already rendered by default
-
-                // --- Neutralize Button color tint so hover doesn't turn green button red ---
-                // Button.transition=ColorTint multiplies Image color by highlightedColor on hover.
-                // The original dismiss button has an orange/red highlightedColor. Set all colors
-                // to white so the sprite we chose shows through unmodified.
-                {
-                    Component btnForColors = null;
-                    foreach (Component c in btnT.GetComponents<Component>())
-                        if (c != null && c.GetType().Name == "Button") { btnForColors = c; break; }
-                    if (btnForColors != null)
-                    {
-                        var colorsProp = btnForColors.GetType().GetProperty("colors",
-                            BindingFlags.Instance | BindingFlags.Public);
-                        if (colorsProp != null)
-                        {
-                            try
-                            {
-                                var cb = colorsProp.GetValue(btnForColors, null);
-                                if (cb != null)
-                                {
-                                    var t = cb.GetType();
-                                    // Set normalColor, highlightedColor, pressedColor to white,
-                                    // disabledColor to light grey — all fully opaque
-                                    foreach (string cn in new[] { "normalColor", "highlightedColor", "pressedColor" })
-                                        SetColorField(t, cb, cn, Color.white);
-                                    SetColorField(t, cb, "disabledColor", new Color(0.78f, 0.78f, 0.78f, 0.5f));
-                                    // colorMultiplier = 1 so tint is not amplified
-                                    var cmF = t.GetField("m_ColorMultiplier",
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (cmF == null) cmF = t.GetField("colorMultiplier",
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (cmF != null) try { cmF.SetValue(cb, 1f); } catch { }
-                                    colorsProp.SetValue(btnForColors, cb, null);
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                }
-
-                // --- UIStateButtonTooltip ---
-                Component tooltip = null;
-                foreach (Component c in btnT.GetComponents<Component>())
-                    if (c != null && c.GetType().Name == "UIStateButtonTooltip") { tooltip = c; break; }
-
-                if (tooltip != null)
-                {
-                    // Force enabled — cycle false→true to trigger OnEnable/re-registration
-                    var tooltipEnabledP = tooltip.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                    if (tooltipEnabledP != null) try { tooltipEnabledP.SetValue(tooltip, false, null); } catch { }
-                    if (tooltipEnabledP != null) try { tooltipEnabledP.SetValue(tooltip, true, null); } catch { }
-
-                    // RequireInteractable=True (from dump) blocks tooltip when selectableBase is null.
-                    // Set it false so the tooltip fires on hover unconditionally.
-                    var riF = tooltip.GetType().GetField("RequireInteractable",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (riF == null) riF = tooltip.GetType().GetField("requireInteractable",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (riF != null) try { riF.SetValue(tooltip, false); } catch { }
-
-                    // Wire stateButton so tooltip reads currentStateIndex for text selection
-                    if (uisb != null)
-                    {
-                        var sbF = tooltip.GetType().GetField("stateButton",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch { }
-                    }
-
-                    // Wire tooltipPrefab — check for both null AND destroyed Unity objects
-                    var prefabF = tooltip.GetType().GetField("tooltipPrefab",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (prefabF != null)
-                    {
-                        var pfVal = prefabF.GetValue(tooltip);
-                        bool pfDead = (pfVal is UnityEngine.Object pfObj) ? (pfObj == null) : (pfVal == null);
-                        if (pfDead)
-                        {
-                            foreach (Component tc in UnityEngine.Object.FindObjectsOfType(tooltip.GetType()))
-                            {
-                                if (tc == tooltip) continue;
-                                var pf = prefabF.GetValue(tc);
-                                if (pf is UnityEngine.Object livePf && livePf != null)
-                                { try { prefabF.SetValue(tooltip, pf); } catch { } break; }
-                            }
-                        }
-                    }
-
-                    // Set tooltipStates text: index 0 = "Cannot Recall", index 1 = "Recall Kerbal (cost)"
-                    var tsF = tooltip.GetType().GetField("tooltipStates",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (tsF != null)
-                    {
-                        var arr = tsF.GetValue(tooltip) as System.Array;
-                        if (arr != null)
-                        {
-                            double rCost = 0;
-                            try { rCost = RosterRotationKSCUI.GetRecallFundsCost(); } catch { }
-                            string costStr = rCost > 0 ? $" ({rCost:N0})" : "";
-                            for (int si = 0; si < arr.Length; si++)
-                            {
-                                var entry = arr.GetValue(si);
-                                if (entry == null) continue;
-                                string tipText = si == 0 ? "Cannot Recall" : ("Recall Kerbal" + costStr);
-                                bool tipSet = false;
-                                foreach (string fn in new[] { "tooltipText", "text", "tip", "message", "content", "label" })
-                                {
-                                    var tf = entry.GetType().GetField(fn,
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (tf != null && tf.FieldType == typeof(string))
-                                    {
-                                        try { tf.SetValue(entry, tipText); tipSet = true; break; }
-                                        catch { }
-                                    }
-                                }
-                                if (!tipSet)
-                                    RRLog.Warn("[RosterRotation] ACPatch: tooltip[" + si + "] — could not find text field (known: tooltipText, text, tip, message, content, label)");
-                            }
-                            try { tsF.SetValue(tooltip, arr); } catch { }
-                        }
-                    }
-                }
-
-                // --- Button onClick ---
-                Component btn = null;
-                foreach (Component c in btnT.GetComponents<Component>())
-                    if (c != null && c.GetType().Name == "Button") { btn = c; break; }
-                if (btn != null)
-                {
-                    var onClickP = btn.GetType().GetProperty("onClick", BindingFlags.Instance | BindingFlags.Public);
-                    if (onClickP != null)
-                    {
-                        try
-                        {
-                            var onClick = onClickP.GetValue(btn, null);
-                            onClick?.GetType().GetMethod("RemoveAllListeners")?.Invoke(onClick, null);
-                            var addListener = onClick?.GetType().GetMethod("AddListener",
-                                new Type[] { typeof(UnityEngine.Events.UnityAction) });
-                            if (canRecall)
-                            {
-                                UnityEngine.Events.UnityAction action = () => RecallKerbalFromRetiredTab(kerbal);
-                                addListener?.Invoke(onClick, new object[] { action });
-                            }
-                            else
-                            {
-                                string kName = kerbal.name;
-                                UnityEngine.Events.UnityAction action = () =>
-                                    ScreenMessages.PostScreenMessage(
-                                        kName + " has lost all experience in retirement and cannot be recalled.",
-                                        4f, ScreenMessageStyle.UPPER_CENTER);
-                                addListener?.Invoke(onClick, new object[] { action });
-                            }
-                        }
-                        catch { }
-                    }
-                    // Always interactable — clicking gives feedback even for zero-star kerbals
-                    var interactP = btn.GetType().GetProperty("interactable", BindingFlags.Instance | BindingFlags.Public);
-                    if (interactP != null) try { interactP.SetValue(btn, true, null); } catch { }
-                }
-
-            }
-            catch (Exception ex)
-            {
-                RRLog.WarnOnce("ac.recall.wire."+kerbal.name, "[RosterRotation] ACPatch: WireRecallButton failed for " + kerbal.name + ": " + ex.Message);
-            }
-        }
-
-        // Manual recursive descent to find the "stars" GO and re-apply UIStateImage state.
-        // Used instead of GetComponentsInChildren because Unity 2019 has a known issue where
-        // GetComponentsInChildren<Transform>(true) silently skips children of inactive GOs.
-        private static void FindAndRestoreStars(Transform node, ref bool found)
-        {
-            if (node == null || found) return;
-            if (node.name == "stars")
-            {
-                // Found the GO — activate it and re-apply UIStateImage
-                node.gameObject.SetActive(true);
-                foreach (Component sc in node.GetComponents<Component>())
-                {
-                    if (sc == null || sc.GetType().Name != "UIStateImage") continue;
-                    var csiF = sc.GetType().GetField("currentStateIndex",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (csiF == null) break;
-                    int idx = 0;
-                    try { idx = (int)csiF.GetValue(sc); } catch { break; }
-                    var setStateM = sc.GetType().GetMethod("SetState",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                        null, new Type[] { typeof(int) }, null);
-                    if (setStateM != null) try { setStateM.Invoke(sc, new object[] { idx }); } catch { }
-                    found = true;
-                    break;
-                }
-                return;
-            }
-            // Recurse into ALL children regardless of active state
-            for (int i = 0; i < node.childCount; i++)
-                FindAndRestoreStars(node.GetChild(i), ref found);
-        }
-
-        private static void SetColorField(Type t, object obj, string fieldName, Color color)
-        {
-            var f = t.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            if (f != null) try { f.SetValue(obj, color); } catch { }
-        }
-
-        private static void RecallKerbalFromRetiredTab(ProtoCrewMember kerbal)
-        {
-            try
-            {
-                if (kerbal == null) return;
-                if (!RosterRotationState.Records.TryGetValue(kerbal.name, out var rec) || rec == null) return;
-
-                double nowUT = Planetarium.GetUniversalTime();
-
-                // Check: zero stars → cannot recall
-                int effStars = RosterRotationState.GetRetiredEffectiveStars(kerbal, rec, nowUT);
-                if (effStars <= 0)
-                {
-                    RRLog.Warn("[RosterRotation] ACPatch: Cannot recall " + kerbal.name + " — zero stars.");
-                    ScreenMessages.PostScreenMessage(kerbal.name + " has no experience remaining and cannot be recalled.", 4f, ScreenMessageStyle.UPPER_CENTER);
-                    return;
-                }
-
-                // Check cap
-                if (ACPatches.GetCachedMaxCrew() < int.MaxValue)
-                {
-                    int active = 0;
-                    int retiredSkipped = 0, deadSkipped = 0, applicantSkipped = 0;
-                    if (HighLogic.CurrentGame?.CrewRoster != null)
-                        foreach (var pcm in HighLogic.CurrentGame.CrewRoster.Crew)
-                        {
-                            if (pcm == null) continue;
-                            if (pcm.type == ProtoCrewMember.KerbalType.Applicant) { applicantSkipped++; continue; }
-                            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
-                                pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) { deadSkipped++; continue; }
-                            if (RosterRotationState.Records.TryGetValue(pcm.name, out var pr) && pr != null && pr.Retired) { retiredSkipped++; continue; }
-                            active++;
-                        }
-                    int maxCrew = ACPatches.GetCachedMaxCrew();
-                    RRLog.Verbose("[EAC] RecallCheck: active=" + active + " max=" + maxCrew
-                        + " retiredSkipped=" + retiredSkipped + " deadSkipped=" + deadSkipped
-                        + " applicantSkipped=" + applicantSkipped);
-                    if (active >= maxCrew)
-                    {
-                        ScreenMessages.PostScreenMessage("Cannot recall " + kerbal.name + " — crew roster is full (" + active + "/" + maxCrew + ").", 4f, ScreenMessageStyle.UPPER_CENTER);
-                        return;
-                    }
-                }
-
-                // Check recall funds cost
-                double recallCost = RosterRotationKSCUI.GetRecallFundsCost();
-                if (recallCost > 0)
-                {
-                    double funds = 0;
-                    try { funds = Funding.Instance?.Funds ?? 0; } catch { }
-                    if (funds < recallCost)
-                    {
-                        ScreenMessages.PostScreenMessage(
-                            "Cannot recall " + kerbal.name + " — insufficient funds (need √" + recallCost.ToString("N0") + ").",
-                            4f, ScreenMessageStyle.UPPER_CENTER);
-                        return;
-                    }
-                    try { Funding.Instance?.AddFunds(-recallCost, TransactionReasons.CrewRecruited); } catch { }
-                }
-
-                rec.Retired = false;
-                RosterRotationState.InvalidateRetiredCache();
-                RosterRotationKSCUI.InvalidateCrewCapacityCache();
-
-                if (kerbal.type == ProtoCrewMember.KerbalType.Tourist ||
-                    kerbal.type == ProtoCrewMember.KerbalType.Unowned)
-                {
-                    kerbal.type = rec.OriginalType;
-                    if (kerbal.type == 0) kerbal.type = ProtoCrewMember.KerbalType.Crew;
-                }
-                kerbal.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-
-                if (!string.IsNullOrEmpty(rec.OriginalTrait))
-                    kerbal.trait = rec.OriginalTrait;
-
-                // Apply experience decay — kerbal retains effStars level, not original level
-                // KSP's experienceLevel is a float; we set it to the decayed integer value.
-                try { kerbal.experienceLevel = effStars; }
-                catch (Exception ex2) { RRLog.Warn("[RosterRotation] Could not set experienceLevel: " + ex2.Message); }
-
-                // 30-day refresher training
-                double recallSeconds = 30.0 * RosterRotationState.DaySeconds;
-                kerbal.inactive = true;
-                kerbal.inactiveTimeEnd = nowUT + recallSeconds;
-                rec.Training            = TrainingType.RecallRefresher;
-                rec.TrainingTargetLevel = 0;
-
-                try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
-
-                string costMsg = recallCost > 0 ? " (√" + recallCost.ToString("N0") + ")" : "";
-                ScreenMessages.PostScreenMessage(kerbal.name + " recalled — 30-day refresher training begins." + costMsg, 4f, ScreenMessageStyle.UPPER_CENTER);
-
-                // Rebuild lists and immediately update status labels so the row shows
-                // "In refresher training Xd Xh Xm" instead of "Available for next mission".
-                ForceRefresh();
-                // ForceRefresh() now calls PatchAvailableListStatusText() internally,
-                // but call it again here to handle the case where AvailListTransform
-                // was populated AFTER the internal call.
-                PatchAvailableListStatusText();
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error("[RosterRotation] RecallKerbalFromRetiredTab failed: " + ex);
-            }
-        }
-        public static void PatchAvailableListStatusText()
-        {
-            if (AvailListTransform == null) return;
-            double nowUT = Planetarium.GetUniversalTime();
-            for (int i = 0; i < AvailListTransform.childCount; i++)
-            {
-                Transform row = AvailListTransform.GetChild(i);
-                if (row == null) continue;
-                string kerbalName = GetKerbalNameFromRow(row.gameObject);
-                if (kerbalName == null) continue;
-                ProtoCrewMember pcm = null;
-                if (HighLogic.CurrentGame?.CrewRoster != null)
-                    foreach (var k in HighLogic.CurrentGame.CrewRoster.Crew)
-                        if (k != null && k.name == kerbalName) { pcm = k; break; }
-                if (pcm == null) continue;
-
-                // Build age prefix — shown for all active kerbals when aging is enabled
-                string agePrefix = "";
-                if (RosterRotationState.AgingEnabled
-                    && RosterRotationState.Records.TryGetValue(kerbalName, out var recAge)
-                    && recAge.LastAgedYears >= 0)
-                {
-                    agePrefix = "Age " + RosterRotationState.GetKerbalAge(recAge, nowUT) + "  ";
-                }
-
-                if (pcm.inactive && pcm.inactiveTimeEnd > nowUT)
-                {
-                    string timeLeft = FormatCountdownStatic(pcm.inactiveTimeEnd - nowUT);
-
-                    string label = "In refresher training"; // fallback / RecallRefresher
-                    if (RosterRotationState.Records.TryGetValue(kerbalName, out var rec))
-                    {
-                        if (rec.Training == TrainingType.InitialHire)
-                            label = "In introductory training";
-                        else if (rec.Training == TrainingType.ExperienceUpgrade)
-                            label = "In Level " + rec.TrainingTargetLevel + " training";
-                        else if (rec.Training == TrainingType.RecallRefresher)
-                            label = "In refresher training";
-                        else
-                            continue; // None+inactive = RandR/other, skip
-                    }
-
-                    ReplaceStatusText(row.gameObject, agePrefix + label + " " + timeLeft);
-                }
-                else if (agePrefix.Length > 0)
-                {
-                    // Not in training — show age alongside the default "Available for next mission"
-                    // text that KSP already set.  We only replace if it still reads the default,
-                    // to avoid clobbering other mods' status text.
-                    ReplaceStatusTextIfDefault(row.gameObject, agePrefix + "Available for next mission");
-                }
-            }
-        }
-
-        // Patches K.I.A. rows in the Lost tab to show age+date from our DeathUT record.
-
-        // Patches K.I.A. rows in the Lost tab to show age+date from our DeathUT record.
-        // Searches ALL descendants of LostListTransform for dead kerbal name text components,
-        // then replaces the status text on the same row.
-        public static void PatchLostListStatusText()
-        {
-
-            if (LostListTransform == null)
-            {
-                RRLog.VerboseOnce("ac.lost.null", "[RosterRotation] ACPatch LostTab: LostListTransform is null — cannot patch.");
-                return;
-            }
-
-            // Build lookup of all dead/missing kerbals that have DeathUT records
-            var deadKerbals = new System.Collections.Generic.Dictionary<string, RosterRotationState.KerbalRecord>();
-            foreach (var kvp in RosterRotationState.Records)
-            {
-                if (kvp.Value == null || kvp.Value.DeathUT <= 0) continue;
-                deadKerbals[kvp.Key] = kvp.Value;
-            }
-
-            if (deadKerbals.Count == 0)
-            {
-                return;
-            }
-
-            // Search ALL descendant text components for dead kerbal names
-            int patched = 0;
-            var allComponents = LostListTransform.GetComponentsInChildren<Component>(true);
-            var processedRows = new System.Collections.Generic.HashSet<int>(); // track by instance ID
-
-            foreach (Component c in allComponents)
-            {
-                if (c == null) continue;
-                var textProp = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (textProp == null || textProp.PropertyType != typeof(string)) continue;
-
-                string textVal = null;
-                try { textVal = textProp.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(textVal)) continue;
-
-                // Is this text a dead kerbal's name?
-                if (!deadKerbals.TryGetValue(textVal, out var rec)) continue;
-
-                // Find the row-level parent (walk up until we find a meaningful container)
-                GameObject row = FindRowParent(c.transform);
-                if (row == null) row = c.transform.parent != null ? c.transform.parent.gameObject : c.gameObject;
-
-                // Don't process the same row twice
-                int rowId = row.GetInstanceID();
-                if (processedRows.Contains(rowId)) continue;
-                processedRows.Add(rowId);
-
-                string kerbalName = textVal;
-
-                // Compute the status text
-                int age = -1;
-                if (RosterRotationState.AgingEnabled && rec.LastAgedYears >= 0)
-                    age = RosterRotationState.GetKerbalAge(rec, rec.DeathUT);
-
-                string dateStr = RosterRotationState.FormatGameDateYD(rec.DeathUT);
-                bool retiredDeath = (rec.RetiredUT > 0) && (rec.DeathUT >= rec.RetiredUT - 1);
-
-                string newStatus;
-                if (retiredDeath)
-                {
-                    newStatus = age >= 0 ? "Died Age " + age + ", " + dateStr : "Died " + dateStr;
-                }
-                else
-                {
-                    newStatus = age >= 0 ? "K.I.A. Age " + age + ", " + dateStr : "K.I.A. " + dateStr;
-                }
-
-                // Replace the status text on this row
-                bool replaced = ReplaceNonNameText(row, kerbalName, newStatus);
-                if (replaced)
-                    patched++;
-                else
-                    RRLog.Warn("[RosterRotation] ACPatch LostTab: could not replace status for '" + kerbalName + "'");
-            }
-
-        }
-
-        /// <summary>
-        /// Walk up the transform hierarchy to find the row-level parent.
-        /// Stops when we find a GameObject whose name contains "ListItem" or "Clone",
-        /// or when we've gone up 5 levels, whichever comes first.
-        /// </summary>
-        private static GameObject FindRowParent(Transform child)
-        {
-            if (child == null) return null;
-            Transform current = child.parent;
-            int depth = 0;
-            while (current != null && depth < 5)
-            {
-                string n = current.name ?? "";
-                if (n.Contains("ListItem") || n.Contains("Clone") || n.Contains("enlisted"))
-                    return current.gameObject;
-                current = current.parent;
-                depth++;
-            }
-            // Fallback: just use the direct parent of the text component
-            return child.parent != null ? child.parent.gameObject : null;
-        }
-
-        /// <summary>
-        /// Find the 'label' text component on the row and replace its text.
-        /// Specifically targets the GO named 'label' to avoid clobbering
-        /// 'stats' (class), 'label_courage', or 'label_stupidity'.
-        /// </summary>
-        private static bool ReplaceNonNameText(GameObject row, string kerbalName, string newText)
-        {
-            if (row == null) return false;
-
-            // First pass: look for a text component on a GO named "label"
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                if (c.gameObject.name != "label") continue;
-
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-
-                // Skip if already replaced
-                if (s == newText) return true;
-
-                try
-                {
-                    p.SetValue(c, newText, null);
-                    return true;
-                }
-                catch { }
-            }
-
-            // Fallback: try any text component that matches a known status pattern
-            foreach (Component c in row.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                // Skip GOs that are NOT status labels
-                string goName = c.gameObject.name ?? "";
-                if (goName == "name" || goName == "stats" ||
-                    goName == "label_courage" || goName == "label_stupidity")
-                    continue;
-
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-                if (s == kerbalName || s == newText) continue;
-                if (!IsStatusText(s)) continue;
-
-                try
-                {
-                    p.SetValue(c, newText, null);
-                    return true;
-                }
-                catch { }
-            }
-
-            return false;
-        }
-
-        private static string FormatTimeAgoStatic(double eventUT, double nowUT)
-        {
-            if (eventUT <= 0) return "";
-            double elapsed = nowUT - eventUT;
-            return FormatCountdownStatic(elapsed) + " ago";
-        }
-
-        private static string FormatCountdownStatic(double seconds)
-        {
-            if (seconds <= 0) return "Ready";
-            double daySec = RosterRotationState.DaySeconds;
-            int days    = (int)(seconds / daySec);
-            int hours   = (int)((seconds % daySec) / 3600.0);
-            int minutes = (int)((seconds % 3600.0) / 60.0);
-            int secs    = (int)(seconds % 60.0);
-            if (days > 0)    return days + "d " + hours + "h " + minutes + "m";
-            if (hours > 0)   return hours + "h " + minutes + "m " + secs + "s";
-            if (minutes > 0) return minutes + "m " + secs + "s";
-            return secs + "s";
-        }
     }
 
 }

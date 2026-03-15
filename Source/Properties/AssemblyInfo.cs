@@ -1,9 +1,22 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 
-[assembly: AssemblyTitle("Enhanced Astronaut Complex")]
-[assembly: AssemblyDescription("Crew aging, retirement, training and management for KSP")]
+[assembly: AssemblyTitle("EAC")]
+[assembly: AssemblyDescription("Enhanced Astronaut Complex")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("EAC")]
-[assembly: AssemblyCopyright("2026")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
-[assembly: KSPAssembly("EAC", 1, 0)]
+[assembly: AssemblyCopyright("")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+
+[assembly: ComVisible(false)]
+[assembly: Guid("7f0c632f-0d4e-4f76-b767-b6b9fbbca0de")]
+
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyInformationalVersion("1.1.0")]
+
+[assembly: InternalsVisibleTo("EAC.Tests")]
+[assembly: InternalsVisibleTo("RosterRotation.Tests")]

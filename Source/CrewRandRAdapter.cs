@@ -39,8 +39,8 @@ namespace RosterRotation
 
         public static void InvalidateVacationCache()
         {
-            // No-op: reverted full refresh cache because it was too expensive
-            // in heavy installs.
+            _rosterInstance = null;
+            _extDataSet = null;
         }
 
         /// <summary>True if CrewRandR says the Kerbal is on vacation.</summary>
@@ -63,27 +63,46 @@ namespace RosterRotation
 
             try
             {
-                if (_extDataSet == null || _rosterInstance == null)
-                    TryInitRosterExtAccess();
-                if (_extDataSet == null) return false;
-
                 double nowUT = Planetarium.GetUniversalTime();
 
-                foreach (var ext in _extDataSet)
-                {
-                    if (ext == null) continue;
-
-                    var accessors = GetAccessors(ext.GetType());
-                    var pcm = GetProtoReference(ext, accessors);
-                    if (pcm == null || pcm.name != kerbalName) continue;
-
-                    untilUT = ExtractVacationUntil(ext, accessors, nowUT);
+                // Flight -> KSC scene changes can invalidate CrewRandR's singleton and its ext-data enumerable.
+                // Always try the current handle first, then force one refresh if nothing useful is found.
+                if (TryGetVacationUntilByNameInternal(kerbalName, nowUT, out untilUT))
                     return untilUT > 0;
-                }
+
+                InvalidateVacationCache();
+                TryInitRosterExtAccess();
+
+                if (TryGetVacationUntilByNameInternal(kerbalName, nowUT, out untilUT))
+                    return untilUT > 0;
             }
             catch (Exception ex)
             {
                 RRLog.Error($"[RosterRotation] CrewRandRAdapter.TryGetVacationUntilByName failed: {ex}");
+            }
+
+            return false;
+        }
+
+        private static bool TryGetVacationUntilByNameInternal(string kerbalName, double nowUT, out double untilUT)
+        {
+            untilUT = 0;
+
+            if (_extDataSet == null || _rosterInstance == null)
+                TryInitRosterExtAccess();
+            if (_extDataSet == null) return false;
+
+            foreach (var ext in _extDataSet)
+            {
+                if (ext == null) continue;
+
+                var accessors = GetAccessors(ext.GetType());
+                var pcm = GetProtoReference(ext, accessors);
+                if (pcm == null || !string.Equals(pcm.name, kerbalName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                untilUT = ExtractVacationUntil(ext, accessors, nowUT);
+                return true;
             }
 
             return false;
@@ -199,7 +218,7 @@ namespace RosterRotation
                 if (accessors.ProtoReferenceProperty != null)
                     return accessors.ProtoReferenceProperty.GetValue(ext, null) as ProtoCrewMember;
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("CrewRandRAdapter.cs:221", "Suppressed exception in CrewRandRAdapter.cs:221", ex); }
 
             return null;
         }
@@ -276,6 +295,9 @@ namespace RosterRotation
         {
             try
             {
+                _rosterInstance = null;
+                _extDataSet = null;
+
                 if (_asm == null) return;
 
                 var rosterType = SafeGetTypes(_asm).FirstOrDefault(t => t.FullName != null && t.FullName.Contains("CrewRandRRoster"));

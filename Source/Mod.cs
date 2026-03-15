@@ -3,6 +3,7 @@
 
 using System;
 using System.Linq;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -29,400 +30,6 @@ namespace RosterRotation
     }
 
     // ── Shared state ───────────────────────────────────────────────────────────
-    public static class RosterRotationState
-    {
-        public static double RestDays      = 14;
-        public static bool   UseKerbinDays = true;
-
-        public static double DaySeconds => UseKerbinDays ? 21600.0 : 86400.0;
-
-        public static int    TrainingInitialDays     = 30;
-        public static int    TrainingStarDays        = 30;
-        public static double TrainingFundsMultiplier = 1.0;
-        public static double TrainingRDPerStar       = 10.0;
-        public static double TrainingBaseFundsCost   = 62000;
-        public static double RecallFundsCostMultiplier = 1.0; // multiplied by hire cost for recall
-
-        public static readonly Dictionary<string, KerbalRecord> Records =
-            new Dictionary<string, KerbalRecord>();
-
-        public class KerbalRecord
-        {
-            public string OriginalTrait;
-            public ProtoCrewMember.KerbalType OriginalType;
-            public int    Flights;
-            public double LastFlightUT;
-            public double RestUntilUT;
-            public double MissionStartUT;
-            public bool   Retired;
-            public double RetiredUT;
-            public int    ExperienceAtRetire;
-            public TrainingType Training           = TrainingType.None;
-            public int          TrainingTargetLevel = 0;
-            public int          GrantedLevel        = -1;
-            public double BirthUT                = 0;
-            public double NaturalRetirementUT    = 0;
-            public int    RetirementDelayYears   = 0;
-            public bool   RetirementWarned       = false;
-            public bool   RetirementScheduled    = false;
-            public double RetirementScheduledUT  = 0;
-            public double DeathUT                = 0;
-            public double TrainingEndUT          = 0;
-            public int    LastAgedYears          = -1;
-        }
-
-        // Aging config
-        public static bool AgingEnabled              = true;
-        public static bool DeathNotificationsEnabled = true;
-        public static bool HudNotificationsEnabled        = true;
-        public static bool MessageAppNotificationsEnabled = true;
-        public static bool BirthdayNotificationsEnabled   = true;
-        public static bool TrainingNotificationsEnabled   = true;
-        public static bool RetirementNotificationsEnabled = true;
-        public static int  RetirementAgeMin          = 48;
-        public static int  RetirementAgeMax          = 55;
-        public static int  RetiredDeathAgeMin        = 55;
-        public static bool VerboseLogging    = false;
-        public static bool VerboseAgeLogging = false;
-        public static bool VerboseSettingsDirty = false;
-
-        // Field aliases for EACStateBridge reflection access
-        public static bool NotifyHUD { get => HudNotificationsEnabled; set => HudNotificationsEnabled = value; }
-        public static bool NotifyMessageApp { get => MessageAppNotificationsEnabled; set => MessageAppNotificationsEnabled = value; }
-
-        public static double YearSeconds => UseKerbinDays ? 426.08 * 21600.0 : 365.25 * 86400.0;
-
-        // ── Cached retired names (invalidated by retire/recall operations) ──────
-        private static List<string> _cachedRetiredNames;
-        private static int _cachedRetiredHash = -1;
-
-        public static void InvalidateRetiredCache() => _cachedRetiredHash = -1;
-
-        public static List<string> GetRetiredNames()
-        {
-            int hash = Records.Count;
-            foreach (var kvp in Records)
-                if (kvp.Value != null && kvp.Value.Retired) hash = hash * 31 + kvp.Key.GetHashCode();
-
-            if (hash == _cachedRetiredHash && _cachedRetiredNames != null)
-                return _cachedRetiredNames;
-
-            var names = new List<string>();
-            foreach (var kvp in Records)
-                if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
-
-            _cachedRetiredNames = names;
-            _cachedRetiredHash = hash;
-            return names;
-        }
-
-        // ── Cached crew name set for row matching ───────────────────────────────
-        private static HashSet<string> _cachedCrewNames;
-        private static int _cachedCrewCount = -1;
-
-        public static HashSet<string> GetCrewNameSet()
-        {
-            var roster = HighLogic.CurrentGame?.CrewRoster;
-            if (roster == null) return _cachedCrewNames ?? new HashSet<string>();
-
-            int count = 0;
-            foreach (var pcm in roster.Crew) if (pcm != null) count++;
-
-            if (count == _cachedCrewCount && _cachedCrewNames != null)
-                return _cachedCrewNames;
-
-            var names = new HashSet<string>();
-            foreach (var pcm in roster.Crew)
-                if (pcm != null) names.Add(pcm.name);
-
-            _cachedCrewNames = names;
-            _cachedCrewCount = count;
-            return names;
-        }
-
-        public static int GetKerbalAge(KerbalRecord rec, double nowUT)
-        {
-            if (rec == null || rec.BirthUT == 0) return -1;
-            return (int)((nowUT - rec.BirthUT) / YearSeconds);
-        }
-
-        public static string FormatGameDate(double ut)
-        {
-            double yr  = ut / YearSeconds;
-            double day = (ut % YearSeconds) / DaySeconds;
-            return $"Yr {(int)yr + 1}, Day {(int)day + 1}";
-        }
-
-        public static string FormatGameDateYM(double ut)
-        {
-            if (ut < 0) ut = 0;
-            double yearSec = YearSeconds;
-            if (yearSec <= 0) return "0Y 0M";
-            int year = (int)(ut / yearSec) + 1;
-            double monthSec = yearSec / 12.0;
-            int month = monthSec > 0 ? Math.Max(1, Math.Min(12, (int)((ut % yearSec) / monthSec) + 1)) : 1;
-            return $"{year}Y {month}M";
-        }
-
-        public static string FormatGameDateYD(double ut)
-        {
-            if (ut < 0) ut = 0;
-            double yearSec = YearSeconds;
-            if (yearSec <= 0) return "Y0 D0";
-            int year = (int)(ut / yearSec) + 1;
-            int day  = (int)((ut % yearSec) / DaySeconds) + 1;
-            return $"Y{year} D{day}";
-        }
-
-        public static int GetRetiredEffectiveStars(ProtoCrewMember k, KerbalRecord r, double nowUT)
-        {
-            if (r == null || !r.Retired) return (int)k.experienceLevel;
-            int starsAtRetire = r.ExperienceAtRetire > 0 ? r.ExperienceAtRetire : (int)k.experienceLevel;
-            if (starsAtRetire <= 0) return 0;
-            int starsLost = (int)((nowUT - r.RetiredUT) / YearSeconds);
-            return Math.Max(0, starsAtRetire - starsLost);
-        }
-
-        public static KerbalRecord GetOrCreate(string name)
-        {
-            if (!Records.TryGetValue(name, out var r))
-            {
-                r = new KerbalRecord();
-                Records[name] = r;
-            }
-            return r;
-        }
-
-        private static bool IsNotificationEnabled(EACNotificationType type)
-        {
-            switch (type)
-            {
-                case EACNotificationType.Birthday:   return BirthdayNotificationsEnabled;
-                case EACNotificationType.Training:   return TrainingNotificationsEnabled;
-                case EACNotificationType.Retirement: return RetirementNotificationsEnabled;
-                case EACNotificationType.Death:      return DeathNotificationsEnabled;
-                default: return true;
-            }
-        }
-
-        public static void PostNotification(
-            string title, string body,
-            MessageSystemButton.MessageButtonColor color,
-            MessageSystemButton.ButtonIcons icon,
-            float hudDuration = 8f)
-        {
-            PostNotification(EACNotificationType.General, title, body, color, icon, hudDuration);
-        }
-
-        public static void PostNotification(
-            EACNotificationType type,
-            string title, string body,
-            MessageSystemButton.MessageButtonColor color,
-            MessageSystemButton.ButtonIcons icon,
-            float hudDuration = 8f)
-        {
-            if (!IsNotificationEnabled(type)) return;
-
-            if (HudNotificationsEnabled)
-                ScreenMessages.PostScreenMessage(body, hudDuration, ScreenMessageStyle.UPPER_CENTER);
-
-            if (!MessageAppNotificationsEnabled) return;
-
-            try
-            {
-                if (MessageSystem.Instance != null)
-                    MessageSystem.Instance.AddMessage(
-                        new MessageSystem.Message(title, body, color, icon));
-            }
-            catch (Exception ex) { RRLog.Warn($"PostNotification failed: {ex.Message}"); }
-        }
-
-        // ── Time formatting helpers ─────────────────────────────────────────────
-        public static string FormatCountdown(double seconds)
-        {
-            if (seconds <= 0) return "Ready";
-            double ds = DaySeconds;
-            int d = (int)(seconds / ds);
-            int h = (int)((seconds % ds) / 3600.0);
-            int m = (int)((seconds % 3600.0) / 60.0);
-            int s = (int)(seconds % 60.0);
-            if (d > 0) return $"{d}d {h}h {m}m";
-            if (h > 0) return $"{h}h {m}m {s}s";
-            if (m > 0) return $"{m}m {s}s";
-            return $"{s}s";
-        }
-
-        public static string FormatTimeAgo(double eventUT, double nowUT)
-        {
-            if (eventUT <= 0) return "";
-            return FormatCountdown(nowUT - eventUT) + " ago";
-        }
-    }
-
-    // ── AC open detection cache ────────────────────────────────────────────────
-    // Replaces per-frame Resources.FindObjectsOfTypeAll scans with a cached check.
-    internal static class ACOpenCache
-    {
-        private static Type _acType;
-        private static bool _typeSearched;
-        private static float _lastCheckTime = -10f;
-        private static bool _lastResult;
-        private const float CACHE_DURATION_OPEN = 0.5f;
-
-        private static MonoBehaviour _cachedACInstance;
-
-        // When true, we've confirmed the AC is closed and won't scan again
-        // until Invalidate() is called (which the Harmony hooks do on dialog open/close).
-        private static bool _confirmedClosed;
-
-        internal static int PollCount;
-        internal static int ExpensiveScanCount;
-        internal static float TotalScanMs;
-        internal static int CacheHitCount;
-
-        public static bool IsOpen
-        {
-            get
-            {
-                // If we've confirmed closed and no hook has invalidated us, return false immediately.
-                // This is the critical optimization: ZERO cost when AC is closed.
-                if (_confirmedClosed) return false;
-
-                float now = Time.realtimeSinceStartup;
-                float cacheDur = _lastResult ? CACHE_DURATION_OPEN : 0f; // no throttle for "not found" — just confirm once
-                if (now - _lastCheckTime < cacheDur) return _lastResult;
-                _lastCheckTime = now;
-                PollCount++;
-                _lastResult = CheckOpen();
-
-                // If scan found nothing, mark confirmed closed — no more scanning until hook fires
-                if (!_lastResult) _confirmedClosed = true;
-
-                return _lastResult;
-            }
-        }
-
-        /// <summary>
-        /// Called by Harmony hooks when AC dialog lifecycle events fire (Start/Awake/OnDestroy/OnDisable).
-        /// Clears the confirmed-closed flag so the next IsOpen check will do one scan.
-        /// </summary>
-        public static void Invalidate()
-        {
-            _lastCheckTime = -10f;
-            _cachedACInstance = null;
-            _confirmedClosed = false;
-        }
-
-        private static bool CheckOpen()
-        {
-            if (HighLogic.LoadedScene != GameScenes.SPACECENTER) return false;
-
-            // Fast path: cached reference alive and active
-            if (_cachedACInstance != null)
-            {
-                try
-                {
-                    if (_cachedACInstance.isActiveAndEnabled &&
-                        _cachedACInstance.gameObject != null &&
-                        _cachedACInstance.gameObject.activeInHierarchy)
-                    {
-                        CacheHitCount++;
-                        return true;
-                    }
-                }
-                catch { }
-                _cachedACInstance = null;
-                return false;
-            }
-
-            // Slow path: one-time scan after Invalidate()
-            try
-            {
-                if (!_typeSearched)
-                {
-                    _typeSearched = true;
-                    var asm = AssemblyLoader.loadedAssemblies
-                        .Select(a => a.assembly)
-                        .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-                    if (asm != null) _acType = asm.GetType("KSP.UI.Screens.AstronautComplex");
-                }
-                if (_acType == null) return false;
-
-                float t0 = Time.realtimeSinceStartup;
-                var all = Resources.FindObjectsOfTypeAll(_acType);
-                float elapsed = (Time.realtimeSinceStartup - t0) * 1000f;
-                ExpensiveScanCount++;
-                TotalScanMs += elapsed;
-
-                foreach (var obj in all)
-                {
-                    var mb = obj as MonoBehaviour;
-                    if (mb != null && mb.isActiveAndEnabled && mb.gameObject != null && mb.gameObject.activeInHierarchy)
-                    {
-                        _cachedACInstance = mb;
-                        return true;
-                    }
-                }
-            }
-            catch { }
-            return false;
-        }
-    }
-
-
-    [KSPAddon(KSPAddon.Startup.MainMenu, true)]
-    public class EACSettingsPersistenceHook : MonoBehaviour
-    {
-        private bool _saveQueued;
-
-        private void Awake()
-        {
-            DontDestroyOnLoad(this);
-            GameEvents.OnGameSettingsApplied.Add(OnGameSettingsApplied);
-        }
-
-        private void OnDestroy()
-        {
-            GameEvents.OnGameSettingsApplied.Remove(OnGameSettingsApplied);
-        }
-
-        private void OnGameSettingsApplied()
-        {
-            if (_saveQueued) return;
-            StartCoroutine(DeferredSavePersistent());
-        }
-
-        private System.Collections.IEnumerator DeferredSavePersistent()
-        {
-            _saveQueued = true;
-
-            // Let KSP finish applying GameParameters before we mirror to scenario state.
-            yield return null;
-            yield return null;
-
-            try
-            {
-                if (HighLogic.CurrentGame == null || string.IsNullOrEmpty(HighLogic.SaveFolder))
-                    yield break;
-
-                if (!EACGameSettings.TryApplyToStateFromGameParams())
-                    RRLog.Warn("[EAC] Settings applied, but EAC parameters could not be mirrored to state before save.");
-
-                RRLog.Info("[EAC] Settings applied; forcing persistent.sfs save.");
-                GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE);
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error("[EAC] Failed to save settings on Apply/Accept: " + ex);
-            }
-            finally
-            {
-                _saveQueued = false;
-            }
-        }
-    }
-
-    // ── Flight tracker ─────────────────────────────────────────────────────────
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public class RosterRotationFlightTracker : MonoBehaviour
     {
@@ -448,6 +55,9 @@ namespace RosterRotation
                 var r = RosterRotationState.GetOrCreate(pcm.name);
                 r.Flights++;
                 r.LastFlightUT = now;
+                r.MissionStartUT = 0;
+                r.LastMissionDeathCheckUT = 0;
+                RosterRotationKSCUI.TryApplyVeteranTraitGrowthOnRecovery(pcm, r, v, now);
 
                 bool killedInFlight = pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
                                    || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing
@@ -468,6 +78,7 @@ namespace RosterRotation
                     pcm.inactive        = true;
                     pcm.inactiveTimeEnd = now + RosterRotationState.YearSeconds * 1000.0;
                     RosterRotationState.InvalidateRetiredCache();
+                    RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
 
                     RosterRotationState.PostNotification(
                         EACNotificationType.Retirement, $"Retired — {pcm.name}",
@@ -476,6 +87,8 @@ namespace RosterRotation
                         MessageSystemButton.ButtonIcons.MESSAGE);
                 }
             }
+
+            CrashSeverityState.HandleRecovery(v, now);
         }
 
         private void OnKerbalStatusChange(
@@ -490,7 +103,12 @@ namespace RosterRotation
             if (newStatus == ProtoCrewMember.RosterStatus.Available && rec.DeathUT > 0)
             {
                 rec.DeathUT = 0;
-                try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                rec.DiedOnMission = false;
+                rec.PendingMissionDeath = false;
+                rec.MissionStartUT = 0;
+                rec.LastMissionDeathCheckUT = 0;
+                RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
+                SaveScheduler.RequestSave("kerbal status change");
                 return;
             }
 
@@ -499,6 +117,11 @@ namespace RosterRotation
             if (!isDeath || rec.DeathUT > 0) return;
 
             rec.DeathUT = now;
+            rec.DiedOnMission = false;
+            rec.PendingMissionDeath = false;
+            rec.MissionStartUT = 0;
+            rec.LastMissionDeathCheckUT = 0;
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
             int kiaAge = RosterRotationState.GetKerbalAge(rec, now);
 
             if (RosterRotationState.DeathNotificationsEnabled)
@@ -511,7 +134,7 @@ namespace RosterRotation
                     MessageSystemButton.MessageButtonColor.RED,
                     MessageSystemButton.ButtonIcons.ALERT, 12f);
             }
-            try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+            SaveScheduler.RequestSave("kerbal death state");
         }
     }
 
@@ -519,22 +142,25 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
+        private const string ModVersion = "1.0.3";
+        private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
+
         public static bool RetiredTabSelected;
 
         private Texture2D _iconTex;
         private ApplicationLauncherButton _btn;
         private bool    _show;
-        private Rect    _window = new Rect(300, 100, 860, 620);
+        private Rect    _window = new Rect(300, 100, 940, 620);
         private Vector2 _scroll;
 
         private enum AcOverlay { None, Applicants, Training, ForceRetire }
         private AcOverlay _acOverlay      = AcOverlay.None;
         private bool      _prevACOpen;
-        private Rect      _overlayWindow  = new Rect(80, 120, 640, 500);
+        private Rect      _overlayWindow  = new Rect(80, 120, 820, 500);
         private Vector2   _overlayScroll;
 
-        private enum Tab { Eligible, Active, RandR, Applicants, Retired, Training }
-        private Tab _tab = Tab.Eligible;
+        private enum Tab { Applicants, Active, Assigned, Training, RandR, Retired, Lost }
+        private Tab _tab = Tab.Active;
 
         private float _nextCheckRT  = 0f;
         private const float CHECK_INTERVAL = 5f;
@@ -553,6 +179,20 @@ namespace RosterRotation
         private static float _cachedHireCostFacilityLevel = float.NaN;
         private static MethodInfo _cachedRecruitCostCountMethod;
         private static MethodInfo _cachedRecruitCostFacilityMethod;
+        private static bool _searchedFlightTrackerFlightsMethod;
+        private static MethodInfo _cachedFlightTrackerFlightsMethod;
+        private static Type _cachedFlightTrackerApiType;
+        private static FieldInfo _cachedFlightTrackerApiInstanceField;
+        private static PropertyInfo _cachedFlightTrackerApiInstanceProperty;
+        private static bool _searchedFlightTrackerStore;
+        private static Type _cachedFlightTrackerStoreType;
+        private static FieldInfo _cachedFlightTrackerStoreInstanceField;
+        private static PropertyInfo _cachedFlightTrackerStoreInstanceProperty;
+        private static FieldInfo _cachedFlightTrackerFlightsField;
+        private static bool _searchedFlightTrackerMissionHoursMethod;
+        private static MethodInfo _cachedFlightTrackerMissionHoursMethod;
+
+        private bool _flightTrackerSyncExecutedThisSession;
 
         private float _lastRosterRowsCacheRT = -10f;
         private Tab _cachedRosterRowsTab = (Tab)(-1);
@@ -573,8 +213,11 @@ namespace RosterRotation
             public RosterRotationState.KerbalRecord Record;
             public bool Retired;
             public bool HasFlown;
+            public bool IsLost;
+            public bool IsAssigned;
             public string Status;
             public string AgeText;
+            public int DisplayFlights;
             public int EffectiveStars;
             public bool InTrainingLockout;
         }
@@ -645,11 +288,16 @@ namespace RosterRotation
                         k.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) continue;
                     if (!RosterRotationState.Records.TryGetValue(k.name, out var rec)) continue;
                     if (rec.DeathUT <= 0) continue;
+                    if (rec.DiedOnMission || rec.PendingMissionDeath) continue;
                     rec.DeathUT = 0;
+                    rec.DiedOnMission = false;
+                    rec.PendingMissionDeath = false;
+                    rec.MissionStartUT = 0;
+                    rec.LastMissionDeathCheckUT = 0;
                     healed++;
                 }
                 if (healed > 0)
-                    try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                    SaveScheduler.RequestSave("heal respawned kerbals");
             }
             catch (Exception ex) { RRLog.Warn($"HealRespawnedKerbals: {ex.Message}"); }
         }
@@ -671,7 +319,7 @@ namespace RosterRotation
                     newCount++;
                 }
                 if (newCount > 0)
-                    try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                    SaveScheduler.RequestSave("initialize existing kerbal ages");
             }
             catch (Exception ex) { RRLog.Warn($"InitializeExistingKerbalAges: {ex.Message}"); }
         }
@@ -713,6 +361,8 @@ namespace RosterRotation
                 ACPatches.ForceRefresh();
                 InvalidateUICaches();
             }
+
+            MaybeRunPendingFlightTrackerSync();
 
             if (Time.realtimeSinceStartup < _nextCheckRT) return;
             _nextCheckRT = Time.realtimeSinceStartup + CHECK_INTERVAL;
@@ -769,15 +419,17 @@ namespace RosterRotation
                     int target = rec.TrainingTargetLevel;
                     if (target >= 1 && target <= 3)
                     {
-                        try { k.experienceLevel = target; } catch { }
+                        try { k.experienceLevel = target; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:422", "Suppressed exception in Mod.cs:422", ex); }
                         rec.GrantedLevel = target;
-                        try { k.careerLog.AddEntry("Training" + target, "Kerbin"); } catch { }
+                        try { k.careerLog.AddEntry("Training" + target, "Kerbin"); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:424", "Suppressed exception in Mod.cs:424", ex); }
 
                         if (RosterRotationState.AgingEnabled && rec.NaturalRetirementUT > 0)
                         {
                             rec.RetirementDelayYears += target;
                             rec.RetirementWarned = false;
                         }
+
+                        RosterRotationKSCUI.TryApplyTrainingTraitGrowth(k, rec, target, now);
 
                         RosterRotationState.PostNotification(
                             EACNotificationType.Training, $"Training Complete — {k.name}",
@@ -813,7 +465,7 @@ namespace RosterRotation
             if (anyDone)
             {
                 InvalidateUICaches();
-                try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                SaveScheduler.RequestSave("training completion");
             }
         }
 
@@ -835,11 +487,39 @@ namespace RosterRotation
             _btn = null;
         }
 
+        private void DrawHallButton()
+        {
+            bool hallAvailable = HallOfHistoryWindow.IsAvailable;
+            bool hallOpen = HallOfHistoryWindow.IsOpen;
+
+            GUI.enabled = hallAvailable;
+            string label = hallOpen ? "Close Hall" : "Open Hall";
+            if (GUILayout.Button(label, GUILayout.Width(110), GUILayout.Height(24)))
+            {
+                if (hallOpen)
+                    HallOfHistoryWindow.HideWindow();
+                else
+                    HallOfHistoryWindow.ShowWindow(true);
+            }
+            GUI.enabled = true;
+        }
+
+        private void DrawHallStatusHint()
+        {
+            if (HallOfHistoryWindow.IsAvailable)
+                return;
+
+            Color prev = GUI.color;
+            GUI.color = new Color(1f, 0.95f, 0.65f);
+            GUILayout.Label("Hall of History is still initializing.");
+            GUI.color = prev;
+        }
+
         // ── OnGUI ──────────────────────────────────────────────────────────────
         private void OnGUI()
         {
             if (_show)
-                _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, "Enhanced Astronaut Complex");
+                _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle);
 
             bool acOpen = ACOpenCache.IsOpen;
             if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
@@ -856,10 +536,10 @@ namespace RosterRotation
 
         private string GetOverlayTitle(AcOverlay ov)
         {
-            if (ov == AcOverlay.Applicants)  return "EAC: Applicants";
-            if (ov == AcOverlay.Training)    return "EAC: Send to Training";
-            if (ov == AcOverlay.ForceRetire) return "EAC: Force Retire";
-            return "Enhanced Astronaut Complex";
+            if (ov == AcOverlay.Applicants)  return $"EAC v{ModVersion}: Applicants";
+            if (ov == AcOverlay.Training)    return $"EAC v{ModVersion}: Send to Training";
+            if (ov == AcOverlay.ForceRetire) return $"EAC v{ModVersion}: Force Retire";
+            return WindowTitle;
         }
 
         // ── Main toolbar window ────────────────────────────────────────────────
@@ -868,21 +548,25 @@ namespace RosterRotation
             GUILayout.BeginVertical();
 
             GUILayout.BeginHorizontal();
-            if (GUILayout.Toggle(_tab == Tab.Eligible,   "Eligible",   "Button", GUILayout.Width(90)))  _tab = Tab.Eligible;
-            if (GUILayout.Toggle(_tab == Tab.Active,     "Active",     "Button", GUILayout.Width(80)))  _tab = Tab.Active;
-            if (GUILayout.Toggle(_tab == Tab.RandR,      "R&R",        "Button", GUILayout.Width(60)))  _tab = Tab.RandR;
             if (GUILayout.Toggle(_tab == Tab.Applicants, "Applicants", "Button", GUILayout.Width(110))) _tab = Tab.Applicants;
-            if (GUILayout.Toggle(_tab == Tab.Retired,    "Retired",    "Button", GUILayout.Width(90)))  _tab = Tab.Retired;
+            if (GUILayout.Toggle(_tab == Tab.Active,     "Active",     "Button", GUILayout.Width(80)))  _tab = Tab.Active;
+            if (GUILayout.Toggle(_tab == Tab.Assigned,   "Assigned",   "Button", GUILayout.Width(90)))  _tab = Tab.Assigned;
             if (GUILayout.Toggle(_tab == Tab.Training,   "Training",   "Button", GUILayout.Width(90)))  _tab = Tab.Training;
+            if (GUILayout.Toggle(_tab == Tab.RandR,      "R&R",        "Button", GUILayout.Width(60)))  _tab = Tab.RandR;
+            if (GUILayout.Toggle(_tab == Tab.Retired,    "Retired",    "Button", GUILayout.Width(90)))  _tab = Tab.Retired;
+            if (GUILayout.Toggle(_tab == Tab.Lost,       "Lost",       "Button", GUILayout.Width(70)))  _tab = Tab.Lost;
             GUILayout.FlexibleSpace();
+            DrawHallButton();
             GUILayout.EndHorizontal();
+            DrawHallStatusHint();
             GUILayout.Space(6);
 
             var roster = HighLogic.CurrentGame?.CrewRoster;
             if (roster == null) { GUILayout.Label("Crew roster not available."); GUILayout.EndVertical(); GUI.DragWindow(); return; }
 
             double now = Planetarium.GetUniversalTime();
-            if (_tab == Tab.Training) DrawTrainingTab(roster, now);
+            if (_tab == Tab.Applicants) DrawApplicantsTab(roster);
+            else if (_tab == Tab.Training) DrawTrainingTab(roster, now);
             else DrawRosterTab(roster, now);
 
             GUILayout.Space(8);
@@ -891,15 +575,89 @@ namespace RosterRotation
             GUI.DragWindow();
         }
 
+        private void DrawApplicantsTab(KerbalRoster roster)
+        {
+            int activeCount = GetActiveNonRetiredCount();
+            int maxCrew = GetMaxCrew();
+            bool atCap = activeCount >= maxCrew;
+            var applicants = GetApplicantsCached(roster);
+
+            GUILayout.Label($"Applicants: {applicants.Count}");
+            GUILayout.Space(4);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Name", GUILayout.Width(260));
+            GUILayout.Label("Skill", GUILayout.Width(110));
+            GUILayout.Label("Courage", GUILayout.Width(90));
+            GUILayout.Label("Stupidity", GUILayout.Width(90));
+            GUILayout.FlexibleSpace();
+            GUILayout.Label("", GUILayout.Width(150));
+            GUILayout.EndHorizontal();
+            DrawHRule();
+
+            _scroll = GUILayout.BeginScrollView(_scroll);
+            foreach (var k in applicants)
+            {
+                if (k == null) continue;
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(k.name, GUILayout.Width(260));
+                GUILayout.Label(k.trait, GUILayout.Width(110));
+                GUILayout.Label($"{k.courage:P0}", GUILayout.Width(90));
+                GUILayout.Label($"{k.stupidity:P0}", GUILayout.Width(90));
+                GUILayout.FlexibleSpace();
+                GUI.enabled = !atCap;
+                if (GUILayout.Button("Hire", GUILayout.Width(70)))
+                {
+                    k.type = ProtoCrewMember.KerbalType.Crew;
+                    k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
+                    SaveScheduler.RequestSave("hire applicant");
+                    InvalidateUICaches();
+                    ACPatches.ForceRefresh();
+                }
+                GUI.enabled = true;
+                if (GUILayout.Button("Reject", GUILayout.Width(70)))
+                {
+                    RejectApplicant(roster, k);
+                    InvalidateUICaches();
+                    ACPatches.ForceRefresh();
+                    ACPatches.ForceRefreshApplicants();
+                }
+                GUILayout.EndHorizontal();
+            }
+            if (applicants.Count == 0) GUILayout.Label("No applicants available.");
+            GUILayout.EndScrollView();
+
+            GUILayout.Space(6);
+            DrawHRule();
+            GUILayout.BeginHorizontal();
+            GUILayout.Label($"Slots: {activeCount} / {maxCrew}{(atCap ? " FULL" : "")}", GUILayout.Width(260));
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Reject All Applicants", GUILayout.Width(180)))
+            {
+                var all = roster.Applicants.ToList();
+                foreach (var k in all) RejectApplicant(roster, k);
+                InvalidateUICaches();
+                ACPatches.ForceRefresh();
+                ACPatches.ForceRefreshApplicants();
+            }
+            GUILayout.EndHorizontal();
+        }
+
         private void DrawRosterTab(KerbalRoster roster, double now)
         {
             var rows = GetRosterRowsCached(roster, now);
             int activeCount = GetActiveNonRetiredCount();
             int maxCrew = GetMaxCrew();
             bool atCap = activeCount >= maxCrew;
+            const float nameWidth = 300f;
+            const float flightsWidth = 85f;
+            const float ageWidth = 65f;
+            const float statusWidth = 260f;
+            const float actionButtonWidth = 80f;
+            const float actionAreaWidth = actionButtonWidth * 2f;
 
             GUILayout.Label($"Shown: {rows.Count}");
-            GUILayout.Space(4);
+            GUILayout.Space(8);
             _scroll = GUILayout.BeginScrollView(_scroll);
 
             foreach (var row in rows)
@@ -908,28 +666,15 @@ namespace RosterRotation
                 var r = row.Record;
 
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"{k.name} — {k.trait} — L{(int)k.experienceLevel}", GUILayout.Width(280));
-                GUILayout.Label($"F:{r?.Flights ?? 0}", GUILayout.Width(40));
-                GUILayout.Label(row.AgeText, GUILayout.Width(55));
-                GUILayout.Label(row.Status, GUILayout.Width(240));
+                GUILayout.Label($"{k.name} — {k.trait} — L{(int)k.experienceLevel}", GUILayout.Width(nameWidth));
+                GUILayout.Label($"Flights:{row.DisplayFlights}", GUILayout.Width(flightsWidth));
+                GUILayout.Label(row.AgeText, GUILayout.Width(ageWidth));
+                GUILayout.Label(row.Status, GUILayout.Width(statusWidth));
                 GUILayout.FlexibleSpace();
 
-                if (k.type == ProtoCrewMember.KerbalType.Applicant)
+                if (row.IsLost || row.IsAssigned)
                 {
-                    GUI.enabled = !atCap;
-                    if (GUILayout.Button("Hire", GUILayout.Width(70)))
-                    {
-                        k.type = ProtoCrewMember.KerbalType.Crew;
-                        k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-                        try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
-                        InvalidateUICaches();
-                    }
-                    GUI.enabled = true;
-                    if (GUILayout.Button("Reject", GUILayout.Width(70)))
-                    {
-                        RejectApplicant(roster, k);
-                        InvalidateUICaches();
-                    }
+                    GUILayout.Space(actionAreaWidth);
                 }
                 else if (!row.Retired)
                 {
@@ -937,7 +682,7 @@ namespace RosterRotation
                     bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
                     bool maxLevel = k.experienceLevel >= 3f;
                     GUI.enabled = !inTraining && !onMission && !maxLevel;
-                    if (GUILayout.Button("Train", GUILayout.Width(70)))
+                    if (GUILayout.Button("Train", GUILayout.Width(actionButtonWidth)))
                     {
                         _pendingTrainKerbal = k;
                         _showTrainConfirm = true;
@@ -945,8 +690,8 @@ namespace RosterRotation
                     GUI.enabled = true;
                     GUI.enabled = !inTraining && !onMission && !row.InTrainingLockout;
                     if (row.InTrainingLockout)
-                        GUILayout.Label("Service commitment", GUILayout.Width(70));
-                    else if (GUILayout.Button("Retire", GUILayout.Width(70)))
+                        GUILayout.Button("Committed", GUILayout.Width(actionButtonWidth));
+                    else if (GUILayout.Button("Retire", GUILayout.Width(actionButtonWidth)))
                     {
                         DoRetire(k, r);
                         InvalidateUICaches();
@@ -961,7 +706,7 @@ namespace RosterRotation
                     bool cantAfford = recallCost > 0 && curFunds < recallCost;
                     GUI.enabled = !atCap && !noStar && !cantAfford;
                     string btnLabel = noStar ? "No Stars" : (recallCost > 0 ? $"Recall √{recallCost:N0}" : "Recall");
-                    if (GUILayout.Button(btnLabel, GUILayout.Width(noStar ? 80 : 130)))
+                    if (GUILayout.Button(btnLabel, GUILayout.Width(noStar ? actionButtonWidth : 130f)))
                     {
                         DoRecall(k, r, row.EffectiveStars);
                         InvalidateUICaches();
@@ -1029,8 +774,10 @@ namespace RosterRotation
             foreach (var k in roster.Crew)
             {
                 if (k == null || !k.inactive || k.inactiveTimeEnd <= now) continue;
+                if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
-                string lbl = r != null ? TrainingLabel(r.Training, r.TrainingTargetLevel) : "Inactive";
+                if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
+                string lbl = TrainingLabel(r.Training, r.TrainingTargetLevel);
                 double rem = Math.Max(0, k.inactiveTimeEnd - now);
 
                 GUILayout.BeginHorizontal();
@@ -1090,9 +837,32 @@ namespace RosterRotation
             if (GUILayout.Toggle(_acOverlay == AcOverlay.Applicants,  "📋 Applicants",    "Button", GUILayout.Width(160))) _acOverlay = AcOverlay.Applicants;
             if (GUILayout.Toggle(_acOverlay == AcOverlay.Training,    "🎓 Send Training", "Button", GUILayout.Width(160))) _acOverlay = AcOverlay.Training;
             if (GUILayout.Toggle(_acOverlay == AcOverlay.ForceRetire, "🚪 Force Retire",  "Button", GUILayout.Width(160))) _acOverlay = AcOverlay.ForceRetire;
+
+            bool hallAvailable = HallOfHistoryWindow.IsAvailable;
+            bool hallOpen = HallOfHistoryWindow.IsOpen;
+            GUI.enabled = hallAvailable;
+            string hallLabel = hallOpen ? "🏛 Close Hall" : "🏛 Open Hall";
+            if (GUILayout.Button(hallLabel, GUILayout.Width(160)))
+            {
+                if (hallOpen)
+                    HallOfHistoryWindow.HideWindow();
+                else
+                    HallOfHistoryWindow.ShowWindow(true);
+            }
+            GUI.enabled = true;
+
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("✕ Close", GUILayout.Width(80))) _acOverlay = AcOverlay.None;
             GUILayout.EndHorizontal();
+
+            if (!hallAvailable)
+            {
+                Color prev = GUI.color;
+                GUI.color = new Color(1f, 0.95f, 0.65f);
+                GUILayout.Label("Hall of History is still initializing.");
+                GUI.color = prev;
+            }
+
             GUILayout.Space(6);
 
             if (roster == null) { GUILayout.Label("Roster unavailable."); GUI.DragWindow(); return; }
@@ -1134,7 +904,7 @@ namespace RosterRotation
                 {
                     k.type = ProtoCrewMember.KerbalType.Crew;
                     k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-                    try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                    SaveScheduler.RequestSave("hire applicant");
                     InvalidateUICaches();
                     ACPatches.ForceRefresh();
                 }
@@ -1188,8 +958,9 @@ namespace RosterRotation
             foreach (var k in roster.Crew)
             {
                 if (k == null || !k.inactive || k.inactiveTimeEnd <= now) continue;
+                if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
-                if (r == null || r.Training == TrainingType.None) continue;
+                if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
                 double rem = Math.Max(0, k.inactiveTimeEnd - now);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"⏳ {k.name}", GUILayout.Width(180));
@@ -1258,13 +1029,15 @@ namespace RosterRotation
                 GUILayout.Label(k.name, GUILayout.Width(200));
                 GUILayout.Label(k.trait, GUILayout.Width(100));
                 GUILayout.Label($"L{(int)k.experienceLevel}", GUILayout.Width(60));
-                GUILayout.Label($"{r?.Flights ?? 0}", GUILayout.Width(50));
+                GUILayout.Label($"{row.DisplayFlights}", GUILayout.Width(50));
                 GUILayout.Label(row.AgeText, GUILayout.Width(55));
                 GUILayout.Label(row.Status, GUILayout.Width(170));
                 GUILayout.FlexibleSpace();
 
                 GUI.enabled = !onMission && !inTraining && !row.InTrainingLockout;
-                if (GUILayout.Button(row.InTrainingLockout ? "Committed" : "Retire", GUILayout.Width(80)))
+                if (row.InTrainingLockout)
+                    GUILayout.Button("Committed", GUILayout.Width(80));
+                else if (GUILayout.Button("Retire", GUILayout.Width(80)))
                 {
                     DoRetire(k, r);
                     InvalidateUICaches();
@@ -1305,7 +1078,7 @@ namespace RosterRotation
                         4f, ScreenMessageStyle.UPPER_CENTER);
                     return;
                 }
-                try { Funding.Instance?.AddFunds(-recallCost, TransactionReasons.CrewRecruited); } catch { }
+                try { Funding.Instance?.AddFunds(-recallCost, TransactionReasons.CrewRecruited); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1081", "Suppressed exception in Mod.cs:1081", ex); }
             }
 
             r.Retired = false;
@@ -1316,10 +1089,11 @@ namespace RosterRotation
             }
             k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
             if (!string.IsNullOrEmpty(r.OriginalTrait)) k.trait = r.OriginalTrait;
-            try { k.experienceLevel = effStars; } catch { }
+            try { k.experienceLevel = effStars; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1092", "Suppressed exception in Mod.cs:1092", ex); }
             double sec = 30.0 * RosterRotationState.DaySeconds;
             k.inactive        = true;
             k.inactiveTimeEnd = Planetarium.GetUniversalTime() + sec;
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(k.name);
             r.Training            = TrainingType.RecallRefresher;
             r.TrainingTargetLevel = 0;
             RosterRotationState.InvalidateRetiredCache();
@@ -1341,10 +1115,7 @@ namespace RosterRotation
         // ── Training execution ─────────────────────────────────────────────────
         private static double CalcTrainingDays(ProtoCrewMember k, int targetLevel)
         {
-            double baseDays = targetLevel * 30.0;
-            float stupidity = Mathf.Clamp01(k.stupidity);
-            double extraFrac = UnityEngine.Random.value * stupidity * 0.5;
-            return baseDays * (1.0 + extraFrac);
+            return CareerRules.CalculateTrainingDays(k != null ? k.stupidity : 0f, targetLevel, UnityEngine.Random.value);
         }
 
         private void ExecuteTraining(ProtoCrewMember k, int targetLevel, double fCost, double rCost)
@@ -1355,7 +1126,7 @@ namespace RosterRotation
                 Funding.Instance?.AddFunds(-fCost, TransactionReasons.CrewRecruited);
                 ResearchAndDevelopment.Instance?.AddScience((float)-rCost, TransactionReasons.CrewRecruited);
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1132", "Suppressed exception in Mod.cs:1132", ex); }
 
             double trainingDays = CalcTrainingDays(k, targetLevel);
             double sec = trainingDays * RosterRotationState.DaySeconds;
@@ -1371,7 +1142,7 @@ namespace RosterRotation
                 5f, ScreenMessageStyle.UPPER_CENTER);
 
             InvalidateUICaches();
-            try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+            SaveScheduler.RequestSave("start training");
             ACPatches.ForceRefresh();
         }
 
@@ -1442,25 +1213,33 @@ namespace RosterRotation
                 bool retired = r != null && r.Retired;
                 bool hasFlown = r != null && r.LastFlightUT > 0;
                 bool onVacation = CrewRandRAdapter.IsOnVacationByName(k.name, now);
-                bool isDead = k.rosterStatus == ProtoCrewMember.RosterStatus.Dead
+                bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
+                bool inTraining = r != null && r.Training != TrainingType.None && k.inactive && k.inactiveTimeEnd > now;
+                bool isLost = k.rosterStatus == ProtoCrewMember.RosterStatus.Dead
                            || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing
-                           || (r != null && r.DeathUT > 0 && !retired);
+                           || (r != null && r.DeathUT > 0);
 
                 switch (tab)
                 {
-                    case Tab.Eligible: if (isDead || retired || onVacation || !hasFlown) continue; break;
-                    case Tab.Active:   if (isDead || retired || onVacation || hasFlown) continue; break;
-                    case Tab.RandR:    if (isDead || retired || !onVacation) continue; break;
-                    case Tab.Retired:  if (!retired) continue; break;
+                    case Tab.Active:   if (isLost || retired || onVacation || onMission || inTraining) continue; break;
+                    case Tab.Assigned: if (isLost || retired || !onMission) continue; break;
+                    case Tab.RandR:    if (isLost || retired || !onVacation) continue; break;
+                    case Tab.Retired:  if (!retired || isLost) continue; break;
+                    case Tab.Lost:     if (!isLost) continue; break;
                 }
+
+                int displayFlights = GetDisplayedFlights(k, r);
 
                 var row = new RosterRowData();
                 row.Kerbal = k;
                 row.Record = r;
                 row.Retired = retired;
-                row.HasFlown = hasFlown;
+                row.HasFlown = hasFlown || displayFlights > 0;
+                row.IsLost = isLost;
+                row.IsAssigned = onMission;
                 row.Status = BuildStatusString(k, r, now, hasFlown, retired);
                 row.AgeText = GetAgeDisplay(r, now);
+                row.DisplayFlights = displayFlights;
                 row.EffectiveStars = retired ? RosterRotationState.GetRetiredEffectiveStars(k, r, now) : 0;
                 row.InTrainingLockout = r != null && r.TrainingEndUT > 0
                     && (now - r.TrainingEndUT) < RosterRotationState.YearSeconds;
@@ -1513,6 +1292,7 @@ namespace RosterRotation
                 row.Record = r;
                 row.Status = BuildStatusString(k, r, now, r != null && r.LastFlightUT > 0, false);
                 row.AgeText = GetAgeDisplay(r, now);
+                row.DisplayFlights = GetDisplayedFlights(k, r);
                 row.InTrainingLockout = r != null && r.TrainingEndUT > 0
                     && (now - r.TrainingEndUT) < RosterRotationState.YearSeconds;
                 _cachedRetireRows.Add(row);
@@ -1539,6 +1319,8 @@ namespace RosterRotation
                 string ageStr = age >= 0 ? $"Age {age}, " : "";
                 string dateStr = RosterRotationState.FormatGameDateYD(r.DeathUT);
                 bool retiredDeath = (r.RetiredUT > 0) && (r.DeathUT >= r.RetiredUT - 1);
+                if (r.DiedOnMission)
+                    return $"Died on mission {ageStr}{dateStr}";
                 return retiredDeath ? $"Died {ageStr}{dateStr}" : $"K.I.A. {ageStr}{dateStr}";
             }
             if (retired)
@@ -1551,25 +1333,686 @@ namespace RosterRotation
                 double rem = k.inactiveTimeEnd - now;
                 return $"In {TrainingLabel(r.Training, r.TrainingTargetLevel)}  {RosterRotationState.FormatCountdown(rem)}";
             }
+            if (k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
+            {
+                if (TryGetAssignedVesselName(k, out var vesselName))
+                    return "ASSIGNED: " + vesselName;
+                return "ASSIGNED";
+            }
             if (k.inactive && k.inactiveTimeEnd > now)
                 return $"INACTIVE ({RosterRotationState.FormatCountdown(k.inactiveTimeEnd - now)})";
             if (CrewRandRAdapter.TryGetVacationUntilByName(k.name, out var vacUntil) && vacUntil > now)
                 return $"R&R ({FormatTime(vacUntil - now)})";
-            return hasFlown ? "ELIGIBLE" : "ACTIVE";
+            return "AVAILABLE";
+        }
+
+        private static bool TryGetAssignedVesselName(ProtoCrewMember k, out string vesselName)
+        {
+            vesselName = null;
+            if (k == null || string.IsNullOrEmpty(k.name)) return false;
+
+            try
+            {
+                foreach (var vessel in FlightGlobals.Vessels)
+                {
+                    if (vessel == null) continue;
+                    try
+                    {
+                        var crew = vessel.GetVesselCrew();
+                        if (crew == null) continue;
+                        if (crew.Any(c => c != null && string.Equals(c.name, k.name, StringComparison.Ordinal)))
+                        {
+                            vesselName = vessel.vesselName;
+                            return !string.IsNullOrEmpty(vesselName);
+                        }
+                    }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1372", "Suppressed exception in Mod.cs:1372", ex); }
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1375", "Suppressed exception in Mod.cs:1375", ex); }
+
+            try
+            {
+                var protoVessels = HighLogic.CurrentGame?.flightState?.protoVessels as System.Collections.IEnumerable;
+                if (protoVessels == null) return false;
+                foreach (var pv in protoVessels)
+                {
+                    if (pv == null) continue;
+                    try
+                    {
+                        var pvType = pv.GetType();
+                        var getCrew = pvType.GetMethod("GetVesselCrew", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var crewRaw = getCrew?.Invoke(pv, null) as System.Collections.IEnumerable;
+                        if (crewRaw == null) continue;
+
+                        bool found = false;
+                        foreach (var crewObj in crewRaw)
+                        {
+                            var crew = crewObj as ProtoCrewMember;
+                            if (crew == null) continue;
+                            if (!string.Equals(crew.name, k.name, StringComparison.Ordinal)) continue;
+                            found = true;
+                            break;
+                        }
+                        if (!found) continue;
+
+                        var vesselNameField = pvType.GetField("vesselName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        vesselName = vesselNameField?.GetValue(pv) as string;
+                        if (string.IsNullOrEmpty(vesselName))
+                        {
+                            var vesselNameProp = pvType.GetProperty("vesselName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            vesselName = vesselNameProp?.GetValue(pv, null) as string;
+                        }
+                        return !string.IsNullOrEmpty(vesselName);
+                    }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1411", "Suppressed exception in Mod.cs:1411", ex); }
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1414", "Suppressed exception in Mod.cs:1414", ex); }
+
+            return false;
+        }
+
+        private static MethodInfo GetFlightTrackerFlightsMethod()
+        {
+            if (_searchedFlightTrackerFlightsMethod) return _cachedFlightTrackerFlightsMethod;
+            _searchedFlightTrackerFlightsMethod = true;
+
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (asm == null) continue;
+                    Type[] types;
+                    try { types = asm.GetTypes(); }
+                    catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                    catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        if (t == null) continue;
+                        MethodInfo mi = null;
+                        try
+                        {
+                            mi = t.GetMethod("GetNumberOfFlights",
+                                BindingFlags.Public | BindingFlags.Instance,
+                                null,
+                                new[] { typeof(string) },
+                                null);
+                            if (mi != null)
+                            {
+                                _cachedFlightTrackerFlightsMethod = mi;
+                                _cachedFlightTrackerApiType = t;
+                                _cachedFlightTrackerApiInstanceProperty = t.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                                _cachedFlightTrackerApiInstanceField = t.GetField("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                                RRLog.Info($"[EAC] FlightTracker API detected: {t.FullName}.GetNumberOfFlights(string) [instance]");
+                                return _cachedFlightTrackerFlightsMethod;
+                            }
+
+                            mi = t.GetMethod("GetNumberOfFlights",
+                                BindingFlags.Public | BindingFlags.Static,
+                                null,
+                                new[] { typeof(string) },
+                                null);
+                            if (mi != null)
+                            {
+                                _cachedFlightTrackerFlightsMethod = mi;
+                                _cachedFlightTrackerApiType = t;
+                                RRLog.Info($"[EAC] FlightTracker API detected: {t.FullName}.GetNumberOfFlights(string) [static]");
+                                return _cachedFlightTrackerFlightsMethod;
+                            }
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1468", "Suppressed exception in Mod.cs:1468", ex); }
+                    }
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1472", "Suppressed exception in Mod.cs:1472", ex); }
+
+            return null;
+        }
+
+        private static object GetFlightTrackerApiInstance()
+        {
+            try
+            {
+                if (_cachedFlightTrackerApiInstanceProperty != null)
+                    return _cachedFlightTrackerApiInstanceProperty.GetValue(null, null);
+                if (_cachedFlightTrackerApiInstanceField != null)
+                    return _cachedFlightTrackerApiInstanceField.GetValue(null);
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1486", "Suppressed exception in Mod.cs:1486", ex); }
+            return null;
+        }
+
+        private static bool ResolveFlightTrackerStore()
+        {
+            if (_searchedFlightTrackerStore)
+                return _cachedFlightTrackerStoreType != null && _cachedFlightTrackerFlightsField != null;
+
+            _searchedFlightTrackerStore = true;
+
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (asm == null) continue;
+                    Type[] types;
+                    try { types = asm.GetTypes(); }
+                    catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                    catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        if (t == null) continue;
+
+                        FieldInfo flightsField = null;
+                        try { flightsField = t.GetField("Flights", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1513", "Suppressed exception in Mod.cs:1513", ex); }
+                        if (flightsField == null) continue;
+
+                        FieldInfo instanceField = null;
+                        PropertyInfo instanceProp = null;
+                        try { instanceField = t.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic); }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1519", "Suppressed exception in Mod.cs:1519", ex); }
+                        if (instanceField == null)
+                        {
+                            try { instanceProp = t.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic); }
+                            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1523", "Suppressed exception in Mod.cs:1523", ex); }
+                        }
+
+                        if (instanceField == null && instanceProp == null) continue;
+
+                        _cachedFlightTrackerStoreType = t;
+                        _cachedFlightTrackerStoreInstanceField = instanceField;
+                        _cachedFlightTrackerStoreInstanceProperty = instanceProp;
+                        _cachedFlightTrackerFlightsField = flightsField;
+                        RRLog.Info($"[EAC] FlightTracker store detected: {t.FullName}.Flights");
+                        return true;
+                    }
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1537", "Suppressed exception in Mod.cs:1537", ex); }
+
+            return false;
+        }
+
+        private static bool TryGetFlightTrackerFlightsDictionary(out IDictionary dict, out string reason)
+        {
+            dict = null;
+            reason = null;
+
+            try
+            {
+                if (!ResolveFlightTrackerStore())
+                {
+                    reason = "store type not found";
+                    return false;
+                }
+
+                object instance = null;
+                if (_cachedFlightTrackerStoreInstanceProperty != null)
+                    instance = _cachedFlightTrackerStoreInstanceProperty.GetValue(null, null);
+                else if (_cachedFlightTrackerStoreInstanceField != null)
+                    instance = _cachedFlightTrackerStoreInstanceField.GetValue(null);
+
+                if (instance == null)
+                {
+                    reason = "store instance unavailable";
+                    return false;
+                }
+
+                dict = _cachedFlightTrackerFlightsField.GetValue(instance) as IDictionary;
+                if (dict == null)
+                {
+                    reason = "Flights dictionary unavailable";
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+        }
+
+        private static bool TryGetFlightTrackerFlights(string kerbalName, out int flights, out string reason)
+        {
+            flights = 0;
+            reason = null;
+            if (string.IsNullOrEmpty(kerbalName))
+            {
+                reason = "kerbal name missing";
+                return false;
+            }
+
+            try
+            {
+                var api = GetFlightTrackerFlightsMethod();
+                if (api != null)
+                {
+                    object target = null;
+                    if (!api.IsStatic)
+                    {
+                        target = GetFlightTrackerApiInstance();
+                        if (target == null)
+                        {
+                            reason = "FlightTracker API instance unavailable";
+                        }
+                        else
+                        {
+                            object raw = api.Invoke(target, new object[] { kerbalName });
+                            if (raw != null)
+                            {
+                                flights = Math.Max(0, Convert.ToInt32(raw));
+                                reason = "api";
+                                return true;
+                            }
+
+                            reason = "FlightTracker API returned null";
+                        }
+                    }
+                    else
+                    {
+                        object raw = api.Invoke(null, new object[] { kerbalName });
+                        if (raw != null)
+                        {
+                            flights = Math.Max(0, Convert.ToInt32(raw));
+                            reason = "api";
+                            return true;
+                        }
+
+                        reason = "FlightTracker API returned null";
+                    }
+                }
+                else
+                {
+                    reason = "FlightTracker API not found";
+                }
+            }
+            catch (Exception ex)
+            {
+                reason = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            IDictionary dict;
+            string dictReason;
+            if (TryGetFlightTrackerFlightsDictionary(out dict, out dictReason))
+            {
+                try
+                {
+                    object raw = dict.Contains(kerbalName) ? dict[kerbalName] : 0;
+                    flights = Math.Max(0, Convert.ToInt32(raw));
+                    reason = "store";
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    reason = ex.GetType().Name + ": " + ex.Message;
+                    return false;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(dictReason))
+                reason = string.IsNullOrEmpty(reason) ? dictReason : (reason + "; " + dictReason);
+            return false;
+        }
+
+        private static bool TrySetFlightTrackerFlights(string kerbalName, int newValue, out int previousValue, out string reason)
+        {
+            previousValue = 0;
+            reason = null;
+            IDictionary dict;
+            if (!TryGetFlightTrackerFlightsDictionary(out dict, out reason))
+                return false;
+
+            try
+            {
+                previousValue = dict.Contains(kerbalName) ? Math.Max(0, Convert.ToInt32(dict[kerbalName])) : 0;
+                dict[kerbalName] = Math.Max(0, newValue);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+        }
+
+        private static void LogDisplayedFlightsChoice(ProtoCrewMember k, int eacFlights, bool ftAvailable, int ftFlights, string ftReason, string usingSource)
+        {
+            if (!RRLog.VerboseEnabled || k == null || string.IsNullOrEmpty(k.name)) return;
+
+            string ftText = ftAvailable ? ftFlights.ToString() : ("unavailable: " + (string.IsNullOrEmpty(ftReason) ? "unknown" : ftReason));
+            RRLog.VerboseOnce(
+                "DisplayedFlights:" + k.name + ":" + eacFlights + ":" + ftText + ":" + usingSource,
+                $"[EAC] Flight comparison for {k.name}: EAC={eacFlights}, FlightTracker={ftText}; using={usingSource}");
+        }
+
+        private static int GetDisplayedFlights(ProtoCrewMember k, RosterRotationState.KerbalRecord r)
+        {
+            int fallback = Math.Max(0, r?.Flights ?? 0);
+            if (k == null || string.IsNullOrEmpty(k.name)) return fallback;
+
+            try
+            {
+                int ftFlights;
+                string ftReason;
+                if (TryGetFlightTrackerFlights(k.name, out ftFlights, out ftReason))
+                {
+                    LogDisplayedFlightsChoice(k, fallback, true, ftFlights, ftReason, "FlightTracker");
+                    return Math.Max(0, ftFlights);
+                }
+
+                LogDisplayedFlightsChoice(k, fallback, false, 0, ftReason, "EAC");
+                return fallback;
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn($"FlightTracker lookup failed for {k?.name}: {ex.Message}");
+                LogDisplayedFlightsChoice(k, fallback, false, 0, ex.Message, "EAC");
+                return fallback;
+            }
+        }
+
+        private void MaybeRunPendingFlightTrackerSync()
+        {
+            if (_flightTrackerSyncExecutedThisSession) return;
+            if (!RosterRotationState.SyncFlightTrackerFromEacOnce) return;
+            if (!RRLog.VerboseEnabled) return;
+
+            _flightTrackerSyncExecutedThisSession = true;
+            RunFlightTrackerSyncFromEacOnce();
+        }
+
+        private void RunFlightTrackerSyncFromEacOnce()
+        {
+            int compared = 0;
+            int updated = 0;
+            int skipped = 0;
+
+            RRLog.Verbose("[EAC] One-time FlightTracker sync requested by save flag. Starting EAC -> FlightTracker comparison.");
+
+            try
+            {
+                foreach (var kvp in RosterRotationState.Records)
+                {
+                    string kerbalName = kvp.Key;
+                    var rec = kvp.Value;
+                    if (string.IsNullOrEmpty(kerbalName) || rec == null) continue;
+
+                    int eacFlights = Math.Max(0, rec.Flights);
+                    int ftFlights;
+                    string ftReason;
+                    bool ftAvailable = TryGetFlightTrackerFlights(kerbalName, out ftFlights, out ftReason);
+
+                    compared++;
+
+                    if (!ftAvailable)
+                    {
+                        RRLog.Verbose($"[EAC] FlightTracker sync skipped for {kerbalName}: EAC={eacFlights}, FlightTracker unavailable ({ftReason ?? "unknown"}).");
+                        skipped++;
+                        continue;
+                    }
+
+                    RRLog.Verbose($"[EAC] FlightTracker sync compare for {kerbalName}: EAC={eacFlights}, FlightTracker={ftFlights}.");
+
+                    if (eacFlights <= ftFlights)
+                        continue;
+
+                    int previousValue;
+                    string setReason;
+                    if (TrySetFlightTrackerFlights(kerbalName, eacFlights, out previousValue, out setReason))
+                    {
+                        updated++;
+                        RRLog.Verbose($"[EAC] Synced FlightTracker flights for {kerbalName}: FlightTracker={previousValue} -> EAC={eacFlights}.");
+                    }
+                    else
+                    {
+                        skipped++;
+                        RRLog.Verbose($"[EAC] Failed to sync FlightTracker flights for {kerbalName}: EAC={eacFlights}, FlightTracker={ftFlights}, reason={setReason ?? "unknown"}.");
+                    }
+                }
+            }
+            finally
+            {
+                RosterRotationState.SyncFlightTrackerFromEacOnce = false;
+                RRLog.Verbose($"[EAC] One-time FlightTracker sync finished. Compared={compared}, Updated={updated}, Skipped={skipped}. Save flag reset to False.");
+                SaveScheduler.RequestImmediateSave("FlightTracker sync");
+                RRLog.Verbose("[EAC] Saved persistent.sfs after one-time FlightTracker sync.");
+            }
+        }
+
+        private const float TraitGrowthCourageCap = 0.90f;
+        private const float TraitGrowthStupidityFloor = 0.10f;
+        private const float TraitGrowthVeteranBaseChance = 0.25f;
+        private const float TraitGrowthVeteranFlightBonusPerFlight = 0.01f;
+        private const float TraitGrowthVeteranFlightBonusCap = 0.10f;
+        private const float TraitGrowthVeteranHourBonusPerTenHours = 0.01f;
+        private const float TraitGrowthVeteranHourBonusCap = 0.10f;
+        private const float TraitGrowthVeteranTotalBonusCap = 0.15f;
+        private const float TraitGrowthVeteranDelta = 0.02f;
+
+        public static void TryApplyVeteranTraitGrowthOnRecovery(ProtoCrewMember k, RosterRotationState.KerbalRecord rec, Vessel vessel, double nowUT)
+        {
+            if (!RosterRotationState.TraitGrowthEnabled) return;
+            if (k == null || rec == null) return;
+            if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) return;
+            if (rec.Retired) return;
+            if (k.type != ProtoCrewMember.KerbalType.Crew) return;
+            if (k.experienceLevel < 3)
+            {
+                if (RRLog.VerboseEnabled)
+                    RRLog.Verbose($"[EAC] Trait growth (veteran) skipped for {k.name}: experienceLevel={k.experienceLevel} (< 3).");
+                return;
+            }
+
+            int eacFlights = Math.Max(0, rec.Flights);
+            int ftFlights;
+            string ftFlightsReason;
+            bool ftFlightsAvailable = TryGetFlightTrackerFlights(k.name, out ftFlights, out ftFlightsReason);
+            int flights = ftFlightsAvailable ? Math.Max(eacFlights, Math.Max(0, ftFlights)) : eacFlights;
+
+            double ftHours;
+            string ftHoursReason;
+            bool ftHoursAvailable = TryGetFlightTrackerRecordedHours(k.name, out ftHours, out ftHoursReason);
+            double currentMissionHours = vessel != null ? Math.Max(0.0, vessel.missionTime / 3600.0) : 0.0;
+            double totalHours = (ftHoursAvailable ? Math.Max(0.0, ftHours) : 0.0) + currentMissionHours;
+
+            float flightBonus = Mathf.Min(TraitGrowthVeteranFlightBonusCap, flights * TraitGrowthVeteranFlightBonusPerFlight);
+            float hourBonus = Mathf.Min(TraitGrowthVeteranHourBonusCap, (float)(Math.Floor(totalHours / 10.0) * TraitGrowthVeteranHourBonusPerTenHours));
+            float serviceBonus = Mathf.Min(TraitGrowthVeteranTotalBonusCap, flightBonus + hourBonus);
+            float courageChance = Mathf.Clamp01((TraitGrowthVeteranBaseChance + serviceBonus) * Mathf.Clamp01(1f - k.courage));
+            float stupidityChance = Mathf.Clamp01((TraitGrowthVeteranBaseChance + serviceBonus) * Mathf.Clamp01(k.stupidity));
+
+            ApplyTraitGrowthRolls(
+                k,
+                courageChance,
+                stupidityChance,
+                TraitGrowthVeteranDelta,
+                TraitGrowthVeteranDelta,
+                "Veteran service",
+                $"[EAC] Trait growth (veteran) for {k.name}: EACFlights={eacFlights}, FTFlights={(ftFlightsAvailable ? ftFlights.ToString() : "unavailable:" + (ftFlightsReason ?? "unknown"))}, FTHours={(ftHoursAvailable ? ftHours.ToString("F2") : "unavailable:" + (ftHoursReason ?? "unknown"))}, CurrentMissionHours={currentMissionHours:F2}, TotalHours={totalHours:F2}, CourageChance={courageChance:P1}, StupidityChance={stupidityChance:P1}",
+                nowUT);
+        }
+
+        public static void TryApplyTrainingTraitGrowth(ProtoCrewMember k, RosterRotationState.KerbalRecord rec, int targetLevel, double nowUT)
+        {
+            if (!RosterRotationState.TraitGrowthEnabled) return;
+            if (k == null || rec == null) return;
+            if (targetLevel < 1 || targetLevel > 3) return;
+            if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) return;
+
+            float baseChance;
+            float delta;
+            switch (targetLevel)
+            {
+                case 1: baseChance = 0.15f; delta = 0.01f; break;
+                case 2: baseChance = 0.25f; delta = 0.015f; break;
+                default: baseChance = 0.35f; delta = 0.02f; break;
+            }
+
+            float courageChance = Mathf.Clamp01(baseChance * Mathf.Clamp01(1f - k.courage));
+            float stupidityChance = Mathf.Clamp01(baseChance * Mathf.Clamp01(k.stupidity));
+
+            ApplyTraitGrowthRolls(
+                k,
+                courageChance,
+                stupidityChance,
+                delta,
+                delta,
+                $"Level {targetLevel} training",
+                $"[EAC] Trait growth (training) for {k.name}: TargetLevel={targetLevel}, CourageChance={courageChance:P1}, StupidityChance={stupidityChance:P1}",
+                nowUT);
+        }
+
+        private static void ApplyTraitGrowthRolls(ProtoCrewMember k, float courageChance, float stupidityChance, float courageDelta, float stupidityDelta, string sourceLabel, string verbosePrefix, double nowUT)
+        {
+            if (k == null) return;
+
+            float oldCourage = Mathf.Clamp01(k.courage);
+            float oldStupidity = Mathf.Clamp01(k.stupidity);
+            float courageRoll = UnityEngine.Random.value;
+            float stupidityRoll = UnityEngine.Random.value;
+
+            bool courageSuccess = courageRoll < courageChance && oldCourage < TraitGrowthCourageCap;
+            bool stupiditySuccess = stupidityRoll < stupidityChance && oldStupidity > TraitGrowthStupidityFloor;
+
+            float newCourage = courageSuccess ? Mathf.Min(TraitGrowthCourageCap, oldCourage + courageDelta) : oldCourage;
+            float newStupidity = stupiditySuccess ? Mathf.Max(TraitGrowthStupidityFloor, oldStupidity - stupidityDelta) : oldStupidity;
+
+            if (RRLog.VerboseEnabled)
+            {
+                RRLog.Verbose(verbosePrefix +
+                    $", CourageRoll={courageRoll:F3}, StupidityRoll={stupidityRoll:F3}, CourageSuccess={courageSuccess}, StupiditySuccess={stupiditySuccess}, OldCourage={oldCourage:P0}, NewCourage={newCourage:P0}, OldStupidity={oldStupidity:P0}, NewStupidity={newStupidity:P0}");
+            }
+
+            if (!courageSuccess && !stupiditySuccess) return;
+
+            try { k.courage = newCourage; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1896", "Suppressed exception in Mod.cs:1896", ex); }
+            try { k.stupidity = newStupidity; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1897", "Suppressed exception in Mod.cs:1897", ex); }
+
+            var changes = new List<string>();
+            if (courageSuccess) changes.Add($"Courage {oldCourage:P0} to {newCourage:P0}");
+            if (stupiditySuccess) changes.Add($"Stupidity {oldStupidity:P0} to {newStupidity:P0}");
+
+            string body = $"{k.name} showed growth from {sourceLabel}: {string.Join(", ", changes.ToArray())}. ({RosterRotationState.FormatGameDate(nowUT)})";
+            RosterRotationState.PostNotification(
+                EACNotificationType.Training,
+                $"Trait Growth — {k.name}",
+                body,
+                MessageSystemButton.MessageButtonColor.GREEN,
+                MessageSystemButton.ButtonIcons.COMPLETE,
+                6f);
+        }
+
+        private static MethodInfo GetFlightTrackerMissionHoursMethod()
+        {
+            if (_searchedFlightTrackerMissionHoursMethod) return _cachedFlightTrackerMissionHoursMethod;
+            _searchedFlightTrackerMissionHoursMethod = true;
+
+            try
+            {
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    if (asm == null) continue;
+                    Type[] types;
+                    try { types = asm.GetTypes(); }
+                    catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                    catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        if (t == null) continue;
+                        try
+                        {
+                            var mi = t.GetMethod("GetRecordedMissionTimeHours", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
+                                  ?? t.GetMethod("GetRecordedMissionTimeHours", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null)
+                                  ?? t.GetMethod("GetRecordedMissionTimeSeconds", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
+                                  ?? t.GetMethod("GetRecordedMissionTimeSeconds", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
+                            if (mi == null) continue;
+
+                            _cachedFlightTrackerMissionHoursMethod = mi;
+                            if (_cachedFlightTrackerApiType == null)
+                            {
+                                _cachedFlightTrackerApiType = t;
+                                _cachedFlightTrackerApiInstanceProperty = t.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                                _cachedFlightTrackerApiInstanceField = t.GetField("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                            }
+                            RRLog.Info($"[EAC] FlightTracker time API detected: {t.FullName}.{mi.Name}(string) [{(mi.IsStatic ? "static" : "instance")}]");
+                            return _cachedFlightTrackerMissionHoursMethod;
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1949", "Suppressed exception in Mod.cs:1949", ex); }
+                    }
+                }
+            }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:1953", "Suppressed exception in Mod.cs:1953", ex); }
+
+            return null;
+        }
+
+        private static bool TryGetFlightTrackerRecordedHours(string kerbalName, out double hours, out string reason)
+        {
+            hours = 0.0;
+            reason = null;
+            if (string.IsNullOrEmpty(kerbalName))
+            {
+                reason = "kerbal name missing";
+                return false;
+            }
+
+            try
+            {
+                var api = GetFlightTrackerMissionHoursMethod();
+                if (api == null)
+                {
+                    reason = "FlightTracker time API not found";
+                    return false;
+                }
+
+                object target = null;
+                if (!api.IsStatic)
+                {
+                    target = GetFlightTrackerApiInstance();
+                    if (target == null)
+                    {
+                        reason = "FlightTracker API instance unavailable";
+                        return false;
+                    }
+                }
+
+                object raw = api.Invoke(target, new object[] { kerbalName });
+                if (raw == null)
+                {
+                    reason = "FlightTracker time API returned null";
+                    return false;
+                }
+
+                double value = Convert.ToDouble(raw);
+                if ((api.Name ?? string.Empty).IndexOf("Seconds", StringComparison.OrdinalIgnoreCase) >= 0)
+                    value /= 3600.0;
+
+                hours = Math.Max(0.0, value);
+                reason = "api";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
         }
 
         private static string TrainingLabel(TrainingType t, int targetLevel)
         {
-            if (t == TrainingType.InitialHire)       return "introductory training";
-            if (t == TrainingType.ExperienceUpgrade) return $"Level {targetLevel} training";
-            if (t == TrainingType.RecallRefresher)   return "refresher training";
-            return "training";
+            return CareerRules.GetTrainingLabel(t, targetLevel);
         }
 
         private static double TrainingFundsCost(double hireCost, int targetLevel)
-            => hireCost * RosterRotationState.TrainingFundsMultiplier * targetLevel;
+            => CareerRules.CalculateTrainingFundsCost(hireCost, RosterRotationState.TrainingFundsMultiplier, targetLevel);
         private static double TrainingRDCost(int targetLevel)
-            => RosterRotationState.TrainingRDPerStar * targetLevel;
+            => CareerRules.CalculateTrainingRDCost(RosterRotationState.TrainingRDPerStar, targetLevel);
 
         private void DrawHRule()
         {
@@ -1601,7 +2044,7 @@ namespace RosterRotation
                     var list = f?.GetValue(roster) as List<ProtoCrewMember>;
                     list?.Remove(applicant);
                 }
-                try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                SaveScheduler.RequestSave("reject applicant");
             }
             catch (Exception e) { RRLog.Error("RejectApplicant failed: " + e); }
         }
@@ -1652,7 +2095,7 @@ namespace RosterRotation
                     if (res is double d) return CacheHireCost(d, recruitCount, facLevel, nowRT);
                 }
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:2104", "Suppressed exception in Mod.cs:2104", ex); }
             return CacheHireCost(RosterRotationState.TrainingBaseFundsCost, GetRecruitCostInputCount(),
                 (float)ScenarioUpgradeableFacilities.GetFacilityLevel(SpaceCenterFacility.AstronautComplex), Time.realtimeSinceStartup);
         }
@@ -1734,33 +2177,35 @@ namespace RosterRotation
         internal static void AssignAgeOnHire(ProtoCrewMember k, RosterRotationState.KerbalRecord rec, double nowUT)
         {
             double yearSec = RosterRotationState.YearSeconds;
-            double r1 = 25.0 + UnityEngine.Random.value * 20.0;
-            double r2 = 25.0 + UnityEngine.Random.value * 20.0;
-            double ageYears = (r1 + r2) * 0.5;
-            double birthdayOffset = (0.15 + UnityEngine.Random.value * 0.70) * yearSec;
-            rec.BirthUT = nowUT - (ageYears * yearSec) - birthdayOffset;
-            rec.LastAgedYears = (int)((nowUT - rec.BirthUT) / yearSec);
-            int retireAge = RosterRotationState.RetirementAgeMin
-                + (int)(UnityEngine.Random.value * (RosterRotationState.RetirementAgeMax - RosterRotationState.RetirementAgeMin + 1));
-            rec.NaturalRetirementUT = rec.BirthUT + retireAge * yearSec;
+            AgeAssignmentResult result = CareerRules.CalculateAgeOnHire(
+                nowUT,
+                yearSec,
+                RosterRotationState.RetirementAgeMin,
+                RosterRotationState.RetirementAgeMax,
+                UnityEngine.Random.value,
+                UnityEngine.Random.value,
+                UnityEngine.Random.value,
+                UnityEngine.Random.value);
+            rec.BirthUT = result.BirthUT;
+            rec.LastAgedYears = result.LastAgedYears;
+            rec.NaturalRetirementUT = result.NaturalRetirementUT;
         }
 
         internal static void AssignAgeByExperience(ProtoCrewMember k, RosterRotationState.KerbalRecord rec, double nowUT)
         {
             double yearSec = RosterRotationState.YearSeconds;
-            int stars = (int)k.experienceLevel;
-            double ageMin, ageMax;
-            if      (stars >= 5) { ageMin = 45; ageMax = 51; }
-            else if (stars == 4) { ageMin = 38; ageMax = 46; }
-            else if (stars == 3) { ageMin = 35; ageMax = 42; }
-            else                 { ageMin = 25; ageMax = 35; }
-            double ageYears = ageMin + UnityEngine.Random.value * (ageMax - ageMin);
-            double birthdayOffset = (0.15 + UnityEngine.Random.value * 0.70) * yearSec;
-            rec.BirthUT = nowUT - (ageYears * yearSec) - birthdayOffset;
-            rec.LastAgedYears = (int)((nowUT - rec.BirthUT) / yearSec);
-            int retireAge = RosterRotationState.RetirementAgeMin
-                + (int)(UnityEngine.Random.value * (RosterRotationState.RetirementAgeMax - RosterRotationState.RetirementAgeMin + 1));
-            rec.NaturalRetirementUT = rec.BirthUT + retireAge * yearSec;
+            AgeAssignmentResult result = CareerRules.CalculateAgeByExperience(
+                k != null ? (int)k.experienceLevel : 0,
+                nowUT,
+                yearSec,
+                RosterRotationState.RetirementAgeMin,
+                RosterRotationState.RetirementAgeMax,
+                UnityEngine.Random.value,
+                UnityEngine.Random.value,
+                UnityEngine.Random.value);
+            rec.BirthUT = result.BirthUT;
+            rec.LastAgedYears = result.LastAgedYears;
+            rec.NaturalRetirementUT = result.NaturalRetirementUT;
         }
 
         // ── Aging checks ───────────────────────────────────────────────────────
@@ -1782,12 +2227,49 @@ namespace RosterRotation
                 int currentAge = RosterRotationState.GetKerbalAge(rec, nowUT);
                 if (currentAge < 0) continue;
 
-                if (rec.Retired && rec.DeathUT <= 0)
+                bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
+                if (onMission)
                 {
-                    anyDirty |= CheckRetiredDeath(k, rec, nowUT, currentAge);
+                    if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT)
+                    {
+                        rec.MissionStartUT = nowUT;
+                        anyDirty = true;
+                    }
+                }
+                else if (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0)
+                {
+                    rec.MissionStartUT = 0;
+                    rec.LastMissionDeathCheckUT = 0;
+                    anyDirty = true;
+                }
+
+                double effectiveRetireUT = rec.NaturalRetirementUT + rec.RetirementDelayYears * yearSec;
+                if (!rec.Retired)
+                {
+                    if (CheckAssignedMissionDeath(k, rec, nowUT, currentAge, effectiveRetireUT))
+                        anyDirty = true;
+
+                    if (rec.DeathUT > 0)
+                        continue;
+                }
+
+                if (rec.Retired)
+                {
+                    if (rec.DeathUT <= 0)
+                    {
+                        if (CheckRetiredDeath(k, rec, nowUT, currentAge))
+                            anyDirty = true;
+
+                        if (rec.DeathUT <= 0
+                        && RetiredKerbalCleanupService.IsRetiredPurgeDue(k, rec, nowUT))
+                        {
+                            if (RetiredKerbalCleanupService.RequestAutoCleanupSave(k.name))
+                                anyDirty = true;
+                        }
+                    }
+
                     continue;
                 }
-                if (rec.Retired) continue;
                 if (currentAge <= rec.LastAgedYears) continue;
                 rec.LastAgedYears = currentAge;
                 anyDirty = true;
@@ -1802,7 +2284,6 @@ namespace RosterRotation
                         MessageSystemButton.ButtonIcons.MESSAGE, 5f);
                 }
 
-                double effectiveRetireUT = rec.NaturalRetirementUT + rec.RetirementDelayYears * yearSec;
                 if (nowUT >= effectiveRetireUT)
                 {
                     if (k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
@@ -1856,29 +2337,16 @@ namespace RosterRotation
             }
 
             if (anyDirty)
-                try { GamePersistence.SaveGame("persistent", HighLogic.SaveFolder, SaveMode.OVERWRITE); } catch { }
+                SaveScheduler.RequestSave("aging and retirement");
         }
 
         private static double MoraleRetireProbability(ProtoCrewMember k,
             RosterRotationState.KerbalRecord rec, double nowUT, int stars)
         {
-            double baseP;
-            switch (stars)
-            {
-                case 0: baseP = 0.08; break;
-                case 1: baseP = 0.05; break;
-                case 2: baseP = 0.03; break;
-                default: baseP = 0.015; break;
-            }
             double yearSec = RosterRotationState.YearSeconds;
-            double inactive = rec.LastFlightUT > 0 ? (nowUT - rec.LastFlightUT) / yearSec : 999;
-            double inactMul;
-            if      (inactive >= 3.0) inactMul = 4.0;
-            else if (inactive >= 2.0) inactMul = 2.5;
-            else if (inactive >= 1.0) inactMul = 1.5;
-            else                      inactMul = 1.0;
-            double actRed = Math.Min(rec.Flights / 15.0, 0.75);
-            return baseP * inactMul * (1.0 - actRed);
+            double inactiveYears = rec != null && rec.LastFlightUT > 0 ? (nowUT - rec.LastFlightUT) / yearSec : 999;
+            int displayedFlights = GetDisplayedFlights(k, rec);
+            return CareerRules.CalculateMoraleRetireProbability(stars, inactiveYears, displayedFlights);
         }
 
         private void FireRetirement(ProtoCrewMember k, RosterRotationState.KerbalRecord rec,
@@ -1894,6 +2362,7 @@ namespace RosterRotation
             k.inactive        = true;
             k.inactiveTimeEnd = nowUT + RosterRotationState.YearSeconds * 1000.0;
             RosterRotationState.InvalidateRetiredCache();
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(k.name);
 
             int frAge = RosterRotationState.GetKerbalAge(rec, nowUT);
             string frAgeS = frAge >= 0 ? $" at age {frAge}" : "";
@@ -1921,7 +2390,9 @@ namespace RosterRotation
             if (UnityEngine.Random.value >= pDeath) return true;
 
             rec.DeathUT = nowUT;
-            try { k.rosterStatus = ProtoCrewMember.RosterStatus.Dead; } catch { }
+            rec.DiedOnMission = false;
+            rec.PendingMissionDeath = false;
+            try { k.rosterStatus = ProtoCrewMember.RosterStatus.Dead; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:2412", "Suppressed exception in Mod.cs:2412", ex); }
 
             if (RosterRotationState.DeathNotificationsEnabled)
                 RosterRotationState.PostNotification(EACNotificationType.Death,
@@ -1933,53 +2404,377 @@ namespace RosterRotation
             _pendingForceRefresh = true;
             return true;
         }
-    }
 
-    // ── AC "Astronaut Management" button ────────────────────────────────────────
-    [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
-    public class RosterRotationACButtons : MonoBehaviour
-    {
-        private GUIStyle _boldBtn;
-
-        private void OnGUI()
+        private static bool TryDetachKerbalFromAssignedVessel(ProtoCrewMember k, out string vesselName)
         {
-            if (HighLogic.LoadedScene != GameScenes.SPACECENTER) return;
-            if (!ACOpenCache.IsOpen) return;
+            vesselName = null;
+            if (k == null || string.IsNullOrEmpty(k.name)) return false;
 
-            if (_boldBtn == null)
+            try
             {
-                _boldBtn = new GUIStyle(GUI.skin.button);
-                _boldBtn.fontStyle = FontStyle.Bold;
-                _boldBtn.fontSize = 16;
-                _boldBtn.wordWrap = false;
+                var protoVessels = HighLogic.CurrentGame?.flightState?.protoVessels as System.Collections.IEnumerable;
+                if (protoVessels == null) return false;
+
+                foreach (var pv in protoVessels)
+                {
+                    if (pv == null) continue;
+
+                    bool foundCrew = false;
+                    try
+                    {
+                        var pvType = pv.GetType();
+                        var getCrew = pvType.GetMethod("GetVesselCrew", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var crewRaw = getCrew?.Invoke(pv, null) as System.Collections.IEnumerable;
+                        if (crewRaw == null) continue;
+
+                        foreach (var crewObj in crewRaw)
+                        {
+                            var crew = crewObj as ProtoCrewMember;
+                            string crewName = crew != null ? crew.name : null;
+                            if (string.IsNullOrEmpty(crewName) && crewObj != null)
+                            {
+                                var ct = crewObj.GetType();
+                                crewName = ct.GetField("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(crewObj) as string;
+                                if (string.IsNullOrEmpty(crewName))
+                                    crewName = ct.GetProperty("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(crewObj, null) as string;
+                            }
+                            if (!string.Equals(crewName, k.name, StringComparison.Ordinal)) continue;
+                            foundCrew = true;
+                            break;
+                        }
+                        if (!foundCrew) continue;
+
+                        vesselName = pvType.GetField("vesselName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(pv) as string;
+                        if (string.IsNullOrEmpty(vesselName))
+                            vesselName = pvType.GetProperty("vesselName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(pv, null) as string;
+
+                        object partsObj = pvType.GetField("protoPartSnapshots", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(pv);
+                        if (partsObj == null)
+                            partsObj = pvType.GetProperty("protoPartSnapshots", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(pv, null);
+
+                        var parts = partsObj as System.Collections.IEnumerable;
+                        if (parts == null) return false;
+
+                        bool removed = false;
+                        int removedConfigCrew = 0;
+                        int removedCachedCrew = 0;
+                        foreach (var partObj in parts)
+                        {
+                            if (partObj == null) continue;
+                            var pt = partObj.GetType();
+                            object crewListObj = pt.GetField("protoModuleCrew", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(partObj);
+                            if (crewListObj == null)
+                                crewListObj = pt.GetProperty("protoModuleCrew", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(partObj, null);
+
+                            var list = crewListObj as System.Collections.IList;
+                            if (list != null && list.Count > 0)
+                            {
+                                for (int i = list.Count - 1; i >= 0; --i)
+                                {
+                                    var crewEntry = list[i];
+                                    var crew = crewEntry as ProtoCrewMember;
+                                    string crewName = crew != null ? crew.name : null;
+                                    if (string.IsNullOrEmpty(crewName) && crewEntry != null)
+                                    {
+                                        var ct = crewEntry.GetType();
+                                        crewName = ct.GetField("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(crewEntry) as string;
+                                        if (string.IsNullOrEmpty(crewName))
+                                        {
+                                            var prop = ct.GetProperty("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                            if (prop != null && prop.CanRead && prop.GetIndexParameters().Length == 0)
+                                                crewName = prop.GetValue(crewEntry, null) as string;
+                                        }
+                                    }
+                                    if (!string.Equals(crewName, k.name, StringComparison.Ordinal)) continue;
+
+                                    list.RemoveAt(i);
+                                    removed = true;
+                                }
+                            }
+
+                            removedCachedCrew += RemoveKerbalFromCrewLikeLists(partObj, k.name);
+
+                            foreach (var field in pt.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                            {
+                                if (field == null || field.FieldType != typeof(ConfigNode)) continue;
+                                var node = field.GetValue(partObj) as ConfigNode;
+                                if (node == null) continue;
+                                removedConfigCrew += RemoveKerbalFromConfigNodeCrewValues(node, k.name);
+                            }
+                            foreach (var prop in pt.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                            {
+                                if (prop == null || prop.PropertyType != typeof(ConfigNode) || !prop.CanRead || prop.GetIndexParameters().Length != 0) continue;
+                                ConfigNode node = null;
+                                try { node = prop.GetValue(partObj, null) as ConfigNode; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:2525", "Suppressed exception in Mod.cs:2525", ex); }
+                                if (node == null) continue;
+                                removedConfigCrew += RemoveKerbalFromConfigNodeCrewValues(node, k.name);
+                            }
+                        }
+
+                        removedCachedCrew += RemoveKerbalFromCrewLikeLists(pv, k.name);
+                        TryRefreshProtoVesselCrewCaches(pv);
+
+                        if (removed || removedConfigCrew > 0 || removedCachedCrew > 0)
+                        {
+                            RRLog.Verbose("[EAC] Detached " + k.name + " from vessel " + (string.IsNullOrEmpty(vesselName) ? "<unknown>" : vesselName)
+                                + " for mission death processing. protoModuleCrewRemoved=" + removed
+                                + ", configCrewValuesRemoved=" + removedConfigCrew
+                                + ", cachedCrewEntriesRemoved=" + removedCachedCrew + ".");
+                            return true;
+                        }
+
+                        return false;
+                    }
+                    catch (Exception ex)
+                    {
+                        RRLog.Error("[EAC] Failed detaching " + k.name + " from assigned vessel: " + ex);
+                        if (foundCrew)
+                            return false;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.Error("[EAC] Exception while scanning assigned vessels for " + k.name + ": " + ex);
             }
 
-            float W = Screen.width, H = Screen.height;
-            float btnW = 220f, btnH = 34f;
-            float x = W * 0.44f - btnW * 0.5f;
-            float y = H * 0.070f - btnH * 0.5f;
-
-            if (GUI.Button(new Rect(x, y, btnW, btnH), "Astronaut Management", _boldBtn))
-                RosterRotationKSCUIBridge.RequestOverlay(RosterRotationKSCUIBridge.AcOverlayOpen);
+            return false;
         }
-    }
 
-    // ── Bridge ──────────────────────────────────────────────────────────────────
-    public static class RosterRotationKSCUIBridge
-    {
-        public const int AcOverlayNone = 0;
-        public const int AcOverlayOpen = 1;
-        public const int AcOverlayApplicants = 1;
-        public const int AcOverlayTraining = 1;
-        public const int AcOverlayForceRetire = 1;
-
-        private static volatile int _pendingOverlay = AcOverlayNone;
-        public static void RequestOverlay(int which) => _pendingOverlay = which;
-        public static int ConsumeOverlay()
+        private static int RemoveKerbalFromConfigNodeCrewValues(ConfigNode node, string kerbalName)
         {
-            int v = _pendingOverlay;
-            _pendingOverlay = AcOverlayNone;
-            return v;
+            if (node == null || string.IsNullOrEmpty(kerbalName)) return 0;
+
+            int removed = 0;
+            var keepCrew = new System.Collections.Generic.List<string>();
+            bool touchedCrewValues = false;
+
+            foreach (ConfigNode.Value value in node.values)
+            {
+                if (value == null) continue;
+                if (!string.Equals(value.name, "crew", StringComparison.OrdinalIgnoreCase)) continue;
+                touchedCrewValues = true;
+                if (string.Equals(value.value, kerbalName, StringComparison.Ordinal))
+                {
+                    removed++;
+                    continue;
+                }
+                keepCrew.Add(value.value);
+            }
+
+            if (touchedCrewValues)
+            {
+                node.RemoveValues("crew");
+                for (int i = 0; i < keepCrew.Count; i++)
+                    node.AddValue("crew", keepCrew[i]);
+            }
+
+            foreach (ConfigNode child in node.nodes)
+                removed += RemoveKerbalFromConfigNodeCrewValues(child, kerbalName);
+
+            return removed;
+        }
+
+        private static int RemoveKerbalFromCrewLikeLists(object owner, string kerbalName)
+        {
+            if (owner == null || string.IsNullOrEmpty(kerbalName)) return 0;
+
+            int removed = 0;
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            var type = owner.GetType();
+
+            foreach (var field in type.GetFields(flags))
+            {
+                if (field == null) continue;
+                if (field.FieldType == typeof(string)) continue;
+                if (!typeof(System.Collections.IList).IsAssignableFrom(field.FieldType)) continue;
+                if (field.Name.IndexOf("crew", StringComparison.OrdinalIgnoreCase) < 0) continue;
+
+                var list = field.GetValue(owner) as System.Collections.IList;
+                if (list == null || list.Count == 0) continue;
+
+                for (int i = list.Count - 1; i >= 0; --i)
+                {
+                    var entry = list[i];
+                    if (entry == null) continue;
+
+                    string entryName = entry as string;
+                    var pcm = entry as ProtoCrewMember;
+                    if (string.IsNullOrEmpty(entryName) && pcm != null)
+                        entryName = pcm.name;
+                    if (string.IsNullOrEmpty(entryName))
+                    {
+                        var et = entry.GetType();
+                        entryName = et.GetField("name", flags)?.GetValue(entry) as string;
+                        if (string.IsNullOrEmpty(entryName))
+                        {
+                            var prop = et.GetProperty("name", flags);
+                            if (prop != null && prop.CanRead && prop.GetIndexParameters().Length == 0)
+                                entryName = prop.GetValue(entry, null) as string;
+                        }
+                    }
+
+                    if (!string.Equals(entryName, kerbalName, StringComparison.Ordinal)) continue;
+                    list.RemoveAt(i);
+                    removed++;
+                }
+            }
+
+            return removed;
+        }
+
+        private static void TryRefreshProtoVesselCrewCaches(object protoVessel)
+        {
+            if (protoVessel == null) return;
+
+            try
+            {
+                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                var pvType = protoVessel.GetType();
+
+                int totalCrew = 0;
+                int crewedParts = 0;
+                object partsObj = pvType.GetField("protoPartSnapshots", flags)?.GetValue(protoVessel)
+                               ?? pvType.GetProperty("protoPartSnapshots", flags)?.GetValue(protoVessel, null);
+                var parts = partsObj as System.Collections.IEnumerable;
+                if (parts != null)
+                {
+                    foreach (var partObj in parts)
+                    {
+                        if (partObj == null) continue;
+                        var pt = partObj.GetType();
+                        object crewListObj = pt.GetField("protoModuleCrew", flags)?.GetValue(partObj)
+                                          ?? pt.GetProperty("protoModuleCrew", flags)?.GetValue(partObj, null);
+                        var list = crewListObj as System.Collections.IList;
+                        int count = list != null ? list.Count : 0;
+                        if (count > 0)
+                        {
+                            totalCrew += count;
+                            crewedParts++;
+                        }
+                    }
+                }
+
+                var vesselCrewField = pvType.GetField("vesselCrew", flags);
+                if (vesselCrewField != null && vesselCrewField.FieldType == typeof(int))
+                    vesselCrewField.SetValue(protoVessel, totalCrew);
+                var vesselCrewProp = pvType.GetProperty("vesselCrew", flags);
+                if (vesselCrewProp != null && vesselCrewProp.CanWrite && vesselCrewProp.PropertyType == typeof(int))
+                    vesselCrewProp.SetValue(protoVessel, totalCrew, null);
+
+                var crewedPartsField = pvType.GetField("crewedParts", flags);
+                if (crewedPartsField != null && crewedPartsField.FieldType == typeof(int))
+                    crewedPartsField.SetValue(protoVessel, crewedParts);
+                var crewedPartsProp = pvType.GetProperty("crewedParts", flags);
+                if (crewedPartsProp != null && crewedPartsProp.CanWrite && crewedPartsProp.PropertyType == typeof(int))
+                    crewedPartsProp.SetValue(protoVessel, crewedParts, null);
+
+                object vesselRef = pvType.GetField("vesselRef", flags)?.GetValue(protoVessel)
+                               ?? pvType.GetProperty("vesselRef", flags)?.GetValue(protoVessel, null);
+                if (vesselRef != null)
+                {
+                    var vt = vesselRef.GetType();
+                    vt.GetMethod("CrewListSetDirty", flags)?.Invoke(vesselRef, null);
+                    var crewWasModified = vt.GetMethod("CrewWasModified", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic, null,
+                        new[] { vt }, null);
+                    if (crewWasModified != null)
+                        crewWasModified.Invoke(null, new[] { vesselRef });
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.Verbose("[EAC] Failed refreshing proto vessel crew caches: " + ex.Message);
+            }
+        }
+
+        private bool CheckAssignedMissionDeath(ProtoCrewMember k, RosterRotationState.KerbalRecord rec,
+            double nowUT, int currentAge, double effectiveRetireUT)
+        {
+            if (k == null || rec == null) return false;
+            if (k.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) return false;
+            if (rec.DeathUT > 0) return false;
+
+            bool forceTest = RosterRotationState.DebugForceMissionDeath; // TEMP TEST HOOK
+            if (!forceTest && !RosterRotationState.MissionDeathEnabled) return false;
+            if (!forceTest && nowUT < effectiveRetireUT) return false;
+
+            if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT)
+                rec.MissionStartUT = nowUT;
+
+            double daySec = RosterRotationState.DaySeconds;
+            double lastCheckUT = rec.LastMissionDeathCheckUT > 0 ? rec.LastMissionDeathCheckUT : rec.MissionStartUT;
+            double riskStartUT = forceTest ? lastCheckUT : Math.Max(lastCheckUT, effectiveRetireUT);
+            double eligibleElapsedUT = nowUT - riskStartUT;
+            if (!forceTest && eligibleElapsedUT < daySec) return false;
+
+            int elapsedDays = forceTest ? 1 : Math.Max(1, (int)Math.Floor(eligibleElapsedUT / daySec));
+            double missionDays = rec.MissionStartUT > 0 ? Math.Max(0.0, (nowUT - rec.MissionStartUT) / daySec) : 0.0;
+            double yearsPastRetirement = forceTest ? 0.0 : Math.Max(0.0, (nowUT - effectiveRetireUT) / RosterRotationState.YearSeconds);
+            double ageFactor = 1.0 + (yearsPastRetirement * yearsPastRetirement * 0.5);
+            double stressFactor = 1.0 + Math.Min(3.0, missionDays / 120.0);
+            double dailyChance = Math.Min(0.25, 0.000015 * ageFactor * stressFactor);
+            double rollChance = forceTest ? 1.0 : 1.0 - Math.Pow(Math.Max(0.0, 1.0 - dailyChance), elapsedDays);
+            float roll = UnityEngine.Random.value;
+
+            rec.LastMissionDeathCheckUT = nowUT;
+
+            if (RRLog.VerboseEnabled)
+            {
+                RRLog.Verbose(
+                    $"[EAC] Mission death check for {k.name}: ForceTest={forceTest}, Age={currentAge}, YearsPastRetirement={yearsPastRetirement:F2}, MissionDays={missionDays:F1}, ElapsedDays={elapsedDays}, DailyChance={dailyChance:P4}, RollChance={rollChance:P4}, Roll={roll:F4}");
+            }
+
+            if (!forceTest && roll >= rollChance)
+                return true;
+
+            if (forceTest)
+                RosterRotationState.DebugForceMissionDeath = false;
+
+            string vesselName;
+            if (!TryDetachKerbalFromAssignedVessel(k, out vesselName))
+            {
+                RRLog.Error("[EAC] Mission death could not detach " + (k != null ? k.name : "<null>") + " from assigned vessel; aborting death transition.");
+                return false;
+            }
+
+            rec.DeathUT = nowUT;
+            rec.DiedOnMission = true;
+            rec.PendingMissionDeath = true;
+            rec.RetirementScheduled = false;
+            rec.MissionStartUT = 0;
+            rec.LastMissionDeathCheckUT = 0;
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(k.name);
+
+            // Reassert a dead roster state in memory now that the vessel crew link has been severed.
+            // Stock may briefly flip the kerbal to Missing during save capture; we set Dead again
+            // immediately after the save call so later saves do not drift back to Missing.
+            try { k.rosterStatus = ProtoCrewMember.RosterStatus.Dead; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:2768", "Suppressed exception in Mod.cs:2768", ex); }
+
+            // Keep stock's fragile inactive-vessel roster bookkeeping out of the critical path.
+            // We persist the authoritative death state and let the save-time patch finalize the
+            // stock roster + vessel nodes if KSP tries to repair the assigned status during save.
+            SaveScheduler.RequestImmediateSave("assigned mission death");
+            try { if (k.rosterStatus != ProtoCrewMember.RosterStatus.Dead) k.rosterStatus = ProtoCrewMember.RosterStatus.Dead; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:2774", "Suppressed exception in Mod.cs:2774", ex); }
+
+            if (RosterRotationState.DeathNotificationsEnabled)
+            {
+                string causeText = forceTest
+                    ? $"[TEST] {k.name} was marked dead on mission."
+                    : $"{k.name} has died on mission at age {currentAge} after {missionDays:F0} days in space.";
+
+                RosterRotationState.PostNotification(
+                    EACNotificationType.Death,
+                    $"Deceased on mission — {k.name}",
+                    causeText + $" ({RosterRotationState.FormatGameDate(nowUT)})",
+                    MessageSystemButton.MessageButtonColor.RED,
+                    MessageSystemButton.ButtonIcons.ALERT,
+                    12f);
+            }
+
+            InvalidateUICaches();
+            _pendingForceRefresh = true;
+            return true;
         }
     }
+
 }

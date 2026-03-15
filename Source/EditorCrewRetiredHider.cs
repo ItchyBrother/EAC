@@ -182,7 +182,7 @@ namespace RosterRotation
                             }
                         }
                     }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:185", "Suppressed exception in EditorCrewRetiredHider.cs:185", ex); }
                 }
             }
 
@@ -213,13 +213,13 @@ namespace RosterRotation
                 if (_cachedInstanceProp != null)
                 {
                     try { var v = _cachedInstanceProp.GetValue(null, null); if (v != null) return v; }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:216", "Suppressed exception in EditorCrewRetiredHider.cs:216", ex); }
                 }
 
                 if (_cachedInstanceField != null)
                 {
                     try { var v = _cachedInstanceField.GetValue(null); if (v != null) return v; }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:222", "Suppressed exception in EditorCrewRetiredHider.cs:222", ex); }
                 }
 
                 const BindingFlags sf = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -234,7 +234,7 @@ namespace RosterRotation
                         var v = prop.GetValue(null, null);
                         if (v != null) { _cachedInstanceProp = prop; return v; }
                     }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:237", "Suppressed exception in EditorCrewRetiredHider.cs:237", ex); }
                 }
 
                 foreach (var field in _cachedDialogType.GetFields(sf))
@@ -246,7 +246,7 @@ namespace RosterRotation
                         var v = field.GetValue(null);
                         if (v != null) { _cachedInstanceField = field; return v; }
                     }
-                    catch { }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:249", "Suppressed exception in EditorCrewRetiredHider.cs:249", ex); }
                 }
 
                 if (typeof(UnityEngine.Object).IsAssignableFrom(_cachedDialogType))
@@ -255,7 +255,7 @@ namespace RosterRotation
                     if (obj != null) return obj;
                 }
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:258", "Suppressed exception in EditorCrewRetiredHider.cs:258", ex); }
 
             return null;
         }
@@ -277,7 +277,7 @@ namespace RosterRotation
                             return t;
                     }
                 }
-                catch { }
+                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:280", "Suppressed exception in EditorCrewRetiredHider.cs:280", ex); }
             }
 
             return null;

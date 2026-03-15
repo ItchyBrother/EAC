@@ -147,7 +147,7 @@ namespace RosterRotation
                         return true;
                 }
             }
-            catch { }
+            catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexHook.cs:150", "Suppressed exception in AstronautComplexHook.cs:150", ex); }
 
             return false;
         }

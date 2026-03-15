@@ -8,7 +8,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationHarmonyBootstrap : MonoBehaviour
     {
-        private const string VER = "EAC v1.0.1";
+        private const string VER = "EAC v 1.1";
 
         private void Start()
         {
@@ -38,7 +38,7 @@ namespace RosterRotation
                     foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
                     {
                         if (a == null) continue;
-                        try { t = a.GetType(fullTypeName); } catch { }
+                        try { t = a.GetType(fullTypeName); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("HarmonyPatches.cs:41", "Suppressed exception in HarmonyPatches.cs:41", ex); }
                         if (t != null) break;
                     }
                 }
