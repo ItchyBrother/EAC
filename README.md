@@ -10,7 +10,11 @@ Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to K
 
 Designed to feel “stock-like” while adding meaningful long-term crew management.
 
-**I would recommend using this mod in conjuction with linuxgurugamer CrewRandR mod.  CrewRandR is not required for EAC to work.**
+**I would recommend the following mod addons with EAC:**
+-** linuxgurugamer CrewRandR mod. **
+-** severedsolo Earn Your Strips and FlightTracker **
+
+-- EAC can run without these, but it also takes advantage of what these mods offer.  --
 
 ---
 
@@ -43,6 +47,7 @@ You can enable/disable notifications by category:
 And choose where they appear:
 - HUD
 - Message App (KSP Message System)
+- or both
 
 ---
 
@@ -131,7 +136,7 @@ Use verbose logging only when troubleshooting.
 ---
 
 ## Planned / Ideas
-- Currently no plans...we'll see how the mod is received and what the KSP community would like in maybe future releases.
+- Currently no further plans...we'll see how the mod is received and what the KSP community would like in maybe future releases.
 
 ---
 
@@ -148,9 +153,3 @@ MIT License.  You are free to use.  I guarantee nothing other than this will tak
 ## Credits
 - Kerbal Space Program by Squad / Private Division
 - Thanks to the KSP modding community especially linuxgurugamer who indirectly inspired me.
-
----
-
-## Thank you!
-Thank you for downloading my mod.  I appreciate your support and look forward to your constructive feedback.  
-I'd love to hear how you are using it!
