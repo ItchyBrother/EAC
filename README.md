@@ -11,8 +11,10 @@ Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to K
 Designed to feel “stock-like” while adding meaningful long-term crew management.
 
 **I would recommend the following mod addons with EAC:**
--** linuxgurugamer CrewRandR mod. **
--** severedsolo Earn Your Strips and FlightTracker **
+
+**-linuxgurugamer CrewRandR mod.**
+
+**-severedsolo Earn Your Strips and FlightTracker**
 
 -- EAC can run without these, but it also takes advantage of what these mods offer.  --
 
