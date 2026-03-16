@@ -12,9 +12,9 @@ Designed to feel “stock-like” while adding meaningful long-term crew managem
 
 **I would recommend the following mod addons with EAC:**
 
-**-linuxgurugamer CrewRandR mod.**
+**@linuxgurugamer CrewRandR mod.**
 
-**-severedsolo Earn Your Strips and FlightTracker**
+**@severedsolo Earn Your Strips and FlightTracker**
 
 -- EAC can run without these, but it also takes advantage of what these mods offer.  --
 
