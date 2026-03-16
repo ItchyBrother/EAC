@@ -1,10 +1,11 @@
 # Enhanced Astronaut Complex (EAC)
 
-*2026-0316: 1.1.1 for KSP >-1.12.X
--	Made EAC windows more opaque
--	Adjusted some windows to not open on top of each other
--	Adjust portrait capture so that valid portraits are captured verses "static screens"
--	Portraits are stored in /saves/<savegamename>/EAC/HallofPortraits 
+*	2026-0316: 1.1.1 for KSP >-1.12.X
+	-	Made EAC windows more opaque
+	-	Adjusted some windows to not open on top of each other
+	-	Adjust portrait capture so that valid portraits are captured verses "static screens"
+	-	Portraits are stored in /saves/<savegamename>/EAC/HallofPortraits 
+	-	Minor logic fixes and visual fixes
 
 * 2026-0314: 1.1 for KSP >= 1.12.X
 
@@ -24,11 +25,11 @@
 -	Improved compatibility behavior when optional supported mods are present.
 	
 **-Performed major internal reliability and maintenance refactoring, including:**
--	 Centralized save scheduling
--	 Safer reflection helpers
--	 Better logging and diagnostics
--	 Fewer silent failures
--	 Stronger UI/object discovery checks
+-	Centralized save scheduling
+-	Safer reflection helpers
+-	Better logging and diagnostics
+-	Fewer silent failures
+-	Stronger UI/object discovery checks
 
 Note:
 
