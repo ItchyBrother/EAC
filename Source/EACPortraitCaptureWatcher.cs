@@ -6,10 +6,10 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public class EACPortraitCaptureWatcher : MonoBehaviour
     {
-        private const float PollIntervalSeconds = 1.0f;
-        private const float RetryWindowSeconds = 15.0f;
-        private const float StartupDelaySeconds = 4.0f;   // KSP portrait camera needs ~3s to render first real frame
-        private const float VesselChangeDelaySeconds = 3.0f;
+        private const float PollIntervalSeconds = 0.5f;   // Poll every 0.5s so we catch the RenderTexture quickly
+        private const float RetryWindowSeconds = 20.0f;   // Wide window — retries until RenderTexture appears
+        private const float StartupDelaySeconds = 1.25f;  // Start early; Texture2D placeholders are now rejected
+        private const float VesselChangeDelaySeconds = 0.75f; // Same — retry loop handles the wait
 
         private static EACPortraitCaptureWatcher _instance;
 

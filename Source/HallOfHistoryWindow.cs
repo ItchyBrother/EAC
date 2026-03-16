@@ -48,7 +48,7 @@ namespace RosterRotation
         }
 
         private bool _show;
-        private Rect _window = new Rect(160, 70, 1140, 720);
+        private Rect _window = new Rect(720, 420, 1140, 720);
 
         private enum Tab
         {
@@ -89,6 +89,7 @@ namespace RosterRotation
         private GUIStyle _metaValueStyle;
         private GUIStyle _badgeStyle;
         private bool _stylesReady;
+        private GUIStyle _windowStyle;
         private readonly Dictionary<string, Texture> _portraitCache = new Dictionary<string, Texture>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> _textureReplacerPortraitKeys = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         private bool _textureReplacerPortraitKeysReady;
@@ -172,13 +173,22 @@ namespace RosterRotation
         {
             if (!_show) return;
             EnsureStyles();
-            _window = GUILayout.Window(GetInstanceID() + 919191, _window, DrawWindow, WindowTitle);
+            _window = GUILayout.Window(GetInstanceID() + 919191, _window, DrawWindow, WindowTitle, _windowStyle);
         }
 
         private void EnsureStyles()
         {
             if (_stylesReady) return;
             _stylesReady = true;
+
+            // Opaque window background — KSP's default skin texture is semi-transparent,
+            // so we replace it with a solid 1x1 texture of the same dark colour.
+            var bgTex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
+            bgTex.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f, 0.96f)); //changes opacity
+            bgTex.Apply();
+            _windowStyle = new GUIStyle(GUI.skin.window);
+            _windowStyle.normal.background   = bgTex;
+            _windowStyle.onNormal.background = bgTex;
 
             _headerStyle = new GUIStyle(GUI.skin.label)
             {

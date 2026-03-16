@@ -142,7 +142,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.0.3";
+        private const string ModVersion = "1.1.1";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -158,6 +158,8 @@ namespace RosterRotation
         private bool      _prevACOpen;
         private Rect      _overlayWindow  = new Rect(80, 120, 820, 500);
         private Vector2   _overlayScroll;
+        private GUIStyle  _windowStyle;
+        private bool      _windowStyleReady;
 
         private enum Tab { Applicants, Active, Assigned, Training, RandR, Retired, Lost }
         private Tab _tab = Tab.Active;
@@ -518,8 +520,19 @@ namespace RosterRotation
         // ── OnGUI ──────────────────────────────────────────────────────────────
         private void OnGUI()
         {
+            if (!_windowStyleReady)
+            {
+                _windowStyleReady = true;
+                var bgTex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
+                bgTex.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f, 0.96f)); //Changes opacity
+                bgTex.Apply();
+                _windowStyle = new GUIStyle(GUI.skin.window);
+                _windowStyle.normal.background   = bgTex;
+                _windowStyle.onNormal.background = bgTex;
+            }
+
             if (_show)
-                _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle);
+                _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle, _windowStyle);
 
             bool acOpen = ACOpenCache.IsOpen;
             if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
@@ -530,7 +543,7 @@ namespace RosterRotation
             {
                 string title = GetOverlayTitle(_acOverlay);
                 _overlayWindow = GUILayout.Window(
-                    GetInstanceID() + 55555, _overlayWindow, DrawACOverlay, title);
+                    GetInstanceID() + 55555, _overlayWindow, DrawACOverlay, title, _windowStyle);
             }
         }
 

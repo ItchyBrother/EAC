@@ -706,9 +706,14 @@ namespace RosterRotation
                             if (texProp != null)
                             {
                                 Texture tex = texProp.GetValue(rawImage, null) as Texture;
+                                // Only accept a RenderTexture — that means the portrait camera
+                                // has rendered a real frame. A Texture2D here is KSP's static
+                                // placeholder shown before the camera initialises; rejecting it
+                                // lets the retry loop wait for the live frame.
                                 RRLog.Verbose("[EAC.PortraitCapture] Matched " + pcm.name
-                                    + " tex=" + (tex != null ? tex.GetType().Name + " " + tex.width + "x" + tex.height : "null"));
-                                if (tex != null) return tex;
+                                    + " tex=" + (tex != null ? tex.GetType().Name + " " + tex.width + "x" + tex.height : "null")
+                                    + (tex != null && !(tex is RenderTexture) ? " (placeholder, skipping)" : ""));
+                                if (tex is RenderTexture) return tex;
                             }
                         }
                     }
