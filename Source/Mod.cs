@@ -142,7 +142,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.1.3";
+        private const string ModVersion = "1.1.4";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;

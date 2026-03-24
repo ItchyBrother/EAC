@@ -39,6 +39,7 @@
     <Compile Include="CrewRandRAdapter.cs" />
     <Compile Include="CrewRandRWriter.cs" />
     <Compile Include="CrashSeverity.cs" />
+    <Compile Include="RecoveryLeaveService.cs" />
     <Compile Include="LaunchBlocker.cs" />
     <Compile Include="KspGuiSkin.cs" />
     <Compile Include="RetiredKerbalCleanup.cs" />

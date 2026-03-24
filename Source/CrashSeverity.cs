@@ -31,13 +31,6 @@ namespace RosterRotation
         public string Label;
     }
 
-    internal sealed class PendingCrewRandRExtension
-    {
-        public string KerbalName;
-        public string VesselName;
-        public double ExtraDays;
-        public double QueuedUT;
-    }
 
     internal sealed class CrashTrackedVessel
     {
@@ -96,7 +89,6 @@ namespace RosterRotation
         private static readonly Dictionary<Guid, CrashTrackedVessel> Tracked = new Dictionary<Guid, CrashTrackedVessel>();
         private static readonly Dictionary<Guid, DetachedVesselSnapshot> DetachedSnapshots = new Dictionary<Guid, DetachedVesselSnapshot>();
         private static readonly Dictionary<string, Guid> CrewToVessel = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, PendingCrewRandRExtension> PendingCrewRandRExtensions = new Dictionary<string, PendingCrewRandRExtension>(StringComparer.OrdinalIgnoreCase);
 
         internal static void RememberCrewIncident(string kerbalName, Guid vesselId)
         {
@@ -104,167 +96,10 @@ namespace RosterRotation
             CrewToVessel[kerbalName] = vesselId;
         }
 
-        internal static void QueuePendingCrewRandRExtension(ProtoCrewMember pcm, CrashTrackedVessel tracked, double extraDays)
-        {
-            if (pcm == null || string.IsNullOrEmpty(pcm.name)) return;
-            if (extraDays <= 0) return;
 
-            PendingCrewRandRExtension pending;
-            if (!PendingCrewRandRExtensions.TryGetValue(pcm.name, out pending) || pending == null)
-            {
-                pending = new PendingCrewRandRExtension();
-                pending.KerbalName = pcm.name;
-                pending.VesselName = SafeVesselNameText(tracked);
-                pending.QueuedUT = Planetarium.GetUniversalTime();
-                pending.ExtraDays = 0;
-                PendingCrewRandRExtensions[pcm.name] = pending;
-            }
 
-            pending.ExtraDays += extraDays;
-            pending.QueuedUT = Planetarium.GetUniversalTime();
-            if (tracked != null && !string.IsNullOrEmpty(tracked.VesselName))
-                pending.VesselName = tracked.VesselName;
 
-            RRLog.Verbose("[EAC] queued CrewRandR crash extension for " + pcm.name
-                + ": extraDays=" + pending.ExtraDays.ToString("0.#")
-                + ", vessel=" + (string.IsNullOrEmpty(pending.VesselName) ? "<unknown>" : pending.VesselName));
-        }
 
-        internal static void SavePendingCrewRandRExtensions(ConfigNode root)
-        {
-            if (root == null) return;
-            root.RemoveNodes("CrashPending");
-
-            foreach (KeyValuePair<string, PendingCrewRandRExtension> kvp in PendingCrewRandRExtensions)
-            {
-                PendingCrewRandRExtension pending = kvp.Value;
-                if (pending == null || string.IsNullOrEmpty(kvp.Key) || pending.ExtraDays <= 0) continue;
-
-                ConfigNode n = root.AddNode("CrashPending");
-                n.AddValue("kerbalName", kvp.Key);
-                if (!string.IsNullOrEmpty(pending.VesselName)) n.AddValue("vesselName", pending.VesselName);
-                n.AddValue("extraDays", pending.ExtraDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
-                n.AddValue("queuedUT", pending.QueuedUT.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
-            }
-        }
-
-        internal static void LoadPendingCrewRandRExtensions(ConfigNode root)
-        {
-            PendingCrewRandRExtensions.Clear();
-            if (root == null) return;
-            ConfigNode[] nodes = root.GetNodes("CrashPending");
-            if (nodes == null || nodes.Length == 0) return;
-
-            for (int i = 0; i < nodes.Length; i++)
-            {
-                ConfigNode n = nodes[i];
-                if (n == null) continue;
-                string kerbalName = n.GetValue("kerbalName");
-                if (string.IsNullOrEmpty(kerbalName)) continue;
-
-                double extraDays;
-                if (!double.TryParse(n.GetValue("extraDays"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out extraDays) || extraDays <= 0)
-                    continue;
-
-                double queuedUT;
-                if (!double.TryParse(n.GetValue("queuedUT"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out queuedUT))
-                    queuedUT = 0;
-
-                PendingCrewRandRExtension pending = new PendingCrewRandRExtension();
-                pending.KerbalName = kerbalName;
-                pending.VesselName = n.GetValue("vesselName");
-                pending.ExtraDays = extraDays;
-                pending.QueuedUT = queuedUT;
-                PendingCrewRandRExtensions[kerbalName] = pending;
-            }
-
-            RRLog.Verbose("[EAC] loaded pending CrewRandR crash extensions=" + PendingCrewRandRExtensions.Count);
-        }
-
-        internal static void TryApplyPendingCrewRandRExtensions()
-        {
-            if (PendingCrewRandRExtensions.Count == 0) return;
-            if (!CrewRandRAdapter.IsInstalled()) return;
-            if (HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null) return;
-
-            double now = Planetarium.GetUniversalTime();
-            List<string> completed = null;
-            bool changed = false;
-
-            foreach (KeyValuePair<string, PendingCrewRandRExtension> kvp in PendingCrewRandRExtensions)
-            {
-                string kerbalName = kvp.Key;
-                PendingCrewRandRExtension pending = kvp.Value;
-                if (pending == null || string.IsNullOrEmpty(kerbalName))
-                {
-                    if (completed == null) completed = new List<string>();
-                    completed.Add(kerbalName);
-                    continue;
-                }
-
-                ProtoCrewMember pcm = FindCrewMemberByName(kerbalName);
-                if (pcm == null) continue;
-
-                double baseUntil;
-                if (!CrewRandRAdapter.TryGetVacationUntilByName(kerbalName, out baseUntil) || baseUntil <= now)
-                {
-                    RRLog.Verbose("[EAC] waiting for CrewRandR base vacation for " + kerbalName);
-                    continue;
-                }
-
-                double targetUntil = baseUntil + pending.ExtraDays * RosterRotationState.DaySeconds;
-                if (!CrewRandRWriter.TrySetVacationUntil(kerbalName, targetUntil))
-                {
-                    RRLog.Verbose("[EAC] CrewRandR extension write not ready for " + kerbalName);
-                    continue;
-                }
-
-                pcm.inactive = true;
-                pcm.inactiveTimeEnd = Math.Max(pcm.inactiveTimeEnd, targetUntil);
-                RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(kerbalName);
-                rec.RestUntilUT = Math.Max(rec.RestUntilUT, targetUntil);
-
-                RRLog.Verbose("[EAC] CrewRandR crash extension applied for " + kerbalName
-                    + ": baseUntil=" + baseUntil.ToString("0.###")
-                    + ", targetUntil=" + targetUntil.ToString("0.###")
-                    + ", extraDays=" + pending.ExtraDays.ToString("0.#"));
-
-                if (completed == null) completed = new List<string>();
-                completed.Add(kerbalName);
-                changed = true;
-            }
-
-            if (completed != null)
-            {
-                for (int i = 0; i < completed.Count; i++)
-                    PendingCrewRandRExtensions.Remove(completed[i]);
-            }
-
-            if (changed)
-            {
-                SaveScheduler.RequestSave("CrewRandR crash extension");
-
-                try { ACPatches.ForceRefresh(); }
-                catch (Exception ex)
-                {
-                    RRLog.Warn("[EAC] AC refresh after CrewRandR crash extension failed: " + ex.Message);
-                }
-            }
-        }
-
-        private static ProtoCrewMember FindCrewMemberByName(string kerbalName)
-        {
-            if (string.IsNullOrEmpty(kerbalName)) return null;
-            if (HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null) return null;
-
-            foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
-            {
-                if (pcm == null) continue;
-                if (string.Equals(pcm.name, kerbalName, StringComparison.OrdinalIgnoreCase))
-                    return pcm;
-            }
-            return null;
-        }
 
         internal static void ObserveLoadedVessels()
         {
@@ -815,7 +650,7 @@ namespace RosterRotation
             if (!RosterRotationState.CrashPenaltyEnabled)
             {
                 Forget(vessel.id);
-                ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
                 return;
             }
 
@@ -824,7 +659,7 @@ namespace RosterRotation
             if (!hadTracked)
             {
                 RRLog.Verbose("[EAC] recovery handler: no tracked crash state for vessel=" + SafeVesselName(vessel));
-                ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
                 return;
             }
 
@@ -849,7 +684,7 @@ namespace RosterRotation
             {
                 RRLog.Verbose("[EAC] No crash injury outcome for vessel=" + SafeVesselName(vessel) + "; applying normal recovery rules only.");
                 Forget(vessel.id);
-                ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
                 return;
             }
 
@@ -887,12 +722,12 @@ namespace RosterRotation
                     RRLog.Verbose("[EAC] Crash roll resulted in no injury for " + pcm.name
                         + ": roll=" + outcome.Roll
                         + ", modifier=" + outcome.Modifier);
-                    ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                    RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
                     PostRecoveryNotification(pcm, tracked, outcome);
                 }
                 else
                 {
-                    CrashApplySource applySource = ApplyRecoveryTime(pcm, rec, now, outcome, tracked);
+                    CrashApplySource applySource = RecoveryLeaveService.ApplyCrashRecoveryTime(pcm, rec, vessel, now, outcome, tracked);
                     string sourceText = applySource == CrashApplySource.CrewRandR ? "CrewRandR"
                         : (applySource == CrashApplySource.CrewRandRPending ? "CrewRandR-pending" : "EAC");
                     RRLog.Verbose("[EAC] Recovery leave applied for " + pcm.name
@@ -908,41 +743,6 @@ namespace RosterRotation
             SaveScheduler.RequestSave("crash recovery");
         }
 
-        private static void ApplyDefaultRecoveryRestIfNeeded(Vessel vessel, double now)
-        {
-            if (vessel == null) return;
-            if (CrewRandRAdapter.IsInstalled())
-            {
-                RRLog.Verbose("[EAC] CrewRandR present; skipping EAC base restDays for vessel=" + SafeVesselName(vessel));
-                return;
-            }
-
-            List<ProtoCrewMember> crew = vessel.GetVesselCrew();
-            if (crew == null || crew.Count == 0) return;
-
-            for (int i = 0; i < crew.Count; i++)
-            {
-                ProtoCrewMember pcm = crew[i];
-                if (pcm == null) continue;
-                if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
-
-                RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
-                if (rec.Retired) continue;
-
-                double restUntil = now + Math.Max(0, RosterRotationState.RestDays) * RosterRotationState.DaySeconds;
-                if (pcm.inactiveTimeEnd > now)
-                    restUntil = Math.Max(restUntil, pcm.inactiveTimeEnd);
-
-                pcm.inactive = true;
-                pcm.inactiveTimeEnd = restUntil;
-                rec.RestUntilUT = Math.Max(rec.RestUntilUT, restUntil);
-
-                RRLog.Verbose("[EAC] Base recovery rest applied for " + pcm.name
-                    + ": restDays=" + RosterRotationState.RestDays
-                    + ", inactiveTimeEnd=" + pcm.inactiveTimeEnd.ToString("0.###")
-                    + ", rec.RestUntilUT=" + rec.RestUntilUT.ToString("0.###"));
-            }
-        }
 
         private static CrashOutcome RollOutcome(CrashTrackedVessel tracked, int totalCrew)
         {
@@ -996,66 +796,6 @@ namespace RosterRotation
             return Math.Min(120, partsBonus + fatalityBonus + casualtyBonus + crashBonus);
         }
 
-        private static CrashApplySource ApplyRecoveryTime(
-            ProtoCrewMember pcm,
-            RosterRotationState.KerbalRecord rec,
-            double now,
-            CrashOutcome outcome,
-            CrashTrackedVessel tracked)
-        {
-            bool crewRandRInstalled = CrewRandRAdapter.IsInstalled();
-            double baseUntil = now;
-
-            if (crewRandRInstalled)
-            {
-                double vacationUntil;
-                if (CrewRandRAdapter.TryGetVacationUntilByName(pcm.name, out vacationUntil) && vacationUntil > now)
-                    baseUntil = vacationUntil;
-                else if (pcm.inactiveTimeEnd > now)
-                    baseUntil = Math.Max(baseUntil, pcm.inactiveTimeEnd);
-
-                double newUntil = baseUntil + outcome.ExtraDays * RosterRotationState.DaySeconds;
-                if (CrewRandRWriter.TrySetVacationUntil(pcm.name, newUntil))
-                {
-                    pcm.inactive = true;
-                    pcm.inactiveTimeEnd = Math.Max(pcm.inactiveTimeEnd, newUntil);
-                    rec.RestUntilUT = Math.Max(rec.RestUntilUT, newUntil);
-                    return CrashApplySource.CrewRandR;
-                }
-
-                double displayUntil = newUntil;
-                if (displayUntil <= now)
-                    displayUntil = now + outcome.ExtraDays * RosterRotationState.DaySeconds;
-
-                pcm.inactive = true;
-                pcm.inactiveTimeEnd = Math.Max(pcm.inactiveTimeEnd, displayUntil);
-                rec.RestUntilUT = Math.Max(rec.RestUntilUT, displayUntil);
-
-                try
-                {
-                    if (pcm.rosterStatus != ProtoCrewMember.RosterStatus.Dead
-                     && pcm.rosterStatus != ProtoCrewMember.RosterStatus.Missing
-                     && pcm.rosterStatus != ProtoCrewMember.RosterStatus.Assigned)
-                    {
-                        pcm.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-                    }
-                }
-                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("CrashSeverity.cs:662", "Suppressed exception in CrashSeverity.cs:662", ex); }
-
-                CrashSeverityState.QueuePendingCrewRandRExtension(pcm, tracked, outcome.ExtraDays);
-                return CrashApplySource.CrewRandRPending;
-            }
-
-            baseUntil = now + Math.Max(0, RosterRotationState.RestDays) * RosterRotationState.DaySeconds;
-            if (pcm.inactiveTimeEnd > now)
-                baseUntil = Math.Max(baseUntil, pcm.inactiveTimeEnd);
-
-            double eacUntil = baseUntil + outcome.ExtraDays * RosterRotationState.DaySeconds;
-            pcm.inactive = true;
-            pcm.inactiveTimeEnd = Math.Max(pcm.inactiveTimeEnd, eacUntil);
-            rec.RestUntilUT = Math.Max(rec.RestUntilUT, eacUntil);
-            return CrashApplySource.EAC;
-        }
 
         private static void ApplyPermanentDisability(
             ProtoCrewMember pcm,
@@ -1453,7 +1193,7 @@ namespace RosterRotation
             if (HighLogic.LoadedScene != GameScenes.SPACECENTER && HighLogic.LoadedScene != GameScenes.TRACKSTATION)
                 return;
 
-            CrashSeverityState.TryApplyPendingCrewRandRExtensions();
+            RecoveryLeaveService.TryApplyPendingCrewRandRExtensions();
         }
     }
 }

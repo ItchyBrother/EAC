@@ -39,7 +39,7 @@ namespace RosterRotation
                     RRLog.Verbose($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
 
-                CrashSeverityState.LoadPendingCrewRandRExtensions(root);
+                RecoveryLeaveService.LoadPendingCrewRandRExtensions(root);
 
                 // Push our loaded state into GameParameters so the Difficulty Options UI
                 // shows the correct values when the player opens it.
@@ -73,7 +73,7 @@ namespace RosterRotation
                 KerbalRecordPersistence.WriteSettingsNode(s, KerbalRecordPersistence.CaptureSettingsFromState(), ci);
                 RosterRotationState.VerboseSettingsDirty = false;
 
-                CrashSeverityState.SavePendingCrewRandRExtensions(root);
+                RecoveryLeaveService.SavePendingCrewRandRExtensions(root);
 
                 foreach (var kvp in RosterRotationState.Records)
                 {
