@@ -1,7 +1,7 @@
 # Enhanced Astronaut Complex (EAC)
 
 # Change Log
-### 2026-0324: 1.1.2 for KSP >= 1.12.X
+### 2026-0324: 1.1.3 for KSP >= 1.12.X
 
 ### Fixed Training
 - Level-up training now uses the configurable TrainingStarDays setting instead of hardcoded 30
