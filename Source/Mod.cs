@@ -142,7 +142,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.1.1";
+        private const string ModVersion = "1.1.2";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -159,6 +159,7 @@ namespace RosterRotation
         private Rect      _overlayWindow  = new Rect(80, 120, 820, 500);
         private Vector2   _overlayScroll;
         private GUIStyle  _windowStyle;
+        private GUISkin   _windowStyleSourceSkin;
         private bool      _windowStyleReady;
 
         private enum Tab { Applicants, Active, Assigned, Training, RandR, Retired, Lost }
@@ -520,30 +521,38 @@ namespace RosterRotation
         // ── OnGUI ──────────────────────────────────────────────────────────────
         private void OnGUI()
         {
-            if (!_windowStyleReady)
+            GUISkin previousSkin = GUI.skin;
+            GUISkin kspSkin = KspGuiSkin.Current;
+            if (kspSkin != null)
+                GUI.skin = kspSkin;
+
+            try
             {
-                _windowStyleReady = true;
-                var bgTex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
-                bgTex.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f, 0.96f)); //Changes opacity
-                bgTex.Apply();
-                _windowStyle = new GUIStyle(GUI.skin.window);
-                _windowStyle.normal.background   = bgTex;
-                _windowStyle.onNormal.background = bgTex;
+                if (!_windowStyleReady || !ReferenceEquals(_windowStyleSourceSkin, kspSkin))
+                {
+                    _windowStyleReady = true;
+                    _windowStyleSourceSkin = kspSkin;
+                    _windowStyle = new GUIStyle(KspGuiSkin.Window);
+                }
+
+                if (_show)
+                    _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle, _windowStyle);
+
+                bool acOpen = ACOpenCache.IsOpen;
+                if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
+                _prevACOpen = acOpen;
+                if (!acOpen) RetiredTabSelected = false;
+
+                if (acOpen && _acOverlay != AcOverlay.None)
+                {
+                    string title = GetOverlayTitle(_acOverlay);
+                    _overlayWindow = GUILayout.Window(
+                        GetInstanceID() + 55555, _overlayWindow, DrawACOverlay, title, _windowStyle);
+                }
             }
-
-            if (_show)
-                _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle, _windowStyle);
-
-            bool acOpen = ACOpenCache.IsOpen;
-            if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
-            _prevACOpen = acOpen;
-            if (!acOpen) RetiredTabSelected = false;
-
-            if (acOpen && _acOverlay != AcOverlay.None)
+            finally
             {
-                string title = GetOverlayTitle(_acOverlay);
-                _overlayWindow = GUILayout.Window(
-                    GetInstanceID() + 55555, _overlayWindow, DrawACOverlay, title, _windowStyle);
+                GUI.skin = previousSkin;
             }
         }
 
@@ -747,7 +756,7 @@ namespace RosterRotation
             bool afford = funds >= fCost && rd >= rCost;
 
             GUILayout.Space(6);
-            GUILayout.BeginVertical(GUI.skin.box);
+            GUILayout.BeginVertical(KspGuiSkin.Box);
             GUILayout.Label($"Train {trainK.name}  L{(int)trainK.experienceLevel} → L{tgt}");
             int cBase = tgt * 30;
             int cMax = (int)(cBase * 1.5);
@@ -2029,7 +2038,7 @@ namespace RosterRotation
 
         private void DrawHRule()
         {
-            var rect = GUILayoutUtility.GetRect(GUIContent.none, GUI.skin.horizontalSlider,
+            var rect = GUILayoutUtility.GetRect(GUIContent.none, KspGuiSkin.HorizontalSlider,
                 GUILayout.Height(2), GUILayout.ExpandWidth(true));
             GUI.DrawTexture(rect, Texture2D.whiteTexture);
         }

@@ -153,6 +153,8 @@ namespace RosterRotation
                 EACStateBridge.SetInt("RetirementAgeMax", ag.RetirementAgeMax);
                 EACStateBridge.SetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
                 EACStateBridge.SetBool("AutoCleanupUnreferencedKerbals", ag.AutoCleanupUnreferencedKerbals);
+                EACStateBridge.SetDouble("RecoveryLeavePercent", ag.RecoveryLeavePercent);
+                EACStateBridge.SetDouble("RestDays", ag.RecoveryLeaveMaxDays);
 
                 return true;
             }
@@ -209,6 +211,8 @@ namespace RosterRotation
                 ag.RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", ag.RetirementAgeMax);
                 ag.RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
                 ag.AutoCleanupUnreferencedKerbals = EACStateBridge.GetBool("AutoCleanupUnreferencedKerbals", ag.AutoCleanupUnreferencedKerbals);
+                ag.RecoveryLeavePercent = (float)EACStateBridge.GetDouble("RecoveryLeavePercent", ag.RecoveryLeavePercent);
+                ag.RecoveryLeaveMaxDays = (float)EACStateBridge.GetDouble("RestDays", ag.RecoveryLeaveMaxDays);
 
                 return true;
             }
@@ -223,6 +227,7 @@ namespace RosterRotation
             toolTip = "If enabled: 6-hour days, 426-day years. If disabled: 24-hour days, 365-day years.",
             autoPersistance = false)]
         public bool UseKerbinTime = true;
+
 
         // Messages: channels
         [GameParameters.CustomParameterUI(
@@ -467,6 +472,51 @@ namespace RosterRotation
             autoPersistance = false)]
         public bool AutoCleanupUnreferencedKerbals = false;
 
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "",
+            lines = 1,
+            autoPersistance = false)]
+        public string RecoverySpacer1 = "";
+
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "",
+            lines = 1,
+            autoPersistance = false)]
+        public string RecoverySpacer2 = "";
+
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "Recovery time",
+            lines = 1,
+            autoPersistance = false)]
+        public string RecoveryHeading = "";
+
+        [GameParameters.CustomFloatParameterUI(
+            "Recovery leave (%)",
+            toolTip = "Base EAC recovery leave as a percent of the recovered mission's flight time. 0 disables EAC recovery leave. Ignored when CrewRandR is installed.",
+            displayFormat = "N0",
+            minValue = 0f, maxValue = 100f, stepCount = 101, asPercentage = false,
+            autoPersistance = false)]
+        public float RecoveryLeavePercent = 10f;
+
+        [GameParameters.CustomFloatParameterUI(
+            "RestDay Max",
+            toolTip = "Maximum EAC recovery leave, in days. This cap is only used when Recovery leave (%) is above 0, and is ignored when CrewRandR is installed.",
+            displayFormat = "N0",
+            minValue = 0f, maxValue = 365f, stepCount = 366, asPercentage = false,
+            autoPersistance = false)]
+        public float RecoveryLeaveMaxDays = 14f;
+
+        public override bool Interactible(MemberInfo member, GameParameters parameters)
+        {
+            if (member != null && member.Name == nameof(RecoveryLeaveMaxDays))
+                return RecoveryLeavePercent > 0f;
+
+            return true;
+        }
+
         protected override void PullFromState()
         {
             AgingEnabled       = EACStateBridge.GetBool("AgingEnabled", true);
@@ -474,17 +524,25 @@ namespace RosterRotation
             RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", 55);
             RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", 55);
             AutoCleanupUnreferencedKerbals = EACStateBridge.GetBool("AutoCleanupUnreferencedKerbals", false);
+            RecoveryLeavePercent = (float)EACStateBridge.GetDouble("RecoveryLeavePercent", 10.0);
+            RecoveryLeaveMaxDays = (float)EACStateBridge.GetDouble("RestDays", 14.0);
         }
 
         protected override void PushToState()
         {
             if (RetirementAgeMax < RetirementAgeMin) RetirementAgeMax = RetirementAgeMin;
 
+            if (RecoveryLeavePercent < 0f) RecoveryLeavePercent = 0f;
+            if (RecoveryLeavePercent > 100f) RecoveryLeavePercent = 100f;
+            if (RecoveryLeaveMaxDays < 0f) RecoveryLeaveMaxDays = 0f;
+
             EACStateBridge.SetBool("AgingEnabled", AgingEnabled);
             EACStateBridge.SetInt("RetirementAgeMin", RetirementAgeMin);
             EACStateBridge.SetInt("RetirementAgeMax", RetirementAgeMax);
             EACStateBridge.SetInt("RetiredDeathAgeMin", RetiredDeathAgeMin);
             EACStateBridge.SetBool("AutoCleanupUnreferencedKerbals", AutoCleanupUnreferencedKerbals);
+            EACStateBridge.SetDouble("RecoveryLeavePercent", RecoveryLeavePercent);
+            EACStateBridge.SetDouble("RestDays", RecoveryLeaveMaxDays);
         }
     }
 }

@@ -8,7 +8,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationHarmonyBootstrap : MonoBehaviour
     {
-        private const string VER = "EAC v 1.1.1";
+        private const string VER = "EAC v 1.1.2";
 
         private void Start()
         {

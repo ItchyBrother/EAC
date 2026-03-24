@@ -6,6 +6,7 @@ namespace RosterRotation
     internal sealed class EacSettingsSnapshot
     {
         public double RestDays = 14;
+        public double RecoveryLeavePercent = 10;
         public bool UseKerbinDays = true;
         public int TrainingInitialDays = 30;
         public int TrainingStarDays = 30;
@@ -39,6 +40,7 @@ namespace RosterRotation
             return new EacSettingsSnapshot
             {
                 RestDays = RosterRotationState.RestDays,
+                RecoveryLeavePercent = RosterRotationState.RecoveryLeavePercent,
                 UseKerbinDays = RosterRotationState.UseKerbinDays,
                 TrainingInitialDays = RosterRotationState.TrainingInitialDays,
                 TrainingStarDays = RosterRotationState.TrainingStarDays,
@@ -72,6 +74,10 @@ namespace RosterRotation
             if (settingsNode == null) return settings;
 
             settings.RestDays = PD(settingsNode.GetValue("restDays"), 14);
+            if (settingsNode.HasValue("recoveryLeavePercent"))
+                settings.RecoveryLeavePercent = PD(settingsNode.GetValue("recoveryLeavePercent"), 10);
+            else
+                settings.RecoveryLeavePercent = settings.RestDays <= 0 ? 0 : 10;
             settings.UseKerbinDays = PB(settingsNode.GetValue("useKerbinDays"), true);
             settings.TrainingInitialDays = PI(settingsNode.GetValue("trainingInitialDays"), 30);
             settings.TrainingStarDays = PI(settingsNode.GetValue("trainingStarDays"), 30);
@@ -104,6 +110,7 @@ namespace RosterRotation
             if (settings == null) return;
 
             RosterRotationState.RestDays = settings.RestDays;
+            RosterRotationState.RecoveryLeavePercent = settings.RecoveryLeavePercent;
             RosterRotationState.UseKerbinDays = settings.UseKerbinDays;
             RosterRotationState.TrainingInitialDays = settings.TrainingInitialDays;
             RosterRotationState.TrainingStarDays = settings.TrainingStarDays;
@@ -140,6 +147,7 @@ namespace RosterRotation
             var ci = formatProvider as CultureInfo ?? CultureInfo.InvariantCulture;
 
             node.AddValue("restDays", settings.RestDays.ToString(ci));
+            node.AddValue("recoveryLeavePercent", settings.RecoveryLeavePercent.ToString(ci));
             node.AddValue("useKerbinDays", settings.UseKerbinDays.ToString(ci));
             node.AddValue("trainingInitialDays", settings.TrainingInitialDays.ToString(ci));
             node.AddValue("trainingStarDays", settings.TrainingStarDays.ToString(ci));

@@ -12,7 +12,8 @@ namespace RosterRotation
 {
     public static class RosterRotationState
     {
-        public static double RestDays      = 14;
+        public static double RestDays      = 14; // legacy fallback retained for older saves
+        public static double RecoveryLeavePercent = 10;
         public static bool   UseKerbinDays = true;
 
         public static double DaySeconds => KspTimeMath.GetDaySeconds(UseKerbinDays);

@@ -11,27 +11,41 @@ namespace RosterRotation
     public class RosterRotationACButtons : MonoBehaviour
     {
         private GUIStyle _boldBtn;
+        private GUISkin _boldBtnSkinSource;
 
         private void OnGUI()
         {
             if (HighLogic.LoadedScene != GameScenes.SPACECENTER) return;
             if (!ACOpenCache.IsOpen) return;
 
-            if (_boldBtn == null)
+            GUISkin previousSkin = GUI.skin;
+            GUISkin kspSkin = KspGuiSkin.Current;
+            if (kspSkin != null)
+                GUI.skin = kspSkin;
+
+            try
             {
-                _boldBtn = new GUIStyle(GUI.skin.button);
-                _boldBtn.fontStyle = FontStyle.Bold;
-                _boldBtn.fontSize = 16;
-                _boldBtn.wordWrap = false;
+                if (_boldBtn == null || !ReferenceEquals(_boldBtnSkinSource, kspSkin))
+                {
+                    _boldBtnSkinSource = kspSkin;
+                    _boldBtn = new GUIStyle(KspGuiSkin.Button);
+                    _boldBtn.fontStyle = FontStyle.Bold;
+                    _boldBtn.fontSize = 16;
+                    _boldBtn.wordWrap = false;
+                }
+
+                float W = Screen.width, H = Screen.height;
+                float btnW = 220f, btnH = 34f;
+                float x = W * 0.44f - btnW * 0.5f;
+                float y = H * 0.070f - btnH * 0.5f;
+
+                if (GUI.Button(new Rect(x, y, btnW, btnH), "Astronaut Management", _boldBtn))
+                    RosterRotationKSCUIBridge.RequestOverlay(RosterRotationKSCUIBridge.AcOverlayOpen);
             }
-
-            float W = Screen.width, H = Screen.height;
-            float btnW = 220f, btnH = 34f;
-            float x = W * 0.44f - btnW * 0.5f;
-            float y = H * 0.070f - btnH * 0.5f;
-
-            if (GUI.Button(new Rect(x, y, btnW, btnH), "Astronaut Management", _boldBtn))
-                RosterRotationKSCUIBridge.RequestOverlay(RosterRotationKSCUIBridge.AcOverlayOpen);
+            finally
+            {
+                GUI.skin = previousSkin;
+            }
         }
     }
 

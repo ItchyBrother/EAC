@@ -2,6 +2,7 @@
 // Extracted data cache types and FlightTracker shim for Hall of History.
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -379,6 +380,19 @@ namespace RosterRotation
         {
             private static bool _checked;
             private static bool _available;
+            private static bool _searchedFlightsMethod;
+            private static MethodInfo _cachedFlightsMethod;
+            private static Type _cachedApiType;
+            private static FieldInfo _cachedApiInstanceField;
+            private static PropertyInfo _cachedApiInstanceProperty;
+            private static bool _searchedMissionHoursMethod;
+            private static MethodInfo _cachedMissionHoursMethod;
+            private static bool _searchedTimeLoggedStore;
+            private static Type _cachedTimeLoggedStoreType;
+            private static FieldInfo _cachedTimeLoggedStoreInstanceField;
+            private static PropertyInfo _cachedTimeLoggedStoreInstanceProperty;
+            private static FieldInfo _cachedTimeLoggedDictionaryField;
+            private static PropertyInfo _cachedTimeLoggedDictionaryProperty;
 
             public static bool Available
             {
@@ -392,13 +406,67 @@ namespace RosterRotation
             public static int GetFlightCount(string kerbalName)
             {
                 Ensure();
-                return -1;
+                if (!_available || string.IsNullOrEmpty(kerbalName))
+                    return -1;
+
+                try
+                {
+                    var api = GetFlightsMethod();
+                    if (api == null)
+                        return -1;
+
+                    object target = null;
+                    if (!api.IsStatic)
+                    {
+                        target = GetApiInstance();
+                        if (target == null)
+                            return -1;
+                    }
+
+                    object raw = api.Invoke(target, new object[] { kerbalName });
+                    return raw != null ? Math.Max(0, Convert.ToInt32(raw, CultureInfo.InvariantCulture)) : -1;
+                }
+                catch
+                {
+                    return -1;
+                }
             }
 
             public static double GetHours(string kerbalName)
             {
                 Ensure();
-                return -1d;
+                if (!_available || string.IsNullOrEmpty(kerbalName))
+                    return -1d;
+
+                try
+                {
+                    var api = GetMissionHoursMethod();
+                    if (api != null)
+                    {
+                        object target = null;
+                        if (!api.IsStatic)
+                        {
+                            target = GetApiInstance();
+                            if (target == null)
+                                return -1d;
+                        }
+
+                        object raw = api.Invoke(target, new object[] { kerbalName });
+                        if (raw == null)
+                            return -1d;
+
+                        double value = Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+                        if ((api.Name ?? string.Empty).IndexOf("Seconds", StringComparison.OrdinalIgnoreCase) >= 0)
+                            value /= 3600.0;
+
+                        return Math.Max(0d, value);
+                    }
+                }
+                catch
+                {
+                }
+
+                return TryGetTimeLoggedHours(kerbalName, out double hours) ? hours : -1d;
             }
 
             private static void Ensure()
@@ -412,6 +480,226 @@ namespace RosterRotation
                 catch
                 {
                     _available = false;
+                }
+            }
+
+            private static MethodInfo GetFlightsMethod()
+            {
+                if (_searchedFlightsMethod)
+                    return _cachedFlightsMethod;
+
+                _searchedFlightsMethod = true;
+                try
+                {
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        if (asm == null) continue;
+                        Type[] types;
+                        try { types = asm.GetTypes(); }
+                        catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                        catch { continue; }
+
+                        foreach (var t in types)
+                        {
+                            if (t == null) continue;
+                            try
+                            {
+                                var mi = t.GetMethod("GetNumberOfFlights", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
+                                      ?? t.GetMethod("GetNumberOfFlights", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
+                                if (mi == null) continue;
+
+                                _cachedFlightsMethod = mi;
+                                CacheApiType(t);
+                                return _cachedFlightsMethod;
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                return null;
+            }
+
+            private static MethodInfo GetMissionHoursMethod()
+            {
+                if (_searchedMissionHoursMethod)
+                    return _cachedMissionHoursMethod;
+
+                _searchedMissionHoursMethod = true;
+                try
+                {
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        if (asm == null) continue;
+                        Type[] types;
+                        try { types = asm.GetTypes(); }
+                        catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                        catch { continue; }
+
+                        foreach (var t in types)
+                        {
+                            if (t == null) continue;
+                            try
+                            {
+                                var mi = t.GetMethod("GetRecordedMissionTimeHours", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
+                                      ?? t.GetMethod("GetRecordedMissionTimeHours", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null)
+                                      ?? t.GetMethod("GetRecordedMissionTimeSeconds", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(string) }, null)
+                                      ?? t.GetMethod("GetRecordedMissionTimeSeconds", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
+                                if (mi == null) continue;
+
+                                _cachedMissionHoursMethod = mi;
+                                CacheApiType(t);
+                                return _cachedMissionHoursMethod;
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                return null;
+            }
+
+            private static void CacheApiType(Type type)
+            {
+                if (type == null || _cachedApiType != null)
+                    return;
+
+                _cachedApiType = type;
+                try { _cachedApiInstanceProperty = type.GetProperty("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static); }
+                catch { }
+                try { _cachedApiInstanceField = type.GetField("Instance", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static); }
+                catch { }
+            }
+
+            private static object GetApiInstance()
+            {
+                try
+                {
+                    if (_cachedApiInstanceProperty != null)
+                        return _cachedApiInstanceProperty.GetValue(null, null);
+                    if (_cachedApiInstanceField != null)
+                        return _cachedApiInstanceField.GetValue(null);
+                }
+                catch
+                {
+                }
+
+                return null;
+            }
+
+            private static bool ResolveTimeLoggedStore()
+            {
+                if (_searchedTimeLoggedStore)
+                    return _cachedTimeLoggedStoreType != null && (_cachedTimeLoggedDictionaryField != null || _cachedTimeLoggedDictionaryProperty != null);
+
+                _searchedTimeLoggedStore = true;
+                try
+                {
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        if (asm == null) continue;
+                        Type[] types;
+                        try { types = asm.GetTypes(); }
+                        catch (ReflectionTypeLoadException rtl) { types = rtl.Types; }
+                        catch { continue; }
+
+                        foreach (var t in types)
+                        {
+                            if (t == null) continue;
+
+                            FieldInfo dictField = null;
+                            PropertyInfo dictProp = null;
+                            foreach (string memberName in new[] { "KerbalFlightTime", "TimeLogged" })
+                            {
+                                try { dictField = t.GetField(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); }
+                                catch { }
+                                if (dictField != null && typeof(IDictionary).IsAssignableFrom(dictField.FieldType))
+                                    break;
+                                dictField = null;
+
+                                try { dictProp = t.GetProperty(memberName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic); }
+                                catch { }
+                                if (dictProp != null && typeof(IDictionary).IsAssignableFrom(dictProp.PropertyType))
+                                    break;
+                                dictProp = null;
+                            }
+
+                            if (dictField == null && dictProp == null) continue;
+
+                            FieldInfo instanceField = null;
+                            PropertyInfo instanceProp = null;
+                            try { instanceField = t.GetField("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic); }
+                            catch { }
+                            if (instanceField == null)
+                            {
+                                try { instanceProp = t.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic); }
+                                catch { }
+                            }
+
+                            if (instanceField == null && instanceProp == null) continue;
+
+                            _cachedTimeLoggedStoreType = t;
+                            _cachedTimeLoggedStoreInstanceField = instanceField;
+                            _cachedTimeLoggedStoreInstanceProperty = instanceProp;
+                            _cachedTimeLoggedDictionaryField = dictField;
+                            _cachedTimeLoggedDictionaryProperty = dictProp;
+                            return true;
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                return false;
+            }
+
+            private static bool TryGetTimeLoggedHours(string kerbalName, out double hours)
+            {
+                hours = -1d;
+                if (string.IsNullOrEmpty(kerbalName) || !ResolveTimeLoggedStore())
+                    return false;
+
+                try
+                {
+                    object instance = null;
+                    if (_cachedTimeLoggedStoreInstanceProperty != null)
+                        instance = _cachedTimeLoggedStoreInstanceProperty.GetValue(null, null);
+                    else if (_cachedTimeLoggedStoreInstanceField != null)
+                        instance = _cachedTimeLoggedStoreInstanceField.GetValue(null);
+
+                    if (instance == null)
+                        return false;
+
+                    var dict = _cachedTimeLoggedDictionaryField != null
+                        ? _cachedTimeLoggedDictionaryField.GetValue(instance) as IDictionary
+                        : _cachedTimeLoggedDictionaryProperty != null
+                            ? _cachedTimeLoggedDictionaryProperty.GetValue(instance, null) as IDictionary
+                            : null;
+                    if (dict == null || !dict.Contains(kerbalName))
+                        return false;
+
+                    object raw = dict[kerbalName];
+                    if (raw == null)
+                        return false;
+
+                    hours = Math.Max(0d, Convert.ToDouble(raw, CultureInfo.InvariantCulture));
+                    return true;
+                }
+                catch
+                {
+                    hours = -1d;
+                    return false;
                 }
             }
         }

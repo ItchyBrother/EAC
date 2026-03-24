@@ -89,6 +89,7 @@ namespace RosterRotation
         private GUIStyle _metaValueStyle;
         private GUIStyle _badgeStyle;
         private bool _stylesReady;
+        private GUISkin _styleSourceSkin;
         private GUIStyle _windowStyle;
         private readonly Dictionary<string, Texture> _portraitCache = new Dictionary<string, Texture>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> _textureReplacerPortraitKeys = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -172,25 +173,34 @@ namespace RosterRotation
         private void OnGUI()
         {
             if (!_show) return;
-            EnsureStyles();
-            _window = GUILayout.Window(GetInstanceID() + 919191, _window, DrawWindow, WindowTitle, _windowStyle);
+
+            GUISkin previousSkin = GUI.skin;
+            GUISkin kspSkin = KspGuiSkin.Current;
+            if (kspSkin != null)
+                GUI.skin = kspSkin;
+
+            try
+            {
+                EnsureStyles();
+                _window = GUILayout.Window(GetInstanceID() + 919191, _window, DrawWindow, WindowTitle, _windowStyle);
+            }
+            finally
+            {
+                GUI.skin = previousSkin;
+            }
         }
 
         private void EnsureStyles()
         {
-            if (_stylesReady) return;
+            GUISkin currentSkin = KspGuiSkin.Current;
+            if (_stylesReady && ReferenceEquals(_styleSourceSkin, currentSkin)) return;
+
             _stylesReady = true;
+            _styleSourceSkin = currentSkin;
 
-            // Opaque window background — KSP's default skin texture is semi-transparent,
-            // so we replace it with a solid 1x1 texture of the same dark colour.
-            var bgTex = new Texture2D(1, 1, TextureFormat.ARGB32, false);
-            bgTex.SetPixel(0, 0, new Color(0.12f, 0.12f, 0.12f, 0.96f)); //changes opacity
-            bgTex.Apply();
-            _windowStyle = new GUIStyle(GUI.skin.window);
-            _windowStyle.normal.background   = bgTex;
-            _windowStyle.onNormal.background = bgTex;
+            _windowStyle = new GUIStyle(KspGuiSkin.Window);
 
-            _headerStyle = new GUIStyle(GUI.skin.label)
+            _headerStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 22,
                 fontStyle = FontStyle.Bold,
@@ -198,7 +208,7 @@ namespace RosterRotation
                 wordWrap = false
             };
 
-            _subheaderStyle = new GUIStyle(GUI.skin.label)
+            _subheaderStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 14,
                 fontStyle = FontStyle.Bold,
@@ -206,7 +216,7 @@ namespace RosterRotation
                 wordWrap = false
             };
 
-            _sectionHeaderStyle = new GUIStyle(GUI.skin.box)
+            _sectionHeaderStyle = new GUIStyle(KspGuiSkin.Box)
             {
                 alignment = TextAnchor.MiddleLeft,
                 fontSize = 12,
@@ -220,7 +230,7 @@ namespace RosterRotation
                 fontSize = 13
             };
 
-            _cardStyle = new GUIStyle(GUI.skin.box)
+            _cardStyle = new GUIStyle(KspGuiSkin.Box)
             {
                 padding = new RectOffset(10, 10, 10, 10),
                 margin = new RectOffset(4, 4, 4, 4),
@@ -233,7 +243,7 @@ namespace RosterRotation
                 fontStyle = FontStyle.Bold
             };
 
-            _detailStyle = new GUIStyle(GUI.skin.box)
+            _detailStyle = new GUIStyle(KspGuiSkin.Box)
             {
                 padding = new RectOffset(14, 14, 14, 14),
                 margin = new RectOffset(6, 6, 6, 6),
@@ -241,7 +251,7 @@ namespace RosterRotation
                 wordWrap = true
             };
 
-            _mutedStyle = new GUIStyle(GUI.skin.label)
+            _mutedStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 12,
                 wordWrap = true,
@@ -258,7 +268,7 @@ namespace RosterRotation
                 alignment = TextAnchor.MiddleCenter
             };
 
-            _nameStyle = new GUIStyle(GUI.skin.label)
+            _nameStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 17,
                 fontStyle = FontStyle.Bold,
@@ -281,14 +291,14 @@ namespace RosterRotation
                 clipping = TextClipping.Overflow
             };
 
-            _plaqueBodyStyle = new GUIStyle(GUI.skin.box)
+            _plaqueBodyStyle = new GUIStyle(KspGuiSkin.Box)
             {
                 padding = new RectOffset(14, 14, 12, 12),
                 margin = new RectOffset(2, 2, 4, 4),
                 wordWrap = true
             };
 
-            _quoteStyle = new GUIStyle(GUI.skin.label)
+            _quoteStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 13,
                 wordWrap = true,
@@ -304,14 +314,14 @@ namespace RosterRotation
                 alignment = TextAnchor.UpperLeft
             };
 
-            _metaValueStyle = new GUIStyle(GUI.skin.label)
+            _metaValueStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 fontSize = 13,
                 wordWrap = true,
                 alignment = TextAnchor.UpperLeft
             };
 
-            _pillStyle = new GUIStyle(GUI.skin.box)
+            _pillStyle = new GUIStyle(KspGuiSkin.Box)
             {
                 padding = new RectOffset(6, 6, 3, 3),
                 margin = new RectOffset(2, 2, 2, 2),
@@ -325,14 +335,14 @@ namespace RosterRotation
                 margin = new RectOffset(0, 0, 0, 0)
             };
 
-            _rightStyle = new GUIStyle(GUI.skin.label)
+            _rightStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 alignment = TextAnchor.MiddleRight,
                 fontSize = 12,
                 wordWrap = false
             };
 
-            _wrapStyle = new GUIStyle(GUI.skin.label)
+            _wrapStyle = new GUIStyle(KspGuiSkin.Label)
             {
                 wordWrap = true,
                 fontSize = 12
@@ -435,7 +445,7 @@ namespace RosterRotation
             {
                 GUILayout.Space(10);
                 GUILayout.Label("No memorial entries found yet.", _mutedStyle);
-                GUILayout.Label("Expected data sources: ROSTER for death status, EAC records for memorial metadata, and FlightTracker for service time when available.", _smallMutedStyle);
+                GUILayout.Label("Expected data sources: ROSTER for death status, EAC records for memorial metadata and flight counts, and FlightTracker for flight hours when available.", _smallMutedStyle);
             }
             else
             {
@@ -542,15 +552,7 @@ namespace RosterRotation
 
             GUILayout.Label(BuildRoleServiceLine(entry), _mutedStyle);
 
-            GUILayout.Label(string.Format(
-                CultureInfo.InvariantCulture,
-                "{0}  •  {1} flight{2}  •  {3} first{4}  •  {5}",
-                string.IsNullOrEmpty(entry.RecordedDateText) ? "Date unavailable" : entry.RecordedDateText,
-                entry.Flights,
-                entry.Flights == 1 ? string.Empty : "s",
-                entry.WorldFirsts,
-                entry.WorldFirsts == 1 ? string.Empty : "s",
-                entry.HoursText), _smallMutedStyle);
+            GUILayout.Label(BuildMemorialMetricsLine(entry, "Date unavailable"), _smallMutedStyle);
 
             GUILayout.Space(4);
             GUILayout.Label(entry.Citation, _wrapStyle, GUILayout.Height(34));
@@ -616,7 +618,8 @@ namespace RosterRotation
                 DrawPlaqueFact("Retired At", entry.RetiredExperienceStars);
             DrawPlaqueFact("Flights", entry.Flights.ToString(CultureInfo.InvariantCulture));
             DrawPlaqueFact("World Firsts", entry.WorldFirsts.ToString(CultureInfo.InvariantCulture));
-            DrawPlaqueFact("Service Time", entry.HoursText);
+            if (!string.IsNullOrEmpty(entry.HoursText))
+                DrawPlaqueFact("Flight Hours", entry.HoursText);
             DrawPlaqueFact("Archive Date", entry.RecordedDateText);
             GUILayout.EndVertical();
             GUILayout.EndHorizontal();
@@ -930,17 +933,27 @@ namespace RosterRotation
             GUILayout.Space(2f);
         }
 
+        private static string BuildMemorialMetricsLine(MemorialEntry entry, string missingDateText, string datePrefix = "")
+        {
+            if (entry == null)
+                return string.Empty;
+
+            var parts = new List<string>(4)
+            {
+                datePrefix + (string.IsNullOrEmpty(entry.RecordedDateText) ? missingDateText : entry.RecordedDateText),
+                string.Format(CultureInfo.InvariantCulture, "{0} flight{1}", entry.Flights, entry.Flights == 1 ? string.Empty : "s"),
+                string.Format(CultureInfo.InvariantCulture, "{0} first{1}", entry.WorldFirsts, entry.WorldFirsts == 1 ? string.Empty : "s")
+            };
+
+            if (!string.IsNullOrEmpty(entry.HoursText))
+                parts.Add("Flight Hours " + entry.HoursText);
+
+            return string.Join("  •  ", parts.ToArray());
+        }
+
         private static string BuildMemorialSummary(MemorialEntry entry)
         {
-            return string.Format(
-                CultureInfo.InvariantCulture,
-                "Recorded {0}  •  {1} flight{2}  •  {3} first{4}  •  {5}",
-                string.IsNullOrEmpty(entry.RecordedDateText) ? "date unavailable" : entry.RecordedDateText,
-                entry.Flights,
-                entry.Flights == 1 ? string.Empty : "s",
-                entry.WorldFirsts,
-                entry.WorldFirsts == 1 ? string.Empty : "s",
-                entry.HoursText);
+            return BuildMemorialMetricsLine(entry, "date unavailable", "Recorded ");
         }
 
         private static string BuildRoleServiceLine(MemorialEntry entry)
@@ -980,7 +993,7 @@ namespace RosterRotation
             if (tex != null)
                 GUI.DrawTexture(rect, tex, ScaleMode.ScaleToFit, true);
             else
-                GUI.Label(rect, "NO FLAG", new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter });
+                GUI.Label(rect, "NO FLAG", new GUIStyle(KspGuiSkin.Label) { alignment = TextAnchor.MiddleCenter });
             GUILayout.EndVertical();
         }
 
@@ -997,7 +1010,7 @@ namespace RosterRotation
 
             GUI.Box(rect, GUIContent.none);
             string glyph = GetMilestoneGlyph(FirstNonEmpty(entry.CategoryText, entry.KindText, entry.Title));
-            GUI.Label(rect, glyph, new GUIStyle(GUI.skin.label)
+            GUI.Label(rect, glyph, new GUIStyle(KspGuiSkin.Label)
             {
                 alignment = TextAnchor.MiddleCenter,
                 fontSize = Mathf.RoundToInt(h * 0.40f),
@@ -1197,8 +1210,8 @@ namespace RosterRotation
             BuildMemorials(recordMap, rosterMap, liveMap);
 
             string ftMsg = FlightTrackerShim.Available
-                ? "FlightTracker detected: flights and mission hours merged where possible."
-                : "FlightTracker not detected: memorials use roster first, then EAC metadata.";
+                ? "FlightTracker detected: memorial flight hours come from FlightTracker when available."
+                : "FlightTracker not detected: memorials show EAC flight counts only.";
             _cache.DataSummary = ftMsg;
         }
 
@@ -1411,9 +1424,7 @@ namespace RosterRotation
                 entry.Flights = flights;
 
                 double hours = FlightTrackerShim.GetHours(name);
-                if (hours < 0d && eac != null && eac.MissionHours > 0d)
-                    hours = eac.MissionHours;
-                entry.HoursText = hours > 0d ? FormatHours(hours) : "service time unavailable";
+                entry.HoursText = hours > 0d ? FormatHours(hours) : string.Empty;
 
                 if (eac != null && eac.BirthUT >= 0d && eac.DeathUT >= eac.BirthUT)
                 {
@@ -1837,7 +1848,7 @@ namespace RosterRotation
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Remembered as a {0} and a member of the program. Their name is kept here so every launch carries some memory of the crews who came before.",
+                "Remembered as a member of the program. Their name is kept here so every launch carries some memory of the crews who came before.",
                 string.IsNullOrEmpty(entry.Role) ? "kerbonaut" : entry.Role.ToLowerInvariant());
         }
 
@@ -1935,7 +1946,7 @@ namespace RosterRotation
 
         private static string FormatHours(double hours)
         {
-            if (hours < 0d) return "service time unavailable";
+            if (hours < 0d) return string.Empty;
             return hours.ToString("0.0", CultureInfo.InvariantCulture) + " h";
         }
 

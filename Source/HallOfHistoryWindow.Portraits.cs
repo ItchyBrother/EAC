@@ -18,7 +18,7 @@ namespace RosterRotation
     {
         private void DrawPortraitBlock(string name, string role, float w, float h, bool framed, string badgeText = null)
         {
-            GUILayout.BeginVertical(framed ? _plaqueBodyStyle : GUI.skin.box, GUILayout.Width(w), GUILayout.Height(h));
+            GUILayout.BeginVertical(framed ? _plaqueBodyStyle : KspGuiSkin.Box, GUILayout.Width(w), GUILayout.Height(h));
             GUILayout.Space(2f);
 
             Rect rect = GUILayoutUtility.GetRect(w - 12f, h * 0.74f, GUILayout.Width(w - 12f), GUILayout.Height(h * 0.74f));
@@ -79,7 +79,7 @@ namespace RosterRotation
 
             string initial = string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpperInvariant();
             Rect initialRect = new Rect(rect.x, rect.y + rect.height * 0.10f, rect.width, rect.height * 0.55f);
-            GUI.Label(initialRect, initial, new GUIStyle(GUI.skin.label)
+            GUI.Label(initialRect, initial, new GUIStyle(KspGuiSkin.Label)
             {
                 alignment = TextAnchor.MiddleCenter,
                 fontSize = Mathf.RoundToInt(rect.height * 0.42f),
