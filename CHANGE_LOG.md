@@ -3,6 +3,14 @@
 # Change Log
 ### 2026-0324: 1.1.2 for KSP >= 1.12.X
 
+### Fixed Training
+- Level-up training now uses the configurable TrainingStarDays setting instead of hardcoded 30
+- Training confirmation preview now uses TrainingStarDays
+- Training overlay duration preview now uses TrainingStarDays
+- Recall refresher remains fixed at 30 days, unchanged
+
+### 2026-0323: 1.1.2 for KSP >= 1.12.X
+
 ### UI / Skinning
 - Updated EAC UI styling to use **KSP’s native `HighLogic.Skin`** instead of relying on BRP-only or generic `GUI.skin` styling.
 - Applied KSP skin usage to:
