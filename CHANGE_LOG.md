@@ -1,7 +1,8 @@
 # Enhanced Astronaut Complex (EAC)
 
 # Change Log
-###2026-0324-1 1.1.4 for KSP >= 1.12.X
+
+###	2026-0324-1 1.1.4 for KSP >= 1.12.X
 
 - Fixed issue with RestDay and Recovery percentages not working as expected.  Thanks Terensky!
 
