@@ -30,7 +30,7 @@ namespace RosterRotation
 
         public static double CalculateTrainingDays(float stupidity01, int targetLevel, double randomness01)
         {
-            double baseDays = targetLevel * 30.0;
+            double baseDays = targetLevel * RosterRotationState.TrainingStarDays;
             double stupidity = Clamp01(stupidity01);
             double extraFrac = randomness01 * stupidity * 0.5;
             return baseDays * (1.0 + extraFrac);

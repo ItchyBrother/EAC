@@ -142,7 +142,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.1.2";
+        private const string ModVersion = "1.1.3";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -758,7 +758,7 @@ namespace RosterRotation
             GUILayout.Space(6);
             GUILayout.BeginVertical(KspGuiSkin.Box);
             GUILayout.Label($"Train {trainK.name}  L{(int)trainK.experienceLevel} → L{tgt}");
-            int cBase = tgt * 30;
+            int cBase = tgt * RosterRotationState.TrainingStarDays;
             int cMax = (int)(cBase * 1.5);
             string cDur = trainK.stupidity < 0.01f ? $"{cBase}d" : $"{cBase}–{cMax}d";
             GUILayout.Label($"Cost: √{fCost:N0}  |  {rCost:N0} R&D  |  {cDur}");
@@ -827,7 +827,7 @@ namespace RosterRotation
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(k.name, GUILayout.Width(140));
                 GUILayout.Label($"L{(int)k.experienceLevel}→L{tgtT}", GUILayout.Width(70));
-                int baseD = tgtT * 30; int maxD = (int)(baseD * 1.5);
+                int baseD = tgtT * RosterRotationState.TrainingStarDays; int maxD = (int)(baseD * 1.5);
                 GUILayout.Label($"√{fc:N0} + {rc:N0}R  {(k.stupidity < 0.01f ? $"{baseD}d" : $"{baseD}–{maxD}d")}", GUILayout.Width(200));
                 GUILayout.FlexibleSpace();
                 GUI.enabled = afford;
