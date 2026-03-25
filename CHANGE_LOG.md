@@ -13,7 +13,7 @@
 		maxDays
 -	if a kerbal’s MissionStartUT was never set or is invalid, EAC now treats their personal mission duration as 0 for base recovery leave rather than falling back to vessel age.
 
-###2026-0324-1 1.1.4 for KSP >= 1.12.X
+###	2026-0324-1 1.1.4 for KSP >= 1.12.X
 
 - Fixed issue with RestDay and Recovery percentages not working as expected.  Thanks Terensky!
 
