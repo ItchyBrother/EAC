@@ -180,20 +180,10 @@ namespace RosterRotation
                 return;
             }
 
-            double baseRecoveryDays = ComputeBaseRecoveryDays(vessel);
-            if (baseRecoveryDays <= 0)
-            {
-                RRLog.Verbose("[EAC] Base recovery leave disabled or zero for vessel=" + SafeVesselName(vessel)
-                    + ": missionDays=" + GetMissionDays(vessel).ToString("0.###")
-                    + ", percent=" + RosterRotationState.RecoveryLeavePercent.ToString("0.###")
-                    + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###"));
-                return;
-            }
-
             List<ProtoCrewMember> crew = vessel.GetVesselCrew();
             if (crew == null || crew.Count == 0) return;
 
-            double baseUntil = now + baseRecoveryDays * RosterRotationState.DaySeconds;
+            bool appliedAny = false;
             for (int i = 0; i < crew.Count; i++)
             {
                 ProtoCrewMember pcm = crew[i];
@@ -203,21 +193,41 @@ namespace RosterRotation
                 RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
                 if (rec.Retired) continue;
 
-                double restUntil = baseUntil;
+                double missionDays = GetMissionDays(pcm, rec, now);
+                double baseRecoveryDays = ComputeBaseRecoveryDays(pcm, rec, now);
+                if (baseRecoveryDays <= 0)
+                {
+                    RRLog.Verbose("[EAC] Base recovery leave disabled or zero for " + pcm.name
+                        + ": missionDays=" + missionDays.ToString("0.###")
+                        + ", percent=" + RosterRotationState.RecoveryLeavePercent.ToString("0.###")
+                        + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
+                        + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###"));
+                    continue;
+                }
+
+                double restUntil = now + baseRecoveryDays * RosterRotationState.DaySeconds;
                 if (pcm.inactiveTimeEnd > now)
                     restUntil = Math.Max(restUntil, pcm.inactiveTimeEnd);
 
                 pcm.inactive = true;
                 pcm.inactiveTimeEnd = restUntil;
                 rec.RestUntilUT = Math.Max(rec.RestUntilUT, restUntil);
+                appliedAny = true;
 
                 RRLog.Verbose("[EAC] Base recovery leave applied for " + pcm.name
-                    + ": missionDays=" + GetMissionDays(vessel).ToString("0.###")
+                    + ": missionDays=" + missionDays.ToString("0.###")
                     + ", percent=" + RosterRotationState.RecoveryLeavePercent.ToString("0.###")
                     + ", baseRecoveryDays=" + baseRecoveryDays.ToString("0.###")
                     + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
+                    + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###")
                     + ", inactiveTimeEnd=" + pcm.inactiveTimeEnd.ToString("0.###")
                     + ", rec.RestUntilUT=" + rec.RestUntilUT.ToString("0.###"));
+            }
+
+            if (!appliedAny)
+            {
+                RRLog.Verbose("[EAC] Base recovery leave not applied for vessel=" + SafeVesselName(vessel)
+                    + ": no crew had a positive personal mission duration.");
             }
         }
 
@@ -276,7 +286,8 @@ namespace RosterRotation
                 return CrashApplySource.CrewRandRPending;
             }
 
-            double baseRecoveryDays = ComputeBaseRecoveryDays(vessel);
+            double missionDays = GetMissionDays(pcm, rec, now);
+            double baseRecoveryDays = ComputeBaseRecoveryDays(pcm, rec, now);
             baseUntil = now + baseRecoveryDays * RosterRotationState.DaySeconds;
             if (pcm.inactiveTimeEnd > now)
                 baseUntil = Math.Max(baseUntil, pcm.inactiveTimeEnd);
@@ -287,22 +298,23 @@ namespace RosterRotation
             rec.RestUntilUT = Math.Max(rec.RestUntilUT, eacUntil);
 
             RRLog.Verbose("[EAC] Crash recovery leave computed for " + pcm.name
-                + ": missionDays=" + GetMissionDays(vessel).ToString("0.###")
+                + ": missionDays=" + missionDays.ToString("0.###")
                 + ", percent=" + RosterRotationState.RecoveryLeavePercent.ToString("0.###")
                 + ", baseRecoveryDays=" + baseRecoveryDays.ToString("0.###")
                 + ", extraDays=" + outcome.ExtraDays.ToString("0.###")
                 + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
+                + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###")
                 + ", until=" + eacUntil.ToString("0.###"));
 
             return CrashApplySource.EAC;
         }
 
-        private static double ComputeBaseRecoveryDays(Vessel vessel)
+        private static double ComputeBaseRecoveryDays(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double now)
         {
             double percent = Math.Max(0, RosterRotationState.RecoveryLeavePercent);
             if (percent <= 0) return 0;
 
-            double missionDays = GetMissionDays(vessel);
+            double missionDays = GetMissionDays(pcm, rec, now);
             if (missionDays <= 0) return 0;
 
             double computedDays = missionDays * (percent / 100.0);
@@ -313,13 +325,15 @@ namespace RosterRotation
             return Math.Max(0, computedDays);
         }
 
-        private static double GetMissionDays(Vessel vessel)
+        private static double GetMissionDays(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double now)
         {
-            if (vessel == null) return 0;
-            double missionSeconds = Math.Max(0, vessel.missionTime);
-            if (missionSeconds <= 0) return 0;
+            if (pcm == null || rec == null) return 0;
             double daySeconds = RosterRotationState.DaySeconds;
             if (daySeconds <= 0) return 0;
+            if (rec.MissionStartUT <= 0 || rec.MissionStartUT > now) return 0;
+
+            double missionSeconds = Math.Max(0, now - rec.MissionStartUT);
+            if (missionSeconds <= 0) return 0;
             return missionSeconds / daySeconds;
         }
 
