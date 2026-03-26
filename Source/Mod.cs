@@ -29,6 +29,53 @@ namespace RosterRotation
         Death      = 4
     }
 
+    internal static class MissionTimeTracker
+    {
+        internal static bool SyncKerbal(ProtoCrewMember k, double nowUT, bool resetWhenNotAssigned = true)
+        {
+            if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) return false;
+
+            var rec = RosterRotationState.GetOrCreate(k.name);
+            bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
+
+            if (onMission)
+            {
+                if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT)
+                {
+                    rec.MissionStartUT = nowUT;
+                    rec.LastMissionDeathCheckUT = 0;
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (resetWhenNotAssigned && (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0))
+            {
+                rec.MissionStartUT = 0;
+                rec.LastMissionDeathCheckUT = 0;
+                return true;
+            }
+
+            return false;
+        }
+
+        internal static bool SyncRoster(double nowUT, bool resetWhenNotAssigned = true)
+        {
+            var roster = HighLogic.CurrentGame?.CrewRoster;
+            if (roster == null) return false;
+
+            bool anyDirty = false;
+            foreach (var k in roster.Crew)
+            {
+                if (SyncKerbal(k, nowUT, resetWhenNotAssigned))
+                    anyDirty = true;
+            }
+
+            return anyDirty;
+        }
+    }
+
     // ── Shared state ───────────────────────────────────────────────────────────
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public class RosterRotationFlightTracker : MonoBehaviour
@@ -37,6 +84,10 @@ namespace RosterRotation
         {
             GameEvents.OnVesselRecoveryRequested.Add(OnRecover);
             GameEvents.onKerbalStatusChange.Add(OnKerbalStatusChange);
+
+            double now = Planetarium.GetUniversalTime();
+            if (MissionTimeTracker.SyncRoster(now))
+                SaveScheduler.RequestSave("flight mission tracking init");
         }
 
         private void OnDestroy()
@@ -100,6 +151,17 @@ namespace RosterRotation
             var rec = RosterRotationState.GetOrCreate(pcm.name);
             double now = Planetarium.GetUniversalTime();
 
+            if (newStatus == ProtoCrewMember.RosterStatus.Assigned)
+            {
+                if (MissionTimeTracker.SyncKerbal(pcm, now, resetWhenNotAssigned: false))
+                    SaveScheduler.RequestSave("kerbal assigned mission tracking");
+            }
+            else if (oldStatus == ProtoCrewMember.RosterStatus.Assigned && newStatus != ProtoCrewMember.RosterStatus.Assigned)
+            {
+                if (MissionTimeTracker.SyncKerbal(pcm, now, resetWhenNotAssigned: true))
+                    SaveScheduler.RequestSave("kerbal unassigned mission tracking");
+            }
+
             if (newStatus == ProtoCrewMember.RosterStatus.Available && rec.DeathUT > 0)
             {
                 rec.DeathUT = 0;
@@ -142,7 +204,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.1.4";
+        private const string ModVersion = "1.1.6";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -370,8 +432,17 @@ namespace RosterRotation
             if (Time.realtimeSinceStartup < _nextCheckRT) return;
             _nextCheckRT = Time.realtimeSinceStartup + CHECK_INTERVAL;
             CheckTrainingCompletion();
+
+            double nowUT = Planetarium.GetUniversalTime();
+            bool missionTrackingDirty = MissionTimeTracker.SyncRoster(nowUT);
             if (RosterRotationState.AgingEnabled)
+            {
                 CheckAgingAndRetirement();
+            }
+            else if (missionTrackingDirty)
+            {
+                SaveScheduler.RequestSave("mission tracking sync");
+            }
         }
 
         private void OnKerbalTypeChange(ProtoCrewMember pcm,
@@ -2250,20 +2321,8 @@ namespace RosterRotation
                 if (currentAge < 0) continue;
 
                 bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
-                if (onMission)
-                {
-                    if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT)
-                    {
-                        rec.MissionStartUT = nowUT;
-                        anyDirty = true;
-                    }
-                }
-                else if (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0)
-                {
-                    rec.MissionStartUT = 0;
-                    rec.LastMissionDeathCheckUT = 0;
+                if (MissionTimeTracker.SyncKerbal(k, nowUT))
                     anyDirty = true;
-                }
 
                 double effectiveRetireUT = rec.NaturalRetirementUT + rec.RetirementDelayYears * yearSec;
                 if (!rec.Retired)
