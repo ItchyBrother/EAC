@@ -2,6 +2,13 @@
 
 # Change Log
 
+### 2026-0326: 1.1.6 for KSP >= 1.12.X
+-	Added mission-time tracking that runs independently of aging
+-	Added syncing in:
+		flight-scene startup
+		kerbal status changes to/from Assigned
+		KSC periodic update
+
 ### 2026-0325: 1.1.5 for KSP >= 1.12.X
 -	Base recovery leave now uses each kerbal’s own MissionStartUT
 -	Crash recovery leave base time also uses each kerbal’s own MissionStartUT
