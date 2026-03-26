@@ -14,9 +14,9 @@ using System.Runtime.CompilerServices;
 [assembly: ComVisible(false)]
 [assembly: Guid("7f0c632f-0d4e-4f76-b767-b6b9fbbca0de")]
 
-[assembly: AssemblyVersion("1.1.2.0")]
-[assembly: AssemblyFileVersion("1.1.2.0")]
-[assembly: AssemblyInformationalVersion("1.1.2")]
+[assembly: AssemblyVersion("1.1.6.0")]
+[assembly: AssemblyFileVersion("1.1.6.0")]
+[assembly: AssemblyInformationalVersion("1.1.6")]
 
 [assembly: InternalsVisibleTo("EAC.Tests")]
 [assembly: InternalsVisibleTo("RosterRotation.Tests")]
