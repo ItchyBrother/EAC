@@ -2,6 +2,36 @@
 
 # Change Log
 
+# 2026-0327: EAC v1.1.7 for KSP >= 1.12.X
+
+## Fixed
+
+### Recovery / R&R
+- Fixed a recovery timing bug where `MissionStartUT` could be cleared before post-mission recovery leave was calculated.
+- Fixed a related flight-scene status-change issue where `MissionStartUT` could be wiped too early when a kerbal changed from `Assigned` to another roster state.
+- Normal recovery leave now explicitly requests a save after it is applied, so rest/recovery state persists reliably.
+- Fixed `RestDay Max = 0` so it now behaves as a true zero cap instead of acting like “no cap.”
+- Fixed a multi-crew crash-recovery issue where vessel-wide base recovery leave could be re-applied multiple times during no-injury outcomes. Base recovery leave is now only applied once per vessel recovery.
+
+### FlightTracker / veteran progression
+- Fixed a bug where the one-time EAC → FlightTracker flight-count sync only ran when verbose logging was enabled. It now runs correctly for all users.
+- Fixed veteran hour progression so FlightTracker takes precedence when installed.
+- Fixed a potential double-counting issue where veteran service-hour growth could add both FlightTracker recorded hours and current mission time for the same flight.
+- Veteran flight counts now also prefer FlightTracker when it is installed, instead of mixing or max-merging counts.
+
+### Retirement / morale
+- Fixed a retirement-probability bug for kerbals who had never flown a mission.
+- New kerbals were previously treated as if they had been inactive for an extreme amount of time, causing retirement odds that were far too high immediately after training.
+- Never-flown kerbals are now treated as fresh rather than long-neglected veterans.
+
+### Persistence / save consistency
+- Fixed a save-time flight-count drift issue where writing a reconciled flight total to the save file could also overwrite the live in-memory value for the rest of the session.
+- Save reconciliation now preserves the live runtime record while still writing the corrected value to disk.
+
+### Internal cleanup / behavior consistency
+- Recovery leave, crash leave, and veteran progression behavior were tightened up to better respect the intended precedence rules when external mods such as FlightTracker are installed.
+- Reduced redundant recovery processing and verbose-log spam in multi-crew recovery edge cases.
+
 ### 2026-0326: 1.1.6 for KSP >= 1.12.X
 -	Added mission-time tracking that runs independently of aging
 -	Added syncing in:
