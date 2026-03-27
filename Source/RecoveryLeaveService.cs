@@ -228,7 +228,10 @@ namespace RosterRotation
             {
                 RRLog.Verbose("[EAC] Base recovery leave not applied for vessel=" + SafeVesselName(vessel)
                     + ": no crew had a positive personal mission duration.");
+                return;
             }
+
+            SaveScheduler.RequestSave("base recovery leave");
         }
 
         internal static CrashApplySource ApplyCrashRecoveryTime(
@@ -319,8 +322,7 @@ namespace RosterRotation
 
             double computedDays = missionDays * (percent / 100.0);
             double maxDays = Math.Max(0, RosterRotationState.RestDays);
-            if (maxDays > 0)
-                computedDays = Math.Min(computedDays, maxDays);
+            computedDays = Math.Min(computedDays, maxDays);
 
             return Math.Max(0, computedDays);
         }

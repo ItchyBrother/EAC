@@ -79,9 +79,11 @@ namespace RosterRotation
                 {
                     var r = kvp.Value;
                     ConfigNode rNode = root.AddNode("Record");
-                    int recoveredFlights = GetRecoveredFlightCountFromRoster(kvp.Key, r.Flights);
-                    r.Flights = recoveredFlights;
+                    int liveFlights = r.Flights;
+                    int savedFlights = GetRecoveredFlightCountFromRoster(kvp.Key, liveFlights);
+                    r.Flights = savedFlights;
                     KerbalRecordPersistence.WriteRecordNode(rNode, kvp.Key, r, ci);
+                    r.Flights = liveFlights;
                 }
             }
             catch (Exception ex) { RRLog.Error($"OnSave failed: {ex}"); }

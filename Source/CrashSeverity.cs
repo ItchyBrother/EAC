@@ -696,6 +696,7 @@ namespace RosterRotation
                 return;
             }
 
+            bool baseRecoveryApplied = false;
             for (int i = 0; i < survivors.Count; i++)
             {
                 ProtoCrewMember pcm = survivors[i];
@@ -722,7 +723,11 @@ namespace RosterRotation
                     RRLog.Verbose("[EAC] Crash roll resulted in no injury for " + pcm.name
                         + ": roll=" + outcome.Roll
                         + ", modifier=" + outcome.Modifier);
-                    RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                    if (!baseRecoveryApplied)
+                    {
+                        RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                        baseRecoveryApplied = true;
+                    }
                     PostRecoveryNotification(pcm, tracked, outcome);
                 }
                 else

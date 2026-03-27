@@ -100,14 +100,13 @@ namespace RosterRotation
         {
             if (v == null) return;
             double now = Planetarium.GetUniversalTime();
-            foreach (var pcm in v.GetVesselCrew())
+            var recoveredCrew = v.GetVesselCrew();
+            foreach (var pcm in recoveredCrew)
             {
                 if (pcm == null) continue;
                 var r = RosterRotationState.GetOrCreate(pcm.name);
                 r.Flights++;
                 r.LastFlightUT = now;
-                r.MissionStartUT = 0;
-                r.LastMissionDeathCheckUT = 0;
                 RosterRotationKSCUI.TryApplyVeteranTraitGrowthOnRecovery(pcm, r, v, now);
 
                 bool killedInFlight = pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
@@ -140,6 +139,14 @@ namespace RosterRotation
             }
 
             CrashSeverityState.HandleRecovery(v, now);
+
+            foreach (var pcm in recoveredCrew)
+            {
+                if (pcm == null) continue;
+                var r = RosterRotationState.GetOrCreate(pcm.name);
+                r.MissionStartUT = 0;
+                r.LastMissionDeathCheckUT = 0;
+            }
         }
 
         private void OnKerbalStatusChange(
@@ -158,7 +165,7 @@ namespace RosterRotation
             }
             else if (oldStatus == ProtoCrewMember.RosterStatus.Assigned && newStatus != ProtoCrewMember.RosterStatus.Assigned)
             {
-                if (MissionTimeTracker.SyncKerbal(pcm, now, resetWhenNotAssigned: true))
+                if (MissionTimeTracker.SyncKerbal(pcm, now, resetWhenNotAssigned: false))
                     SaveScheduler.RequestSave("kerbal unassigned mission tracking");
             }
 
@@ -204,7 +211,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion = "1.1.6";
+        private const string ModVersion = "1.1.7";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -1813,7 +1820,6 @@ namespace RosterRotation
         {
             if (_flightTrackerSyncExecutedThisSession) return;
             if (!RosterRotationState.SyncFlightTrackerFromEacOnce) return;
-            if (!RRLog.VerboseEnabled) return;
 
             _flightTrackerSyncExecutedThisSession = true;
             RunFlightTrackerSyncFromEacOnce();
@@ -1905,13 +1911,13 @@ namespace RosterRotation
             int ftFlights;
             string ftFlightsReason;
             bool ftFlightsAvailable = TryGetFlightTrackerFlights(k.name, out ftFlights, out ftFlightsReason);
-            int flights = ftFlightsAvailable ? Math.Max(eacFlights, Math.Max(0, ftFlights)) : eacFlights;
+            int flights = ftFlightsAvailable ? Math.Max(0, ftFlights) : eacFlights;
 
             double ftHours;
             string ftHoursReason;
             bool ftHoursAvailable = TryGetFlightTrackerRecordedHours(k.name, out ftHours, out ftHoursReason);
             double currentMissionHours = vessel != null ? Math.Max(0.0, vessel.missionTime / 3600.0) : 0.0;
-            double totalHours = (ftHoursAvailable ? Math.Max(0.0, ftHours) : 0.0) + currentMissionHours;
+            double totalHours = ftHoursAvailable ? Math.Max(0.0, ftHours) : currentMissionHours;
 
             float flightBonus = Mathf.Min(TraitGrowthVeteranFlightBonusCap, flights * TraitGrowthVeteranFlightBonusPerFlight);
             float hourBonus = Mathf.Min(TraitGrowthVeteranHourBonusCap, (float)(Math.Floor(totalHours / 10.0) * TraitGrowthVeteranHourBonusPerTenHours));
@@ -1926,7 +1932,7 @@ namespace RosterRotation
                 TraitGrowthVeteranDelta,
                 TraitGrowthVeteranDelta,
                 "Veteran service",
-                $"[EAC] Trait growth (veteran) for {k.name}: EACFlights={eacFlights}, FTFlights={(ftFlightsAvailable ? ftFlights.ToString() : "unavailable:" + (ftFlightsReason ?? "unknown"))}, FTHours={(ftHoursAvailable ? ftHours.ToString("F2") : "unavailable:" + (ftHoursReason ?? "unknown"))}, CurrentMissionHours={currentMissionHours:F2}, TotalHours={totalHours:F2}, CourageChance={courageChance:P1}, StupidityChance={stupidityChance:P1}",
+                $"[EAC] Trait growth (veteran) for {k.name}: EACFlights={eacFlights}, FTFlights={(ftFlightsAvailable ? ftFlights.ToString() : "unavailable:" + (ftFlightsReason ?? "unknown"))}, FTHours={(ftHoursAvailable ? ftHours.ToString("F2") : "unavailable:" + (ftHoursReason ?? "unknown"))}, CurrentMissionHours={currentMissionHours:F2}, TotalHours={totalHours:F2}, HoursSource={(ftHoursAvailable ? "FlightTracker" : "CurrentMission")}, CourageChance={courageChance:P1}, StupidityChance={stupidityChance:P1}",
                 nowUT);
         }
 
@@ -2425,7 +2431,7 @@ namespace RosterRotation
             RosterRotationState.KerbalRecord rec, double nowUT, int stars)
         {
             double yearSec = RosterRotationState.YearSeconds;
-            double inactiveYears = rec != null && rec.LastFlightUT > 0 ? (nowUT - rec.LastFlightUT) / yearSec : 999;
+            double inactiveYears = rec != null && rec.LastFlightUT > 0 ? (nowUT - rec.LastFlightUT) / yearSec : 0;
             int displayedFlights = GetDisplayedFlights(k, rec);
             return CareerRules.CalculateMoraleRetireProbability(stars, inactiveYears, displayedFlights);
         }
