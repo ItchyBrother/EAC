@@ -72,6 +72,9 @@ namespace RosterRotation
             var roster = HighLogic.CurrentGame?.CrewRoster;
             if (roster == null) return 0;
 
+            // Fast path: no EAC records means no retired kerbals to process.
+            if (RosterRotationState.Records.Count == 0) return 0;
+
             int count = 0;
 
             for (int i = 0; i < roster.Count; i++)
@@ -131,6 +134,13 @@ namespace RosterRotation
 
         // ─── Secondary: Dialog list scrubbing ────────────────────────────────
 
+        // Cached after the first successful scrub. CrewAssignmentDialog's type
+        // hierarchy never changes at runtime, so we only need to walk it once.
+        // This eliminates the repeated GetFields() reflection cost from every
+        // 1-second tick while the dialog is open.
+        private static List<FieldInfo> _cachedCrewListFields;   // fields typed List<ProtoCrewMember>
+        private static List<FieldInfo> _cachedCrewArrayFields;  // fields typed ProtoCrewMember[]
+
         private static int ScrubCrewDialog()
         {
             try
@@ -146,47 +156,74 @@ namespace RosterRotation
         private static int ScrubRetiredFromObject(object obj)
         {
             if (obj == null) return 0;
+
+            // Build the field cache the first time we have a live dialog instance.
+            // After this point the lists are reused directly — no more GetFields()
+            // on every tick.
+            if (_cachedCrewListFields == null)
+                BuildScrubFieldCache(obj.GetType());
+
             int total = 0;
 
-            const BindingFlags flags =
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-            for (var t = obj.GetType(); t != null && t != typeof(object); t = t.BaseType)
+            foreach (var field in _cachedCrewListFields)
             {
-                foreach (var field in t.GetFields(flags | BindingFlags.DeclaredOnly))
+                try
                 {
-                    if (field == null) continue;
-                    try
-                    {
-                        var ft = field.FieldType;
-
-                        if (ft == typeof(List<ProtoCrewMember>))
-                        {
-                            var list = field.GetValue(obj) as List<ProtoCrewMember>;
-                            if (list == null || list.Count == 0) continue;
-                            int before = list.Count;
-                            list.RemoveAll(IsRetired);
-                            total += before - list.Count;
-                        }
-                        else if (ft == typeof(ProtoCrewMember[]))
-                        {
-                            var arr = field.GetValue(obj) as ProtoCrewMember[];
-                            if (arr == null || arr.Length == 0) continue;
-                            int before = arr.Length;
-                            var filtered = new List<ProtoCrewMember>(arr);
-                            filtered.RemoveAll(IsRetired);
-                            if (filtered.Count != before && !field.IsInitOnly)
-                            {
-                                field.SetValue(obj, filtered.ToArray());
-                                total += before - filtered.Count;
-                            }
-                        }
-                    }
-                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:185", "Suppressed exception in EditorCrewRetiredHider.cs:185", ex); }
+                    var list = field.GetValue(obj) as List<ProtoCrewMember>;
+                    if (list == null || list.Count == 0) continue;
+                    int before = list.Count;
+                    list.RemoveAll(IsRetired);
+                    total += before - list.Count;
                 }
+                catch (Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.ScrubList:" + field.Name, "Suppressed exception scrubbing crew list field", ex); }
+            }
+
+            foreach (var field in _cachedCrewArrayFields)
+            {
+                try
+                {
+                    var arr = field.GetValue(obj) as ProtoCrewMember[];
+                    if (arr == null || arr.Length == 0) continue;
+                    int before = arr.Length;
+                    var filtered = new List<ProtoCrewMember>(arr);
+                    filtered.RemoveAll(IsRetired);
+                    if (filtered.Count != before && !field.IsInitOnly)
+                    {
+                        field.SetValue(obj, filtered.ToArray());
+                        total += before - filtered.Count;
+                    }
+                }
+                catch (Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.ScrubArray:" + field.Name, "Suppressed exception scrubbing crew array field", ex); }
             }
 
             return total;
+        }
+
+        /// <summary>
+        /// Walks the full type hierarchy of the dialog once, collecting every field
+        /// typed as List&lt;ProtoCrewMember&gt; or ProtoCrewMember[].  Results are stored
+        /// in the static caches and reused on all subsequent ticks.
+        /// </summary>
+        private static void BuildScrubFieldCache(Type dialogType)
+        {
+            _cachedCrewListFields  = new List<FieldInfo>();
+            _cachedCrewArrayFields = new List<FieldInfo>();
+
+            const BindingFlags flags =
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+            for (var t = dialogType; t != null && t != typeof(object); t = t.BaseType)
+            {
+                foreach (var field in t.GetFields(flags))
+                {
+                    if (field == null) continue;
+
+                    if (field.FieldType == typeof(List<ProtoCrewMember>))
+                        _cachedCrewListFields.Add(field);
+                    else if (field.FieldType == typeof(ProtoCrewMember[]))
+                        _cachedCrewArrayFields.Add(field);
+                }
+            }
         }
 
         private static bool IsRetired(ProtoCrewMember k)
