@@ -2,9 +2,13 @@
 
 # Change Log
 
-# 2026-0327: EAC v1.1.7 for KSP >= 1.12.X
+# 2026-0409: EAC v1.1.8 for KSP >= 1.12.X
+- Improved retired-kerbal hiding performance by caching CrewAssignmentDialog field lookups after the first live dialog is found.
+- Reduced repeated reflection overhead in ScrubRetiredFromObject() by reusing cached field references.
+- Skipped unnecessary roster scans in HideRetiredKerbals() when no retired kerbals exist.
 
-## Fixed
+
+### 2026-0327: EAC v1.1.7 for KSP >= 1.12.X
 
 ### Recovery / R&R
 - Fixed a recovery timing bug where `MissionStartUT` could be cleared before post-mission recovery leave was calculated.
