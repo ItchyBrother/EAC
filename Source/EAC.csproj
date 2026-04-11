@@ -24,6 +24,11 @@
     <Compile Include="Mod.State.cs" />
     <Compile Include="Mod.SettingsPersistence.cs" />
     <Compile Include="Mod.ACButtons.cs" />
+    <Compile Include="Mod.Aging.cs" />
+    <Compile Include="Mod.Drawing.cs" />
+    <Compile Include="Mod.FlightTracker.cs" />
+    <Compile Include="Mod.Roster.cs" />
+    <Compile Include="Mod.TraitGrowth.cs" />
     <Compile Include="Mod.cs" />
     <Compile Include="Persistence.cs" />
     <Compile Include="EACGameSettings.cs" />

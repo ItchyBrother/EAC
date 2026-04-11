@@ -69,6 +69,14 @@ namespace RosterRotation
 
     internal static class CrewDialogHookPatches
     {
+        // Cached after the first Postfix call that has a live dialog instance.
+        // CrewAssignmentDialog's type hierarchy never changes at runtime, so the
+        // GetFields() walk only needs to happen once — every subsequent call reuses
+        // these lists directly, eliminating the repeated reflection cost.
+        private static List<FieldInfo> _cachedCrewListFields;       // fields typed List<ProtoCrewMember>
+        private static List<FieldInfo> _cachedCrewArrayFields;      // fields typed ProtoCrewMember[]
+        private static List<FieldInfo> _cachedCrewEnumerableFields; // other IEnumerable<ProtoCrewMember> fields
+
         public static void Postfix(object __instance)
         {
             try
@@ -76,32 +84,29 @@ namespace RosterRotation
                 if (__instance == null) return;
                 if (HighLogic.LoadedScene != GameScenes.EDITOR) return;
 
+                // Build the field cache the first time we have a live dialog instance.
+                if (_cachedCrewListFields == null)
+                    BuildFieldCache(__instance.GetType());
+
                 double nowUT = Planetarium.GetUniversalTime();
-
-                var instType = __instance.GetType();
-                const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
                 int totalRemoved = 0;
 
-                foreach (var f in instType.GetFields(flags))
+                foreach (var f in _cachedCrewListFields)
                 {
-                    if (f == null) continue;
-                    var ft = f.FieldType;
-                    if (ft == null) continue;
-
-                    // List<ProtoCrewMember>
-                    if (ft == typeof(List<ProtoCrewMember>))
+                    try
                     {
                         var list = f.GetValue(__instance) as List<ProtoCrewMember>;
                         if (list == null) continue;
                         int before = list.Count;
                         list.RemoveAll(k => ShouldHide(k, nowUT));
-                        totalRemoved += (before - list.Count);
-                        continue;
+                        totalRemoved += before - list.Count;
                     }
+                    catch (Exception ex) { RRLog.VerboseExceptionOnce("CrewDialogHook.List:" + f.Name, "Suppressed exception scrubbing crew list field", ex); }
+                }
 
-                    // ProtoCrewMember[]
-                    if (ft == typeof(ProtoCrewMember[]))
+                foreach (var f in _cachedCrewArrayFields)
+                {
+                    try
                     {
                         var arr = f.GetValue(__instance) as ProtoCrewMember[];
                         if (arr == null || arr.Length == 0) continue;
@@ -110,12 +115,14 @@ namespace RosterRotation
                         tmp.RemoveAll(k => ShouldHide(k, nowUT));
                         if (tmp.Count != before && !f.IsInitOnly)
                             f.SetValue(__instance, tmp.ToArray());
-                        totalRemoved += (before - tmp.Count);
-                        continue;
+                        totalRemoved += before - tmp.Count;
                     }
+                    catch (Exception ex) { RRLog.VerboseExceptionOnce("CrewDialogHook.Array:" + f.Name, "Suppressed exception scrubbing crew array field", ex); }
+                }
 
-                    // Any IEnumerable<ProtoCrewMember> we can write back
-                    if (typeof(IEnumerable<ProtoCrewMember>).IsAssignableFrom(ft))
+                foreach (var f in _cachedCrewEnumerableFields)
+                {
+                    try
                     {
                         var enumerable = f.GetValue(__instance) as IEnumerable<ProtoCrewMember>;
                         if (enumerable == null) continue;
@@ -123,14 +130,12 @@ namespace RosterRotation
                         int before = 0;
                         foreach (var k in enumerable) { tmp.Add(k); before++; }
                         if (before == 0) continue;
-
                         tmp.RemoveAll(k => ShouldHide(k, nowUT));
                         if (tmp.Count != before && !f.IsInitOnly)
                             f.SetValue(__instance, tmp);
-
-                        totalRemoved += (before - tmp.Count);
-                        continue;
+                        totalRemoved += before - tmp.Count;
                     }
+                    catch (Exception ex) { RRLog.VerboseExceptionOnce("CrewDialogHook.Enumerable:" + f.Name, "Suppressed exception scrubbing crew enumerable field", ex); }
                 }
 
                 if (totalRemoved > 0)
@@ -139,6 +144,38 @@ namespace RosterRotation
             catch (Exception ex)
             {
                 RRLog.Error($"[RosterRotation] Crew dialog filter failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Walks the full type hierarchy of the dialog once, sorting every
+        /// ProtoCrewMember-bearing field into one of three cached lists.
+        /// Called exactly once; all subsequent Postfix calls use the cache.
+        /// </summary>
+        private static void BuildFieldCache(Type dialogType)
+        {
+            _cachedCrewListFields       = new List<FieldInfo>();
+            _cachedCrewArrayFields      = new List<FieldInfo>();
+            _cachedCrewEnumerableFields = new List<FieldInfo>();
+
+            const BindingFlags flags =
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+            for (var t = dialogType; t != null && t != typeof(object); t = t.BaseType)
+            {
+                foreach (var f in t.GetFields(flags))
+                {
+                    if (f == null) continue;
+                    var ft = f.FieldType;
+                    if (ft == null) continue;
+
+                    if (ft == typeof(List<ProtoCrewMember>))
+                        _cachedCrewListFields.Add(f);
+                    else if (ft == typeof(ProtoCrewMember[]))
+                        _cachedCrewArrayFields.Add(f);
+                    else if (typeof(IEnumerable<ProtoCrewMember>).IsAssignableFrom(ft))
+                        _cachedCrewEnumerableFields.Add(f);
+                }
             }
         }
 

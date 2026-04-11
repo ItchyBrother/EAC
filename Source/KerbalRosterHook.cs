@@ -91,6 +91,12 @@ namespace RosterRotation
         private const string LOGP = "[RosterRotation] KerbalRosterHook: ";
         private static bool _loggedFirstAdjust;
 
+        // Cached reflection results for KerbalRoster.Crew — resolved once on first call,
+        // reused on every subsequent invocation so GetProperty/GetField are never called again.
+        private static bool         _crewMemberResolved;
+        private static PropertyInfo _crewProperty;
+        private static FieldInfo    _crewField;
+
         public static void Postfix_ActiveCount(KerbalRoster __instance, MethodBase __originalMethod, ref int __result)
         {
             try
@@ -126,18 +132,23 @@ namespace RosterRotation
             {
                 if (roster == null) return 0;
 
-                // Use reflection to be resilient across KSP versions (field vs property).
-                var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                object crewObj = null;
-
-                var p = roster.GetType().GetProperty("Crew", flags);
-                if (p != null) crewObj = p.GetValue(roster, null);
-
-                if (crewObj == null)
+                // Resolve the Crew property/field once and cache it. KerbalRoster's type never
+                // changes at runtime, so GetProperty/GetField only needs to run on the very first
+                // call — every subsequent call hits the cached reference directly.
+                if (!_crewMemberResolved)
                 {
-                    var f = roster.GetType().GetField("Crew", flags);
-                    if (f != null) crewObj = f.GetValue(roster);
+                    _crewMemberResolved = true;
+                    const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                    _crewProperty = roster.GetType().GetProperty("Crew", flags);
+                    if (_crewProperty == null)
+                        _crewField = roster.GetType().GetField("Crew", flags);
                 }
+
+                object crewObj = null;
+                if (_crewProperty != null)
+                    crewObj = _crewProperty.GetValue(roster, null);
+                else if (_crewField != null)
+                    crewObj = _crewField.GetValue(roster);
 
                 var crew = crewObj as IEnumerable;
                 if (crew == null) return 0;

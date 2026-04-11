@@ -21,6 +21,10 @@ namespace RosterRotation
     {
         private const string LOGP = "[RosterRotation] EditorHider: ";
 
+        // Static so the hidden state survives across the brief OnDestroy → re-Awake cycle
+        // that can happen during scene reloads. OnDestroy always calls RestoreRetiredKerbals()
+        // which clears the dictionary before any save, so there is no risk of a retired
+        // kerbal's type being permanently left as Unowned across sessions.
         private static readonly Dictionary<string, ProtoCrewMember.KerbalType> _hiddenKerbals =
             new Dictionary<string, ProtoCrewMember.KerbalType>();
 

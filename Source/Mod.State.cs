@@ -85,18 +85,18 @@ namespace RosterRotation
         public static double YearSeconds => KspTimeMath.GetYearSeconds(UseKerbinDays);
 
         // ── Cached retired names (invalidated by retire/recall operations) ──────
+        // Uses a simple dirty flag rather than a computed hash. The hash approach
+        // was fragile: two different sets of retired kerbals could produce the same
+        // hash value, returning a stale list. InvalidateRetiredCache() is already
+        // called on every retire/recall/death transition so the flag is sufficient.
         private static List<string> _cachedRetiredNames;
-        private static int _cachedRetiredHash = -1;
+        private static bool _retiredCacheDirty = true;
 
-        public static void InvalidateRetiredCache() => _cachedRetiredHash = -1;
+        public static void InvalidateRetiredCache() => _retiredCacheDirty = true;
 
         public static List<string> GetRetiredNames()
         {
-            int hash = Records.Count;
-            foreach (var kvp in Records)
-                if (kvp.Value != null && kvp.Value.Retired) hash = hash * 31 + kvp.Key.GetHashCode();
-
-            if (hash == _cachedRetiredHash && _cachedRetiredNames != null)
+            if (!_retiredCacheDirty && _cachedRetiredNames != null)
                 return _cachedRetiredNames;
 
             var names = new List<string>();
@@ -104,7 +104,7 @@ namespace RosterRotation
                 if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
 
             _cachedRetiredNames = names;
-            _cachedRetiredHash = hash;
+            _retiredCacheDirty  = false;
             return names;
         }
 
