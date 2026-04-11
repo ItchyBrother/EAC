@@ -6,7 +6,7 @@
 
 - This release is a behind-the-scenes maintenance update. It does not change gameplay, but it improves performance and reliability in crew-related screens, fixes a small retired-roster edge case, and cleans up the mod’s internals for easier future updates.
 
-# 2026-0409: EAC v1.1.8 for KSP >= 1.12.X
+### 2026-0409: EAC v1.1.8 for KSP >= 1.12.X
 - Improved retired-kerbal hiding performance by caching CrewAssignmentDialog field lookups after the first live dialog is found.
 - Reduced repeated reflection overhead in ScrubRetiredFromObject() by reusing cached field references.
 - Skipped unnecessary roster scans in HideRetiredKerbals() when no retired kerbals exist.
