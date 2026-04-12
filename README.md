@@ -10,13 +10,13 @@ Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to K
 
 Designed to feel “stock-like” while adding meaningful long-term crew management.
 
-**I would recommend the following mod addons with EAC:**
+**EAC can handle Crew Rest after flight as well as crew promotion.  EAC also works well with the following mod addons:**
 
 **@linuxgurugamer CrewRandR mod.**
 
 **@severedsolo Earn Your Strips and FlightTracker**
 
--- EAC can run without these, but it also takes advantage of what these mods offer.  --
+-- If either of these are installed, EAC will give preference to these mods. --
 
 ---
 
@@ -26,6 +26,10 @@ Designed to feel “stock-like” while adding meaningful long-term crew managem
 - Training time scales with experience level.
 - Training costs scale with configured multipliers and per-star adjustments.
 - Training messages are optional and configurable.
+
+### Crash detection
+- If Kerbals crash, when they land, there may be a penalty of added recovery time or even forced retirement. 
+- Completely configurable.
 
 ### Aging & Retirement
 - Kerbals age in years (Kerbin time supported).
