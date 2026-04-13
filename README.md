@@ -12,9 +12,9 @@ Designed to feel “stock-like” while adding meaningful long-term crew managem
 
 **EAC can handle Crew Rest after flight as well as crew promotion.  EAC also works well with the following mod addons:**
 
-**@linuxgurugamer CrewRandR mod.**
+**CrewRandR mod.** by linuxgurugamer
 
-**@severedsolo Earn Your Strips and FlightTracker**
+**Earn Your Strips and FlightTracker** by severedsolo 
 
 -- If either of these are installed, EAC will give preference to these mods. --
 
