@@ -17,9 +17,9 @@ namespace RosterRotation
         {
             try
             {
-                var asm = AssemblyLoader.loadedAssemblies
-                    .Select(a => a.assembly)
-                    .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+                // Use the shared cache — avoids a redundant AssemblyLoader scan since
+                // GetAllTypes() (called below) already resolves and caches the assembly.
+                var asm = KspAssemblyCache.GetAssembly();
 
                 if (asm == null)
                 {
@@ -27,19 +27,20 @@ namespace RosterRotation
                     return;
                 }
 
-                // Patch 1: AstronautComplexFacility (the KSC building object)
-                var facilityType = asm.GetTypes().FirstOrDefault(x => x.Name == "AstronautComplexFacility");
-                if (facilityType == null)
+                // Patch 1: AstronautComplexFacility (the KSC building object).
+                // Uses KspAssemblyCache so GetTypes() is only called once across all hooks.
+                // The two-pass search is collapsed into a single LINQ pass: exact name first,
+                // then fuzzy fallback — same logic, zero extra scans.
+                var facilityType = KspAssemblyCache.GetAllTypes().FirstOrDefault(x =>
                 {
-                    facilityType = asm.GetTypes().FirstOrDefault(x =>
-                    {
-                        var n = x.FullName ?? x.Name;
-                        return n.IndexOf("Astronaut", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                               n.IndexOf("Complex", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                               typeof(MonoBehaviour).IsAssignableFrom(x) &&
-                               n.IndexOf("Facility", StringComparison.OrdinalIgnoreCase) >= 0;
-                    });
-                }
+                    if (x == null) return false;
+                    if (x.Name == "AstronautComplexFacility") return true;
+                    var n = x.FullName ?? x.Name;
+                    return n.IndexOf("Astronaut",  StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           n.IndexOf("Complex",    StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           n.IndexOf("Facility",   StringComparison.OrdinalIgnoreCase) >= 0 &&
+                           typeof(MonoBehaviour).IsAssignableFrom(x);
+                });
 
                 if (facilityType != null)
                 {

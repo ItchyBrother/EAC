@@ -135,7 +135,16 @@ namespace RosterRotation
 
         private void Start()
         {
-            ForceRefresh();
+            // Do NOT load persistent.sfs here.  ConfigNode.Load() is a synchronous,
+            // blocking file read on the main thread; calling it eagerly in Start() was
+            // the primary cause of the visible SpaceCenter startup lag — proportional to
+            // save file size, easily 0.5-2+ seconds on mid-to-large saves.
+            //
+            // Instead, data is loaded lazily on the first ShowWindowInternal() call.
+            // The Update() poll is disarmed (float.MaxValue) until the window is opened
+            // for the first time, at which point ShowWindowInternal arms it normally.
+            _nextRefreshRt = float.MaxValue;
+            RRLog.Info("[EAC DIAG] HallOfHistory Start — deferred load active, no ConfigNode.Load at startup");
         }
 
         private void OnDestroy()
@@ -151,6 +160,12 @@ namespace RosterRotation
 
         private void ShowWindowInternal(bool refresh)
         {
+            // Arm the Update() poll the first time the window is opened.
+            // Until this point _nextRefreshRt is float.MaxValue (set in Start),
+            // preventing any background polling before data has been loaded.
+            if (_nextRefreshRt >= float.MaxValue)
+                _nextRefreshRt = Time.realtimeSinceStartup + CachePollSeconds;
+
             _show = true;
             if (refresh)
                 RefreshDataIfNeeded(false);
@@ -1190,10 +1205,14 @@ namespace RosterRotation
 
         private void BuildData(string persistentPath)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildData starting (scene=" + HighLogic.LoadedScene + ", show=" + _show + ")");
+
             ConfigNode saveRoot = null;
             if (File.Exists(persistentPath))
             {
                 saveRoot = ConfigNode.Load(persistentPath);
+                RRLog.Info("[EAC DIAG] HallOfHistory ConfigNode.Load took " + sw.ElapsedMilliseconds + " ms");
                 if (saveRoot == null)
                     _cache.LastLoadError = "persistent.sfs was found but could not be parsed.";
             }
@@ -1203,16 +1222,25 @@ namespace RosterRotation
             }
 
             var recordMap = BuildEacRecordMap(saveRoot);
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildEacRecordMap took " + sw.ElapsedMilliseconds + " ms cumulative");
+
             var rosterMap = BuildRosterMap(saveRoot);
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildRosterMap took " + sw.ElapsedMilliseconds + " ms cumulative");
+
             var liveMap = BuildLiveCrewMap();
 
             BuildMilestones(saveRoot);
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildMilestones took " + sw.ElapsedMilliseconds + " ms cumulative");
+
             BuildMemorials(recordMap, rosterMap, liveMap);
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildMemorials took " + sw.ElapsedMilliseconds + " ms cumulative");
 
             string ftMsg = FlightTrackerShim.Available
                 ? "FlightTracker detected: memorial flight hours come from FlightTracker when available."
                 : "FlightTracker not detected: memorials show EAC flight counts only.";
             _cache.DataSummary = ftMsg;
+
+            RRLog.Info("[EAC DIAG] HallOfHistory BuildData total: " + sw.ElapsedMilliseconds + " ms");
         }
 
         private Dictionary<string, EacRecordSnapshot> BuildEacRecordMap(ConfigNode saveRoot)

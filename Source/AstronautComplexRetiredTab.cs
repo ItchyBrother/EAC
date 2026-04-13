@@ -365,8 +365,58 @@ namespace RosterRotation
         }
 
         // ── Root discovery (cached after first find) ───────────────────────────
+
+        // Cached AstronautComplex type — resolved once via KspAssemblyCache.
+        private static Type _cachedAcType;
+        private static bool _acTypeSearched;
+
+        private static Type GetAcType()
+        {
+            if (_acTypeSearched) return _cachedAcType;
+            _acTypeSearched = true;
+            var asm = KspAssemblyCache.GetAssembly();
+            if (asm != null)
+                _cachedAcType = asm.GetType("KSP.UI.Screens.AstronautComplex");
+            return _cachedAcType;
+        }
+
+        /// <summary>
+        /// Depth-first search for a named transform within a hierarchy.
+        /// Orders of magnitude faster than FindObjectsOfTypeAll&lt;Transform&gt;()
+        /// because it only walks the sub-tree of a known root.
+        /// </summary>
+        private static Transform FindInHierarchy(Transform root, string name)
+        {
+            if (root == null) return null;
+            if (string.Equals(root.name, name, StringComparison.Ordinal)) return root;
+            for (int i = 0; i < root.childCount; i++)
+            {
+                var result = FindInHierarchy(root.GetChild(i), name);
+                if (result != null) return result;
+            }
+            return null;
+        }
+
         private static Transform FindTabsRoot()
         {
+            // Fast path: find the AstronautComplex MonoBehaviour (1-2 instances) and
+            // search within its hierarchy.  This replaces FindObjectsOfTypeAll<Transform>()
+            // which walks every scene object and takes 1-3 seconds in modded installs.
+            var acType = GetAcType();
+            if (acType != null)
+            {
+                foreach (var obj in Resources.FindObjectsOfTypeAll(acType))
+                {
+                    var mb = obj as MonoBehaviour;
+                    if (mb == null) continue;
+                    var tabs = FindInHierarchy(mb.transform, "Tabs");
+                    if (tabs == null) continue;
+                    if (tabs.Find("Tab Available") != null || tabs.Find("Tab Assigned") != null)
+                        return tabs;
+                }
+            }
+
+            // Slow-path fallback — kept for unusual KSP builds where the type lookup fails.
             Transform best = null; int bestScore = -1;
             foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
             {
@@ -383,6 +433,20 @@ namespace RosterRotation
 
         private static Transform FindVesselScrollRect()
         {
+            // Fast path: search within the AstronautComplex hierarchy.
+            var acType = GetAcType();
+            if (acType != null)
+            {
+                foreach (var obj in Resources.FindObjectsOfTypeAll(acType))
+                {
+                    var mb = obj as MonoBehaviour;
+                    if (mb == null) continue;
+                    var vsr = FindInHierarchy(mb.transform, "VesselScrollRect");
+                    if (vsr != null) return vsr;
+                }
+            }
+
+            // Slow-path fallback.
             Transform best = null; int bestScore = -1;
             foreach (Transform t in Resources.FindObjectsOfTypeAll<Transform>())
             {

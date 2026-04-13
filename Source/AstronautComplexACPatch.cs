@@ -53,11 +53,13 @@ namespace RosterRotation
                 }
                 else RRLog.Warn("[RosterRotation] ACPatch: UIListToggleController not found.");
 
-                // Find AstronautComplex
+                // Find AstronautComplex — fast by-name lookup first; if that returns null
+                // (shouldn't happen on a standard KSP 1.12 install), fall through to the
+                // cached type scan so we don't pay for GetTypes() a second time.
                 Type acType = kspAsm.GetType("KSP.UI.Screens.AstronautComplex");
                 if (acType == null)
                 {
-                    foreach (Type x in SafeGetTypes(kspAsm))
+                    foreach (Type x in KspAssemblyCache.GetAllTypes())
                     {
                         if (x == null) continue;
                         string xn = x.FullName ?? x.Name;

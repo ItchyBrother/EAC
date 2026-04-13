@@ -53,6 +53,7 @@
     <Compile Include="HallOfHistoryWindow.DataTypes.cs" />
     <Compile Include="EACPortraitCaptureWatcher.cs" />
     <Compile Include="EACPortraitRenderer.cs" />
+    <Compile Include="KspAssemblyCache.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -680,9 +680,21 @@ namespace RosterRotation
                 + ", totalCrew=" + totalCrew
                 + ", sawCrashEvent=" + tracked.SawCrashEvent);
 
-            if (severityParts <= 0 && fatalities <= 0 && !tracked.SawCrashEvent)
+            // Require actual part destruction (onPartDie) or an explosion (onPartExplode) or
+            // a fatality before triggering crash-injury processing.
+            //
+            // ImpactEvents and SawCrashEvent are NOT sufficient on their own because KSP fires
+            // onCrash / onCrashSplashdown during normal vessel recovery sequences, even when
+            // nothing is damaged.  Using them as standalone triggers caused false crash detection
+            // every time a player recovered a vessel cleanly.
+            bool actualDamage = tracked.EstimatedLostParts > 0 || tracked.ExplosionEvents > 0;
+
+            if (!actualDamage && fatalities <= 0)
             {
-                RRLog.Verbose("[EAC] No crash injury outcome for vessel=" + SafeVesselName(vessel) + "; applying normal recovery rules only.");
+                RRLog.Verbose("[EAC] No crash injury outcome for vessel=" + SafeVesselName(vessel)
+                    + "; no parts destroyed and no fatalities — applying normal recovery rules only."
+                    + " (impacts=" + tracked.ImpactEvents
+                    + ", sawCrashEvent=" + tracked.SawCrashEvent + " ignored as standalone signals)");
                 Forget(vessel.id);
                 RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
                 return;

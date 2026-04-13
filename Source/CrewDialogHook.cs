@@ -13,9 +13,9 @@ namespace RosterRotation
         {
             try
             {
-                var asm = AssemblyLoader.loadedAssemblies
-                    .Select(a => a.assembly)
-                    .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+                // Use the shared cache — avoids a redundant AssemblyLoader scan and
+                // ensures GetTypes() is only called once across all hooks at startup.
+                var asm = KspAssemblyCache.GetAssembly();
 
                 if (asm == null)
                 {
@@ -24,8 +24,9 @@ namespace RosterRotation
                 }
 
                 // Find ANY type whose FullName contains CrewAssignmentDialog
-                var t = asm.GetTypes().FirstOrDefault(x =>
+                var t = KspAssemblyCache.GetAllTypes().FirstOrDefault(x =>
                 {
+                    if (x == null) return false;
                     var n = x.FullName ?? x.Name;
                     return n.IndexOf("CrewAssignmentDialog", StringComparison.OrdinalIgnoreCase) >= 0;
                 });
