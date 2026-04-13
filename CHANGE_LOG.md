@@ -2,8 +2,14 @@
 
 # Change Log
 
-# 2026-0411: EAC v1.1.9 aka "Jeremiah" for KSP >= 1.12.X
+# 2026-0412: EAC v1.2.0 for KSP >= 1.12.X
+-	Fixed issue with Crash Detection giving a false positive.  
+- 	Fixed Space Center startup lags on heavily modded installs of KSP.  
+	-	Hall of History now only intiates when called, not at startup.
+	-	Retired Tab added helper code so it fast loads verse scanning every object.
+	-	Reduced calls from three to one on the persistent file.
 
+### 2026-0411: EAC v1.1.9 aka "Jeremiah" for KSP >= 1.12.X
 - This release is a behind-the-scenes maintenance update. It does not change gameplay, but it improves performance and reliability in crew-related screens, fixes a small retired-roster edge case, and cleans up the mod’s internals for easier future updates.
 
 ### 2026-0409: EAC v1.1.8 for KSP >= 1.12.X
