@@ -147,12 +147,26 @@ Use verbose logging only when troubleshooting.
 ---
 
 ## License
-MIT License.  You are free to use.  I guarantee nothing other than this will take up disk space.  
 
-* By downloading this mod you agree to hold me harmless of any issues that may or may not occur.  (e.g. you will not hold me liable for defects cause by the software)
-* If you reuse or modify any of my code, you must include the copyright and license with that code.
-* You are free to reuse and modify - just give credit where credit is due.
-* You are free to distribute my code.
+This mod is licensed under a [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License](https://creativecommons.org/licenses/by-nc-nd/4.0/).
+
+[![CC BY-NC-ND 4.0](https://licensebuttons.net/l/by-nc-nd/4.0/88x31.png)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
+
+**You are free to:**
+- Download and use this mod personally
+- Share/redistribute the original mod unchanged (non-commercially)
+
+**You are NOT allowed to:**
+- Modify, adapt, or create derivative works from the code or assets
+- Use any part of this mod for commercial purposes
+
+**By downloading or using this mod, you agree to the following:**
+
+- You use this mod at your own risk. The author is not liable for any issues, damages, or problems that may occur from using it (including defects in the software). You agree to hold the author harmless from any claims or liability.
+- If you share the mod, you must give appropriate credit to the original author (ItchyBrother), provide a link to the license, and indicate if any changes were made (though no changes are permitted under this license).
+- You may not remove or alter the copyright notice or license information.
+
+Copyright © 2026 ItchyBrother. All Rights Reserved (except as expressly licensed above).
 
 ---
 
