@@ -216,7 +216,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.2.0";
+        private const string ModVersion  = "1.2.1";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -464,6 +464,7 @@ namespace RosterRotation
             var roster = HighLogic.CurrentGame?.CrewRoster;
             if (roster == null) return;
             double now = Planetarium.GetUniversalTime();
+            bool anyCleaned = CleanupStaleTrainingRecords(roster);
             bool anyDone = false;
 
             foreach (var k in roster.Crew)
@@ -523,10 +524,10 @@ namespace RosterRotation
                 anyDone = true;
             }
 
-            if (anyDone)
+            if (anyDone || anyCleaned)
             {
                 InvalidateUICaches();
-                SaveScheduler.RequestSave("training completion");
+                SaveScheduler.RequestSave(anyDone ? "training completion" : "cleanup stale training records");
             }
         }
 

@@ -38,6 +38,11 @@ namespace RosterRotation
 
                     RRLog.Verbose($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
+                else
+                {
+                    EACGameSettings.TryApplyToStateFromGameParams();
+                    RRLog.Verbose($"[EAC] Settings node missing; applied GameParameters defaults: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
+                }
 
                 RecoveryLeaveService.LoadPendingCrewRandRExtensions(root);
 

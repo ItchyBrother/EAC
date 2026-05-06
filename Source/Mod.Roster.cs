@@ -28,8 +28,6 @@ namespace RosterRotation
         private List<RosterRowData> _cachedRetireRows = new List<RosterRowData>();
 
         // ── Cached proto-vessel type reflection ────────────────────────────────
-        // Resolved once on first use; eliminates repeated GetMethod/GetField calls
-        // inside TryGetAssignedVesselName's proto-vessel fallback path.
         private static Type         _cachedProtoVesselType;
         private static MethodInfo   _cachedProtoGetVesselCrewMethod;
         private static FieldInfo    _cachedProtoVesselNameField;
@@ -160,6 +158,11 @@ namespace RosterRotation
         private List<ProtoCrewMember> BuildTrainingCandidates(KerbalRoster roster)
         {
             var list = new List<ProtoCrewMember>();
+            double now = Planetarium.GetUniversalTime();
+
+            if (CleanupStaleTrainingRecords(roster))
+                SaveScheduler.RequestSave("cleanup stale training records");
+
             foreach (var k in roster.Crew)
             {
                 if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
@@ -167,12 +170,81 @@ namespace RosterRotation
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                     k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 if (k.experienceLevel >= 3f) continue;
+
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
-                if (r?.Retired == true || r?.DeathUT > 0) continue;
+                if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
+
+                if (!k.inactive || k.inactiveTimeEnd <= now)
+                {
+                    if (r.Training != TrainingType.None)
+                    {
+                        RRLog.Verbose($"[EAC] Cleaning up stale training record for dismissed Kerbal: {k.name}");
+                        ClearTrainingState(r);
+                    }
+                    continue;
+                }
+
                 list.Add(k);
             }
+
             list.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
             return list;
+        }
+
+        /// <summary>
+        /// Aggressively cleans any training data left behind for Kerbals that are no longer valid active crew.
+        /// This catches Kerbals removed from roster.Crew as well as entries left behind as Applicant,
+        /// Tourist, Unowned, Dead, or Missing after dismissal or other roster transitions.
+        /// </summary>
+        private bool CleanupStaleTrainingRecords(KerbalRoster roster)
+        {
+            if (roster == null) return false;
+
+            var validTrainingCrewNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var k in roster.Crew)
+            {
+                if (IsValidTrainingRosterCrew(k))
+                    validTrainingCrewNames.Add(k.name);
+            }
+
+            bool anyCleaned = false;
+            foreach (var kvp in RosterRotationState.Records.ToArray())
+            {
+                var rec = kvp.Value;
+                if (rec == null || rec.Training == TrainingType.None) continue;
+
+                if (!validTrainingCrewNames.Contains(kvp.Key))
+                {
+                    RRLog.Verbose($"[EAC] CleanupStaleTrainingRecords: removing leftover training data for non-active Kerbal: {kvp.Key}");
+                    ClearTrainingState(rec);
+                    anyCleaned = true;
+                }
+            }
+
+            if (anyCleaned)
+            {
+                _lastTrainingCandidatesCacheRT = -10f;
+                InvalidateUICaches();
+            }
+
+            return anyCleaned;
+        }
+
+        private static bool IsValidTrainingRosterCrew(ProtoCrewMember k)
+        {
+            if (k == null || string.IsNullOrEmpty(k.name)) return false;
+            if (k.type != ProtoCrewMember.KerbalType.Crew) return false;
+            if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) return false;
+            return true;
+        }
+
+        private static void ClearTrainingState(RosterRotationState.KerbalRecord rec)
+        {
+            if (rec == null) return;
+            rec.Training = TrainingType.None;
+            rec.TrainingTargetLevel = 0;
+            rec.TrainingEndUT = 0;
         }
 
         // ── Display helpers ────────────────────────────────────────────────────
@@ -225,7 +297,6 @@ namespace RosterRotation
             vesselName = null;
             if (k == null || string.IsNullOrEmpty(k.name)) return false;
 
-            // Phase 1: FlightGlobals.Vessels — fast, no reflection needed.
             try
             {
                 foreach (var vessel in FlightGlobals.Vessels)
@@ -246,7 +317,6 @@ namespace RosterRotation
             }
             catch (Exception ex) { RRLog.VerboseExceptionOnce("Roster.VesselName.LiveOuter", "Suppressed", ex); }
 
-            // Phase 2: protoVessels fallback — reflection resolved once and cached.
             try
             {
                 var protoVessels = HighLogic.CurrentGame?.flightState?.protoVessels as IEnumerable;
@@ -259,9 +329,6 @@ namespace RosterRotation
                     if (pv == null) continue;
                     try
                     {
-                        // Resolve the proto vessel type's reflection members once and reuse.
-                        // In practice all ProtoVessel instances share the same type, but we
-                        // guard with a type identity check to be safe across KSP versions.
                         var pvType = pv.GetType();
                         if (!ReferenceEquals(pvType, _cachedProtoVesselType))
                         {

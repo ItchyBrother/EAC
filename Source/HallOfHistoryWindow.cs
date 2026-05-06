@@ -144,7 +144,6 @@ namespace RosterRotation
             // The Update() poll is disarmed (float.MaxValue) until the window is opened
             // for the first time, at which point ShowWindowInternal arms it normally.
             _nextRefreshRt = float.MaxValue;
-            RRLog.Info("[EAC DIAG] HallOfHistory Start — deferred load active, no ConfigNode.Load at startup");
         }
 
         private void OnDestroy()
@@ -1205,14 +1204,10 @@ namespace RosterRotation
 
         private void BuildData(string persistentPath)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildData starting (scene=" + HighLogic.LoadedScene + ", show=" + _show + ")");
-
             ConfigNode saveRoot = null;
             if (File.Exists(persistentPath))
             {
                 saveRoot = ConfigNode.Load(persistentPath);
-                RRLog.Info("[EAC DIAG] HallOfHistory ConfigNode.Load took " + sw.ElapsedMilliseconds + " ms");
                 if (saveRoot == null)
                     _cache.LastLoadError = "persistent.sfs was found but could not be parsed.";
             }
@@ -1222,25 +1217,16 @@ namespace RosterRotation
             }
 
             var recordMap = BuildEacRecordMap(saveRoot);
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildEacRecordMap took " + sw.ElapsedMilliseconds + " ms cumulative");
-
             var rosterMap = BuildRosterMap(saveRoot);
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildRosterMap took " + sw.ElapsedMilliseconds + " ms cumulative");
-
             var liveMap = BuildLiveCrewMap();
 
             BuildMilestones(saveRoot);
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildMilestones took " + sw.ElapsedMilliseconds + " ms cumulative");
-
             BuildMemorials(recordMap, rosterMap, liveMap);
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildMemorials took " + sw.ElapsedMilliseconds + " ms cumulative");
 
             string ftMsg = FlightTrackerShim.Available
                 ? "FlightTracker detected: memorial flight hours come from FlightTracker when available."
                 : "FlightTracker not detected: memorials show EAC flight counts only.";
             _cache.DataSummary = ftMsg;
-
-            RRLog.Info("[EAC DIAG] HallOfHistory BuildData total: " + sw.ElapsedMilliseconds + " ms");
         }
 
         private Dictionary<string, EacRecordSnapshot> BuildEacRecordMap(ConfigNode saveRoot)
@@ -1982,7 +1968,16 @@ namespace RosterRotation
         {
             try
             {
-                return KSPUtil.PrintDate(ut, false, true);
+                int year, day, hour, minute;
+                GetKspYearDayHourMinute(Math.Max(0d, ut), out year, out day, out hour, out minute);
+
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Year {0}, Day {1}, {2:00}:{3:00}",
+                    year,
+                    day,
+                    hour,
+                    minute);
             }
             catch
             {
@@ -1992,20 +1987,12 @@ namespace RosterRotation
 
         private static double GetKspYearSeconds()
         {
-            return KspTimeMath.GetDisplayYearSeconds(GetKerbinTimeSettingForHistory());
+            return KspTimeMath.GetYearSeconds(GetKerbinTimeSettingForHistory());
         }
 
         private static bool GetKerbinTimeSettingForHistory()
         {
-            try
-            {
-                return GameSettings.KERBIN_TIME;
-            }
-            catch (global::System.Exception ex)
-            {
-                RRLog.VerboseExceptionOnce("HallOfHistoryWindow.GetKerbinTimeSettingForHistory", "Suppressed exception resolving GameSettings.KERBIN_TIME", ex);
-                return true;
-            }
+            return RosterRotationState.UseKerbinDays;
         }
 
         private static string BuildTimeOnlyText(double ut)
