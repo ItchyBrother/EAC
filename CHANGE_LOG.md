@@ -2,7 +2,12 @@
 
 # Change Log
 
-# 2026-0412: EAC v1.2.0 for KSP >= 1.12.X
+### 2026-0505: EAC V1.2.1 for KSP >= 1.12.X
+-	Fixed potential issues with Kerbin/Earth time.  Earth time will now show correctly throughout EAC.
+-	Fixed issue with dismissed Kerbals who were Training still showing up.
+-	Minor code clean up.
+
+### 2026-0412: EAC v1.2.0 for KSP >= 1.12.X
 -	Fixed issue with Crash Detection giving a false positive.  
 - 	Fixed Space Center startup lags on heavily modded installs of KSP.  
 	-	Hall of History now only intiates when called, not at startup.
