@@ -197,11 +197,11 @@ namespace RosterRotation
 
             if (!GraduationExamAwardAlreadyVisible(k, rec, targetLevel))
             {
-                RRLog.VerboseWarn("[EAC] Graduation reconciliation deferred/failed: CC contract completed but stock XP/level is not visible yet for " +
+                RRLog.Verbose("[EAC] Graduation reconciliation deferred: CC contract completed but stock XP/level is not visible yet for " +
                            k.name + " targetLevel=" + targetLevel +
                            " stockLevel=" + observedStockLevel +
                            " grantedLevel=" + rec.GrantedLevel +
-                           ". EAC will not grant the level itself because CC owns XP awards.");
+                           ". This is expected when Contract Configurator has not refreshed the roster yet; EAC will retry later and will not grant the level itself.");
                 return false;
             }
 
@@ -576,9 +576,9 @@ namespace RosterRotation
             }
             else
             {
-                RRLog.VerboseWarn("[EAC] Graduation exam roster-scan reconciliation did not complete: kerbal=" + k.name +
+                RRLog.Verbose("[EAC] Graduation exam roster-scan reconciliation deferred: kerbal=" + k.name +
                            " targetLevel=" + targetLevel +
-                           ". Check whether AwardExperience ran and whether the assigned Kerbal received stock XP.");
+                           ". Stock XP/level is not visible yet; EAC will retry after the roster refreshes.");
             }
             return reconciled;
         }
@@ -756,11 +756,11 @@ namespace RosterRotation
             }
             else
             {
-                RRLog.VerboseWarn("[EAC] Graduation exam bridge-callback reconciliation did not complete after CC completion: kerbal=" + kerbal.name +
+                RRLog.Verbose("[EAC] Graduation exam bridge-callback reconciliation deferred after CC completion: kerbal=" + kerbal.name +
                            " targetLevel=" + resolvedLevel +
                            " contractId=" + contractId +
                            " contractType=" + contractTypeName +
-                           ". Check whether AwardExperience ran and whether the assigned Kerbal received stock XP.");
+                           ". Stock XP/level is not visible yet; EAC will retry after the roster refreshes.");
             }
             return reconciled;
         }
@@ -928,11 +928,11 @@ namespace RosterRotation
             }
             else
             {
-                RRLog.VerboseWarn("[EAC] Graduation exam reconciliation did not complete after CC completion: kerbal=" + kerbal.name +
+                RRLog.Verbose("[EAC] Graduation exam reconciliation deferred after CC completion: kerbal=" + kerbal.name +
                            " targetLevel=" + targetLevel +
                            " contractId=" + completedContractId +
                            " contractType=" + contractTypeName +
-                           ". Check whether AwardExperience ran and whether the assigned Kerbal received stock XP.");
+                           ". Stock XP/level is not visible yet; EAC will retry after the roster refreshes.");
             }
             return reconciled;
         }
@@ -2899,7 +2899,7 @@ namespace RosterRotation
                 }
 
                 if (bound == 0)
-                    RRLog.VerboseWarn("[EAC] No Contract Configurator HasCrew parameter was found to bind for " + kerbal.name + ".");
+                    RRLog.Verbose("[EAC] No trainee-specific Contract Configurator HasCrew parameter was found to bind for " + kerbal.name + "; continuing with AwardExperience binding.");
             }
             catch (Exception ex)
             {
@@ -3108,26 +3108,70 @@ namespace RosterRotation
         {
             if (crew == null) return null;
 
-            Type kerbalType = FindType("ContractConfigurator.ExpressionParser.Kerbal");
+            // Contract Configurator's Kerbal wrapper moved namespace in current builds.
+            // Prefer the current type, but keep the older names for compatibility with
+            // older CC/KSP-RO assemblies.
+            Type kerbalType = FindType("ContractConfigurator.Kerbal") ??
+                              FindType("ContractConfigurator.ExpressionParser.Kerbal") ??
+                              FindType("ContractConfigurator.ExpressionParser.Wrappers.Kerbal");
             if (kerbalType == null) return null;
 
             foreach (ConstructorInfo ctor in kerbalType.GetConstructors(AnyInstance))
             {
                 ParameterInfo[] args = ctor.GetParameters();
-                if (args.Length == 1 && args[0].ParameterType.IsInstanceOfType(crew))
-                    return ctor.Invoke(new object[] { crew });
-                if (args.Length == 1 && args[0].ParameterType == typeof(string))
+
+                try
                 {
-                    object result = ctor.Invoke(new object[] { crew.name });
-                    TrySetMember(result, "pcm", crew);
-                    return result;
+                    if (args.Length == 1 && args[0].ParameterType.IsInstanceOfType(crew))
+                    {
+                        object result = ctor.Invoke(new object[] { crew });
+                        TryPopulateExperienceKerbalWrapper(result, crew);
+                        return result;
+                    }
+
+                    if (args.Length == 1 && args[0].ParameterType == typeof(string))
+                    {
+                        object result = ctor.Invoke(new object[] { crew.name });
+                        TryPopulateExperienceKerbalWrapper(result, crew);
+                        return result;
+                    }
+
+                    if (args.Length == 0)
+                    {
+                        object result = ctor.Invoke(null);
+                        TryPopulateExperienceKerbalWrapper(result, crew);
+                        return result;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    RRLog.VerboseExceptionOnce("EAC.CCBridge.CreateKerbalWrapper.Ctor." + kerbalType.FullName, "Suppressed", ex);
                 }
             }
 
-            object created = Activator.CreateInstance(kerbalType, true);
-            TrySetMember(created, "name", crew.name);
-            TrySetMember(created, "pcm", crew);
-            return created;
+            try
+            {
+                object created = Activator.CreateInstance(kerbalType, true);
+                TryPopulateExperienceKerbalWrapper(created, crew);
+                return created;
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("EAC.CCBridge.CreateKerbalWrapper.Default." + kerbalType.FullName, "Suppressed", ex);
+                return null;
+            }
+        }
+
+        private static void TryPopulateExperienceKerbalWrapper(object wrapper, ProtoCrewMember crew)
+        {
+            if (wrapper == null || crew == null) return;
+
+            // Current Contract Configurator exposes pcm as a read-only property backed
+            // by _pcm.  Set both names so this works across old and new wrappers.
+            TrySetMember(wrapper, "_pcm", crew);
+            TrySetMember(wrapper, "pcm", crew);
+            TrySetMember(wrapper, "name", crew.name);
+            TrySetMember(wrapper, "Name", crew.name);
         }
 
         private static Type FindType(string fullName)
