@@ -1982,21 +1982,21 @@ namespace RosterRotation
             if (string.IsNullOrEmpty(saveFolder))
                 return dirs;
 
-            try
-            {
-                if (System.IO.Path.IsPathRooted(saveFolder))
-                    AddDistinctPath(dirs, System.IO.Path.Combine(saveFolder, System.IO.Path.Combine("Ships", "SPH")));
-            }
-            catch { }
-
+            // HighLogic.SaveFolder is normally just the save folder name, for example "Code".
+            // The correct KSP craft location is always under the saves directory:
+            //     <KSP root>/saves/<SaveFolder>/Ships/SPH
+            // Do not create <KSP root>/<SaveFolder>/Ships/SPH; that is outside the normal KSP save tree.
             string root = "";
             try { root = KSPUtil.ApplicationRootPath ?? ""; } catch { root = ""; }
             AddSaveSphDirectory(dirs, root, saveFolder);
 
+            // Fallback for unusual launcher/current-directory cases. This still only targets
+            // the standard saves/<SaveFolder>/Ships/SPH layout.
             try
             {
                 string cwd = System.IO.Directory.GetCurrentDirectory();
-                AddSaveSphDirectory(dirs, cwd, saveFolder);
+                if (!string.Equals(System.IO.Path.GetFullPath(cwd), System.IO.Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase))
+                    AddSaveSphDirectory(dirs, cwd, saveFolder);
             }
             catch { }
 
@@ -2009,11 +2009,34 @@ namespace RosterRotation
 
             try
             {
-                AddDistinctPath(dirs, System.IO.Path.Combine(System.IO.Path.Combine(System.IO.Path.Combine(root, "saves"), saveFolder), System.IO.Path.Combine("Ships", "SPH")));
+                string sphDir;
 
-                // Some KSP/modded launchers can expose a save-folder-looking value rather than a bare folder name.
-                // This second form is harmless when it does not exist and useful when SaveFolder is already relative.
-                AddDistinctPath(dirs, System.IO.Path.Combine(System.IO.Path.Combine(root, saveFolder), System.IO.Path.Combine("Ships", "SPH")));
+                if (System.IO.Path.IsPathRooted(saveFolder))
+                {
+                    // Defensive support for a rooted SaveFolder value. In that uncommon case,
+                    // treat it as the actual save folder path and append Ships/SPH.
+                    sphDir = System.IO.Path.Combine(saveFolder, System.IO.Path.Combine("Ships", "SPH"));
+                }
+                else
+                {
+                    string normalizedSaveFolder = saveFolder.Trim().Trim(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+
+                    // If a modded launcher ever supplies "saves/<name>" instead of just "<name>",
+                    // do not add another saves segment.
+                    string savePrefix = "saves" + System.IO.Path.DirectorySeparatorChar;
+                    string altSavePrefix = "saves" + System.IO.Path.AltDirectorySeparatorChar;
+                    if (normalizedSaveFolder.StartsWith(savePrefix, StringComparison.OrdinalIgnoreCase) ||
+                        normalizedSaveFolder.StartsWith(altSavePrefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        sphDir = System.IO.Path.Combine(System.IO.Path.Combine(root, normalizedSaveFolder), System.IO.Path.Combine("Ships", "SPH"));
+                    }
+                    else
+                    {
+                        sphDir = System.IO.Path.Combine(System.IO.Path.Combine(System.IO.Path.Combine(root, "saves"), normalizedSaveFolder), System.IO.Path.Combine("Ships", "SPH"));
+                    }
+                }
+
+                AddDistinctPath(dirs, sphDir);
             }
             catch { }
         }
