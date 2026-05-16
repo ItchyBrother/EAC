@@ -145,7 +145,7 @@ namespace RosterRotation
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Reject All Applicants", GUILayout.Width(180)))
             {
-                var all = roster.Applicants;
+                var all = SnapshotApplicants(roster);
                 foreach (var k in all) RejectApplicant(roster, k);
                 InvalidateUICaches();
                 ACPatches.ForceRefresh();
@@ -167,7 +167,8 @@ namespace RosterRotation
             const float ageWidth         = 65f;
             const float statusWidth      = 260f;
             const float actionButtonWidth = 80f;
-            const float actionAreaWidth  = actionButtonWidth * 2f;
+            const float examButtonWidth   = 150f;
+            const float actionAreaWidth  = actionButtonWidth * 2f + examButtonWidth;
 
             GUILayout.Label($"Shown: {rows.Count}");
             GUILayout.Space(8);
@@ -194,24 +195,39 @@ namespace RosterRotation
                     bool inTraining = k.inactive;
                     bool onMission  = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
                     bool maxLevel   = k.experienceLevel >= 3f;
+                    bool hasExam    = HasGraduationExam(r);
 
-                    GUI.enabled = !inTraining && !onMission && !maxLevel;
-                    if (GUILayout.Button("Train", GUILayout.Width(actionButtonWidth)))
+                    if (hasExam)
                     {
-                        _pendingTrainKerbal = k;
-                        _showTrainConfirm   = true;
+                        bool canOffer = CanOfferGraduationExam(k, r);
+                        GUI.enabled = canOffer;
+                        string examLabel = r != null && r.GraduationExamActive ? "Exam Active" : "Offer Final Exam";
+                        if (GUILayout.Button(examLabel, GUILayout.Width(examButtonWidth)) && canOffer)
+                            OfferGraduationExamContract(k, r);
+                        GUI.enabled = true;
+                        GUILayout.Space(actionButtonWidth * 2f);
                     }
-                    GUI.enabled = true;
+                    else
+                    {
+                        GUI.enabled = !inTraining && !onMission && !maxLevel;
+                        if (GUILayout.Button("Train", GUILayout.Width(actionButtonWidth)))
+                        {
+                            _pendingTrainKerbal = k;
+                            _showTrainConfirm   = true;
+                        }
+                        GUI.enabled = true;
 
-                    GUI.enabled = !inTraining && !onMission && !row.InTrainingLockout;
-                    if (row.InTrainingLockout)
-                        GUILayout.Button("Committed", GUILayout.Width(actionButtonWidth));
-                    else if (GUILayout.Button("Retire", GUILayout.Width(actionButtonWidth)))
-                    {
-                        DoRetire(k, r);
-                        InvalidateUICaches();
+                        GUI.enabled = !inTraining && !onMission && !row.InTrainingLockout;
+                        if (row.InTrainingLockout)
+                            GUILayout.Button("Committed", GUILayout.Width(actionButtonWidth));
+                        else if (GUILayout.Button("Retire", GUILayout.Width(actionButtonWidth)))
+                        {
+                            DoRetire(k, r);
+                            InvalidateUICaches();
+                        }
+                        GUI.enabled = true;
+                        GUILayout.Space(examButtonWidth);
                     }
-                    GUI.enabled = true;
                 }
                 else
                 {
@@ -221,7 +237,7 @@ namespace RosterRotation
                     bool   cantAfford = recallCost > 0 && curFunds < recallCost;
 
                     GUI.enabled = !atCap && !noStar && !cantAfford;
-                    string btnLabel = noStar ? "No Stars" : (recallCost > 0 ? $"Recall √{recallCost:N0}" : "Recall");
+                    string btnLabel = noStar ? "No Stars" : (recallCost > 0 ? $"Recall {recallCost:N0}" : "Recall");
                     if (GUILayout.Button(btnLabel, GUILayout.Width(noStar ? actionButtonWidth : 130f)))
                     {
                         DoRecall(k, r, row.EffectiveStars);
@@ -255,7 +271,7 @@ namespace RosterRotation
             int    cBase = tgt * RosterRotationState.TrainingStarDays;
             int    cMax  = (int)(cBase * 1.5);
             string cDur  = trainK.stupidity < 0.01f ? $"{cBase}d" : $"{cBase}–{cMax}d";
-            GUILayout.Label($"Cost: √{fCost:N0}  |  {rCost:N0} R&D  |  {cDur}");
+            GUILayout.Label($"Cost: {fCost:N0}  |  {rCost:N0} R&D  |  {cDur}");
             if (!afford) GUILayout.Label("⚠ Insufficient funds or R&D!");
             GUILayout.BeginHorizontal();
             GUI.enabled = afford;
@@ -282,11 +298,11 @@ namespace RosterRotation
             double funds = Funding.Instance?.Funds ?? 0;
             double rd    = ResearchAndDevelopment.Instance?.Science ?? 0;
 
-            GUILayout.Label($"Training costs based on next hire cost: √{hire:N0}");
+            GUILayout.Label($"Training costs based on next hire cost: {hire:N0}");
             GUILayout.Label(
-                $"  L1: √{TrainingFundsCost(hire,1):N0} + {TrainingRDCost(1):N0} R&D   " +
-                $"L2: √{TrainingFundsCost(hire,2):N0} + {TrainingRDCost(2):N0} R&D   " +
-                $"L3: √{TrainingFundsCost(hire,3):N0} + {TrainingRDCost(3):N0} R&D   " +
+                $"  L1: {TrainingFundsCost(hire,1):N0} + {TrainingRDCost(1):N0} R&D   " +
+                $"L2: {TrainingFundsCost(hire,2):N0} + {TrainingRDCost(2):N0} R&D   " +
+                $"L3: {TrainingFundsCost(hire,3):N0} + {TrainingRDCost(3):N0} R&D   " +
                 $"({RosterRotationState.TrainingStarDays}d base per level)");
             GUILayout.Space(6);
 
@@ -312,6 +328,9 @@ namespace RosterRotation
             if (!anyT) GUILayout.Label("  None.");
             GUILayout.Space(8);
 
+            DrawGraduationExamRows(roster, now, false);
+            GUILayout.Space(8);
+
             GUILayout.Label("▶ Send to Training");
             var candidates = GetTrainingCandidatesCached(roster);
             _scroll = GUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(200));
@@ -328,7 +347,7 @@ namespace RosterRotation
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(k.name,           GUILayout.Width(140));
                 GUILayout.Label($"L{(int)k.experienceLevel}→L{tgtT}", GUILayout.Width(70));
-                GUILayout.Label($"√{fc:N0} + {rc:N0}R  {(k.stupidity < 0.01f ? $"{baseD}d" : $"{baseD}–{maxD}d")}", GUILayout.Width(200));
+                GUILayout.Label($"{fc:N0} + {rc:N0}R  {(k.stupidity < 0.01f ? $"{baseD}d" : $"{baseD}–{maxD}d")}", GUILayout.Width(200));
                 GUILayout.FlexibleSpace();
                 GUI.enabled = afford;
                 if (GUILayout.Button("Send", GUILayout.Width(70)))
@@ -448,7 +467,7 @@ namespace RosterRotation
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Reject All Applicants", GUILayout.Width(180)))
             {
-                var all = roster.Applicants;
+                var all = SnapshotApplicants(roster);
                 foreach (var k in all) RejectApplicant(roster, k);
                 InvalidateUICaches();
                 ACPatches.ForceRefresh();
@@ -463,7 +482,7 @@ namespace RosterRotation
             double funds = Funding.Instance?.Funds ?? 0;
             double rd    = ResearchAndDevelopment.Instance?.Science ?? 0;
 
-            GUILayout.Label($"Funds: √{funds:N0}   R&D: {rd:N0}   Next Hire Base: √{hire:N0}");
+            GUILayout.Label($"Funds: {funds:N0}   R&D: {rd:N0}   Next Hire Base: {hire:N0}");
             GUILayout.Space(4);
             GUILayout.BeginHorizontal();
             GUILayout.Label("Name",       GUILayout.Width(180));
@@ -494,6 +513,10 @@ namespace RosterRotation
                 GUILayout.EndHorizontal();
             }
 
+            GUILayout.Space(6);
+            DrawGraduationExamRows(roster, now, true);
+            GUILayout.Space(6);
+
             _overlayScroll = GUILayout.BeginScrollView(_overlayScroll, GUILayout.MinHeight(250));
             var candidates = GetTrainingCandidatesCached(roster);
             foreach (var k in candidates)
@@ -509,7 +532,7 @@ namespace RosterRotation
                 GUILayout.Label(k.name,    GUILayout.Width(180));
                 GUILayout.Label(k.trait,   GUILayout.Width(90));
                 GUILayout.Label($"L{(int)k.experienceLevel}→L{tgt}", GUILayout.Width(50));
-                GUILayout.Label($"√{fc:N0}", GUILayout.Width(110));
+                GUILayout.Label($"{fc:N0}", GUILayout.Width(110));
                 GUILayout.Label($"{rc:N0}",  GUILayout.Width(80));
                 GUILayout.Label(k.stupidity < 0.01f ? $"{baseDays}d" : $"{baseDays}–{maxDays}d", GUILayout.Width(80));
                 GUILayout.FlexibleSpace();

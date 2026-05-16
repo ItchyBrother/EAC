@@ -15,6 +15,7 @@ using System.Reflection;
 using UnityEngine;
 using KSP;
 using KSP.UI.Screens;
+using Contracts;
 
 namespace RosterRotation
 {
@@ -88,6 +89,7 @@ namespace RosterRotation
         private void Start()
         {
             GameEvents.OnVesselRecoveryRequested.Add(OnRecover);
+            GameEvents.onVesselRecovered.Add(new EventData<ProtoVessel, bool>.OnEvent(OnVesselRecovered));
             GameEvents.onKerbalStatusChange.Add(OnKerbalStatusChange);
 
             double now = Planetarium.GetUniversalTime();
@@ -98,6 +100,7 @@ namespace RosterRotation
         private void OnDestroy()
         {
             GameEvents.OnVesselRecoveryRequested.Remove(OnRecover);
+            GameEvents.onVesselRecovered.Remove(new EventData<ProtoVessel, bool>.OnEvent(OnVesselRecovered));
             GameEvents.onKerbalStatusChange.Remove(OnKerbalStatusChange);
         }
 
@@ -127,6 +130,7 @@ namespace RosterRotation
                     r.Retired                = true;
                     r.RetiredUT              = now;
                     r.ExperienceAtRetire     = (int)pcm.experienceLevel;
+                    RosterRotationState.NoteCertifiedLevel(r, (int)pcm.experienceLevel);
                     r.RetirementWarned       = false;
                     if (string.IsNullOrEmpty(r.OriginalTrait)) r.OriginalTrait = pcm.trait;
                     r.OriginalType = pcm.type;
@@ -151,7 +155,19 @@ namespace RosterRotation
                 var r = RosterRotationState.GetOrCreate(pcm.name);
                 r.MissionStartUT = 0;
                 r.LastMissionDeathCheckUT = 0;
+                RosterRotationKSCUI.RestoreCertifiedLevelIfNeeded(pcm, r, "recovery requested");
             }
+        }
+
+        private void OnVesselRecovered(ProtoVessel protoVessel, bool quick)
+        {
+            // KSP recovery can rebuild recovered crew from a stale vessel snapshot.
+            // If Contract Configurator awarded an EAC final-exam level before
+            // recovery, immediately re-apply EAC's already-recorded certified
+            // level and refresh the AC/EAC views so the roster does not appear
+            // to drop back a level until the next scene transition.
+            if (RosterRotationKSCUI.RestoreCertifiedLevelsFromEacRecords("vessel recovered"))
+                SaveScheduler.RequestSave("restore certified levels after recovery");
         }
 
         private void OnKerbalStatusChange(
@@ -174,15 +190,19 @@ namespace RosterRotation
                     SaveScheduler.RequestSave("kerbal unassigned mission tracking");
             }
 
+            if (newStatus == ProtoCrewMember.RosterStatus.Available &&
+                RosterRotationKSCUI.RestoreCertifiedLevelIfNeeded(pcm, rec, "kerbal status change " + oldStatus + " -> " + newStatus))
+            {
+                SaveScheduler.RequestSave("restore certified level after status change");
+            }
+
             if (newStatus == ProtoCrewMember.RosterStatus.Available && rec.DeathUT > 0)
             {
-                rec.DeathUT = 0;
-                rec.DiedOnMission = false;
-                rec.PendingMissionDeath = false;
-                rec.MissionStartUT = 0;
-                rec.LastMissionDeathCheckUT = 0;
-                RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
-                SaveScheduler.RequestSave("kerbal status change");
+                // KSP can briefly bounce a fatality back to Available during recovery/scene
+                // transitions, especially when respawn settings are permissive.  Do not
+                // treat that as a resurrection; EAC's death record is authoritative.
+                if (RosterRotationKSCUI.ForceRecordedDeathIfNeeded(pcm, rec, now, "flight status change " + oldStatus + " -> " + newStatus))
+                    SaveScheduler.RequestSave("restore kerbal death status");
                 return;
             }
 
@@ -190,12 +210,7 @@ namespace RosterRotation
                         || newStatus == ProtoCrewMember.RosterStatus.Missing;
             if (!isDeath || rec.DeathUT > 0) return;
 
-            rec.DeathUT = now;
-            rec.DiedOnMission = false;
-            rec.PendingMissionDeath = false;
-            rec.MissionStartUT = 0;
-            rec.LastMissionDeathCheckUT = 0;
-            RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
+            RosterRotationKSCUI.MarkKerbalDeathRecord(pcm, rec, now, false, "flight status change " + oldStatus + " -> " + newStatus);
             int kiaAge = RosterRotationState.GetKerbalAge(rec, now);
 
             if (RosterRotationState.DeathNotificationsEnabled)
@@ -216,7 +231,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.2.1";
+        private const string ModVersion  = "1.3.0";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -261,6 +276,10 @@ namespace RosterRotation
 
         private static MethodInfo _cachedRecruitCostCountMethod;
         private static MethodInfo _cachedRecruitCostFacilityMethod;
+        private static MethodInfo _cachedRejectApplicantMethod;
+        private static bool       _rejectApplicantMethodResolved;
+        private static FieldInfo  _cachedRejectApplicantListField;
+        private static bool       _rejectApplicantListFieldResolved;
 
         // ── Roster-row data type ───────────────────────────────────────────────
         private sealed class RosterRowData
@@ -324,38 +343,119 @@ namespace RosterRotation
             yield return null;
             yield return null;
             ApplyGrantedLevels();
-            HealRespawnedKerbals();
+            StartCoroutine(RestoreCertifiedLevelsAfterDelay(0.5f, "space-center startup delayed"));
+            StartCoroutine(RestoreCertifiedLevelsAfterDelay(2.0f, "space-center startup delayed"));
+            EnforceRecordedDeaths("space-center startup");
+            ResolveUnavailableGraduationExams();
             if (RosterRotationState.AgingEnabled)
                 InitializeExistingKerbalAges();
             _pendingForceRefresh = true;
         }
 
-        private static void HealRespawnedKerbals()
+        internal static void MarkKerbalDeathRecord(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT, bool diedOnMission, string reason)
+        {
+            if (pcm == null || rec == null) return;
+            if (rec.DeathUT <= 0)
+                rec.DeathUT = nowUT > 0 ? nowUT : Planetarium.GetUniversalTime();
+
+            rec.DiedOnMission = diedOnMission;
+            rec.PendingMissionDeath = false;
+            rec.MissionStartUT = 0;
+            rec.LastMissionDeathCheckUT = 0;
+            ClearActiveDutyStateAfterDeath(rec);
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
+
+            RRLog.Info("[EAC] Recorded kerbal death: " + pcm.name
+                + ", status=" + pcm.rosterStatus
+                + ", deathUT=" + rec.DeathUT.ToString("0.###")
+                + ", reason=" + (string.IsNullOrEmpty(reason) ? "<none>" : reason));
+        }
+
+        internal static bool ForceRecordedDeathIfNeeded(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT, string reason)
+        {
+            if (pcm == null || rec == null) return false;
+            if (rec.DeathUT <= 0) return false;
+            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+            {
+                ClearActiveDutyStateAfterDeath(rec);
+                return false;
+            }
+
+            ProtoCrewMember.RosterStatus oldStatus = pcm.rosterStatus;
+            ClearActiveDutyStateAfterDeath(rec);
+            rec.MissionStartUT = 0;
+            rec.LastMissionDeathCheckUT = 0;
+            rec.PendingMissionDeath = false;
+            rec.RetirementScheduled = false;
+
+            try
+            {
+                pcm.inactive = false;
+                pcm.inactiveTimeEnd = 0;
+                pcm.rosterStatus = ProtoCrewMember.RosterStatus.Dead;
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("[EAC] Failed to restore KIA/Lost status for " + pcm.name + ": " + ex.Message);
+                return false;
+            }
+
+            RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
+            RRLog.Warn("[EAC] Restored KIA/Lost status for " + pcm.name
+                + "; was " + oldStatus
+                + ", deathUT=" + rec.DeathUT.ToString("0.###")
+                + ", reason=" + (string.IsNullOrEmpty(reason) ? "<none>" : reason));
+            return true;
+        }
+
+        private static bool EnforceRecordedDeaths(string reason)
         {
             try
             {
                 var roster = HighLogic.CurrentGame?.CrewRoster;
-                if (roster == null) return;
-                int healed = 0;
+                if (roster == null) return false;
+
+                double nowUT = Planetarium.GetUniversalTime();
+                int restored = 0;
                 foreach (var k in roster.Crew)
                 {
-                    if (k == null) continue;
-                    if (k.rosterStatus != ProtoCrewMember.RosterStatus.Available &&
-                        k.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) continue;
+                    if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
                     if (!RosterRotationState.Records.TryGetValue(k.name, out var rec)) continue;
-                    if (rec.DeathUT <= 0) continue;
-                    if (rec.DiedOnMission || rec.PendingMissionDeath) continue;
-                    rec.DeathUT = 0;
-                    rec.DiedOnMission = false;
-                    rec.PendingMissionDeath = false;
-                    rec.MissionStartUT = 0;
-                    rec.LastMissionDeathCheckUT = 0;
-                    healed++;
+                    if (ForceRecordedDeathIfNeeded(k, rec, nowUT, reason))
+                        restored++;
                 }
-                if (healed > 0)
-                    SaveScheduler.RequestSave("heal respawned kerbals");
+
+                if (restored > 0)
+                {
+                    SaveScheduler.RequestSave("restore recorded kerbal deaths");
+                    ACPatches.ForceRefresh();
+                    return true;
+                }
             }
-            catch (Exception ex) { RRLog.Warn($"HealRespawnedKerbals: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                RRLog.Warn("EnforceRecordedDeaths: " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private static void ClearActiveDutyStateAfterDeath(RosterRotationState.KerbalRecord rec)
+        {
+            if (rec == null) return;
+
+            rec.Training = TrainingType.None;
+            rec.TrainingTargetLevel = 0;
+            rec.TrainingEndUT = 0;
+            rec.RestUntilUT = 0;
+
+            rec.GraduationExamPending = false;
+            rec.GraduationExamActive = false;
+            rec.GraduationExamTargetLevel = 0;
+            rec.GraduationExamContractGuid = "";
+            rec.GraduationExamContractType = "";
+            rec.GraduationExamReadyUT = 0;
         }
 
         private static void InitializeExistingKerbalAges()
@@ -382,15 +482,107 @@ namespace RosterRotation
 
         private void ApplyGrantedLevels()
         {
-            var roster = HighLogic.CurrentGame?.CrewRoster;
-            if (roster == null) return;
-            foreach (var k in roster.Crew)
+            RestoreCertifiedLevelsFromEacRecords("space-center startup");
+        }
+
+        private IEnumerator RestoreCertifiedLevelsAfterDelay(float delaySeconds, string reason)
+        {
+            if (delaySeconds > 0f)
+                yield return new WaitForSeconds(delaySeconds);
+
+            if (RestoreCertifiedLevelsFromEacRecords(reason))
+                SaveScheduler.RequestSave("restore certified levels");
+        }
+
+        internal static bool RestoreCertifiedLevelsFromEacRecords(string reason)
+        {
+            bool changed = false;
+
+            try
             {
-                if (k == null) continue;
-                if (!RosterRotationState.Records.TryGetValue(k.name, out var rec)) continue;
-                if (rec.GrantedLevel <= 0 || (int)k.experienceLevel >= rec.GrantedLevel) continue;
-                try { k.experienceLevel = rec.GrantedLevel; }
-                catch (Exception ex) { RRLog.Warn($"ApplyGrantedLevels: {k.name} failed: {ex.Message}"); }
+                var roster = HighLogic.CurrentGame?.CrewRoster;
+                if (roster == null) return false;
+
+                foreach (var k in roster.Crew)
+                {
+                    if (k == null) continue;
+                    RosterRotationState.KerbalRecord rec;
+                    if (!RosterRotationState.Records.TryGetValue(k.name, out rec)) continue;
+                    if (RestoreCertifiedLevelIfNeeded(k, rec, reason))
+                        changed = true;
+                }
+
+                if (changed)
+                {
+                    RefreshRosterViewsAfterCertifiedLevelRestore(reason);
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("RestoreCertifiedLevelsFromEacRecords: " + ex.Message);
+            }
+
+            return changed;
+        }
+
+        internal static bool RestoreCertifiedLevelIfNeeded(ProtoCrewMember k, RosterRotationState.KerbalRecord rec, string reason)
+        {
+            if (k == null || rec == null) return false;
+
+            RosterRotationState.EnsureKerbalIdentity(rec);
+            if (rec.HighestLevelEverCertified < rec.GrantedLevel)
+                rec.HighestLevelEverCertified = rec.GrantedLevel;
+
+            // Do not undo intended retirement/recall skill decay.  Recalled Kerbals
+            // can be lower level than their career high and should be trainable again.
+            if (rec.Retired || rec.Training == TrainingType.RecallRefresher)
+            {
+                if (rec.Training == TrainingType.RecallRefresher)
+                    RosterRotationState.SyncCurrentGrantedLevelFromKerbal(k, rec, reason);
+                return false;
+            }
+
+            if (rec.DeathUT > 0) return false;
+            if (rec.GrantedLevel <= 0) return false;
+
+            int currentLevel = Math.Max(0, Math.Min(3, (int)k.experienceLevel));
+            int certifiedLevel = Math.Max(0, Math.Min(3, rec.GrantedLevel));
+            if (currentLevel >= certifiedLevel) return false;
+
+            try
+            {
+                k.experienceLevel = certifiedLevel;
+                RRLog.Verbose("[EAC] Restored certified Kerbal level" +
+                              (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")") +
+                              ": kerbal=" + k.name +
+                              " stockLevel=" + currentLevel +
+                              " certifiedLevel=" + certifiedLevel +
+                              " highestEver=" + rec.HighestLevelEverCertified);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("[EAC] Could not restore certified level for " + k.name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private static void RefreshRosterViewsAfterCertifiedLevelRestore(string reason)
+        {
+            try
+            {
+                foreach (var ui in UnityEngine.Object.FindObjectsOfType<RosterRotationKSCUI>())
+                {
+                    if (ui == null) continue;
+                    ui.InvalidateUICaches();
+                    ui._pendingForceRefresh = true;
+                }
+
+                ACPatches.ForceRefresh();
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("Mod.RefreshAfterCertifiedLevelRestore", "Suppressed", ex);
             }
         }
 
@@ -426,9 +618,10 @@ namespace RosterRotation
 
             double nowUT = Planetarium.GetUniversalTime();
             bool missionTrackingDirty = MissionTimeTracker.SyncRoster(nowUT);
+            bool deathRestoreDirty = EnforceRecordedDeaths("space-center periodic check");
             if (RosterRotationState.AgingEnabled)
                 CheckAgingAndRetirement();
-            else if (missionTrackingDirty)
+            else if (missionTrackingDirty && !deathRestoreDirty)
                 SaveScheduler.RequestSave("mission tracking sync");
         }
 
@@ -441,7 +634,18 @@ namespace RosterRotation
             if (newType != ProtoCrewMember.KerbalType.Crew) return;
 
             double nowUT = Planetarium.GetUniversalTime();
+            bool hadExistingRecord = RosterRotationState.Records.ContainsKey(pcm.name);
             var rec = RosterRotationState.GetOrCreate(pcm.name);
+
+            // A new hire from Applicants is a new Kerbal generation, even if the
+            // display name matches a dismissed/retired Kerbal's old EAC record.
+            // EAC recalls do not come through Applicant -> Crew, so recalled retired
+            // Kerbals keep their career history and can retrain from their current level.
+            if (hadExistingRecord && RosterRotationState.HasPriorKerbalCareerState(rec))
+            {
+                RRLog.Verbose("[EAC] Starting fresh EAC record for newly hired Kerbal name collision: " + pcm.name);
+                rec = RosterRotationState.ReplaceWithFreshKerbalRecord(pcm.name, pcm);
+            }
 
             if (rec.Training == TrainingType.None)
             {
@@ -465,12 +669,22 @@ namespace RosterRotation
             if (roster == null) return;
             double now = Planetarium.GetUniversalTime();
             bool anyCleaned = CleanupStaleTrainingRecords(roster);
+            bool anyExamResolved = ResolveUnavailableGraduationExams();
             bool anyDone = false;
 
             foreach (var k in roster.Crew)
             {
                 if (k == null) continue;
                 if (!RosterRotationState.Records.TryGetValue(k.name, out var rec)) continue;
+                if (rec.DeathUT > 0 || k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+                {
+                    if (rec.Training != TrainingType.None || rec.GraduationExamPending || rec.GraduationExamActive)
+                    {
+                        MarkKerbalDeathRecord(k, rec, rec.DeathUT > 0 ? rec.DeathUT : now, rec.DiedOnMission, "training cleanup for dead kerbal");
+                        anyDone = true;
+                    }
+                    continue;
+                }
                 if (rec.Training == TrainingType.None) continue;
 
                 bool done = !k.inactive || (k.inactiveTimeEnd > 0 && now >= k.inactiveTimeEnd);
@@ -481,23 +695,14 @@ namespace RosterRotation
                     int target = rec.TrainingTargetLevel;
                     if (target >= 1 && target <= 3)
                     {
-                        try { k.experienceLevel = target; } catch (Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:CheckTraining.SetLevel", "Suppressed", ex); }
-                        rec.GrantedLevel = target;
-                        try { k.careerLog.AddEntry("Training" + target, "Kerbin"); } catch (Exception ex) { RRLog.VerboseExceptionOnce("Mod.cs:CheckTraining.CareerLog", "Suppressed", ex); }
-
-                        if (RosterRotationState.AgingEnabled && rec.NaturalRetirementUT > 0)
+                        if (ShouldRequireGraduationExam(k, rec, target))
                         {
-                            rec.RetirementDelayYears += target;
-                            rec.RetirementWarned = false;
+                            MarkGraduationExamPending(k, rec, target, now);
                         }
-
-                        TryApplyTrainingTraitGrowth(k, rec, target, now);
-
-                        RosterRotationState.PostNotification(
-                            EACNotificationType.Training, $"Training Complete — {k.name}",
-                            $"{k.name} has completed Level {target} training and is ready for duty. ({RosterRotationState.FormatGameDate(now)})",
-                            MessageSystemButton.MessageButtonColor.GREEN,
-                            MessageSystemButton.ButtonIcons.COMPLETE, 6f);
+                        else
+                        {
+                            GrantTrainingLevel(k, rec, target, now);
+                        }
                     }
                 }
                 else if (rec.Training == TrainingType.InitialHire)
@@ -511,6 +716,7 @@ namespace RosterRotation
                 }
                 else if (rec.Training == TrainingType.RecallRefresher)
                 {
+                    RosterRotationState.SyncCurrentGrantedLevelFromKerbal(k, rec, "recall refresher complete");
                     RosterRotationState.PostNotification(
                         EACNotificationType.Training, "Refresher Complete — " + k.name,
                         k.name + " has completed refresher training and is cleared for missions. (" + RosterRotationState.FormatGameDate(now) + ")",
@@ -524,10 +730,10 @@ namespace RosterRotation
                 anyDone = true;
             }
 
-            if (anyDone || anyCleaned)
+            if (anyDone || anyCleaned || anyExamResolved)
             {
                 InvalidateUICaches();
-                SaveScheduler.RequestSave(anyDone ? "training completion" : "cleanup stale training records");
+                SaveScheduler.RequestSave(anyDone ? "training completion" : anyCleaned ? "cleanup stale training records" : "final exams resolved by legacy training path");
             }
         }
 
@@ -586,17 +792,20 @@ namespace RosterRotation
         {
             if (r == null) { r = new RosterRotationState.KerbalRecord(); RosterRotationState.Records[k.name] = r; }
             if (string.IsNullOrEmpty(r.OriginalTrait)) r.OriginalTrait = k.trait;
+            double nowUT = Planetarium.GetUniversalTime();
             r.OriginalType       = k.type;
             r.Retired            = true;
-            r.RetiredUT          = Planetarium.GetUniversalTime();
+            r.RetiredUT          = nowUT;
             r.ExperienceAtRetire = (int)k.experienceLevel;
+            RosterRotationState.NoteCertifiedLevel(r, (int)k.experienceLevel);
             k.inactive        = true;
-            k.inactiveTimeEnd = Planetarium.GetUniversalTime() + RosterRotationState.YearSeconds * 1000.0;
+            k.inactiveTimeEnd = nowUT + RosterRotationState.YearSeconds * 1000.0;
             RosterRotationState.InvalidateRetiredCache();
         }
 
         private void DoRecall(ProtoCrewMember k, RosterRotationState.KerbalRecord r, int effStars)
         {
+            double nowUT = Planetarium.GetUniversalTime();
             double recallCost = GetRecallFundsCost();
             if (recallCost > 0)
             {
@@ -604,7 +813,7 @@ namespace RosterRotation
                 if (funds < recallCost)
                 {
                     ScreenMessages.PostScreenMessage(
-                        $"Cannot recall {k.name} — insufficient funds (need √{recallCost:N0}).",
+                        $"Cannot recall {k.name} — insufficient funds (need {recallCost:N0} funds).",
                         4f, ScreenMessageStyle.UPPER_CENTER);
                     return;
                 }
@@ -620,15 +829,16 @@ namespace RosterRotation
             k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
             if (!string.IsNullOrEmpty(r.OriginalTrait)) k.trait = r.OriginalTrait;
             try { k.experienceLevel = effStars; } catch (Exception ex) { RRLog.VerboseExceptionOnce("Mod.DoRecall.ExpLevel", "Suppressed", ex); }
+            RosterRotationState.SyncCurrentGrantedLevelFromKerbal(k, r, "retired Kerbal recalled");
             double sec = 30.0 * RosterRotationState.DaySeconds;
             k.inactive        = true;
-            k.inactiveTimeEnd = Planetarium.GetUniversalTime() + sec;
+            k.inactiveTimeEnd = nowUT + sec;
             RetiredKerbalCleanupService.ResetAutoCleanupRequest(k.name);
             r.Training            = TrainingType.RecallRefresher;
             r.TrainingTargetLevel = 0;
             RosterRotationState.InvalidateRetiredCache();
 
-            string costMsg = recallCost > 0 ? $" (√{recallCost:N0})" : "";
+            string costMsg = recallCost > 0 ? $" ({recallCost:N0} funds)" : "";
             ScreenMessages.PostScreenMessage(
                 $"{k.name} recalled — 30-day refresher training begins.{costMsg}",
                 4f, ScreenMessageStyle.UPPER_CENTER);
@@ -659,11 +869,12 @@ namespace RosterRotation
             k.inactiveTimeEnd = Planetarium.GetUniversalTime() + sec;
 
             var rec = RosterRotationState.GetOrCreate(k.name);
+            ClearGraduationExamState(rec);
             rec.Training            = TrainingType.ExperienceUpgrade;
             rec.TrainingTargetLevel = targetLevel;
 
             ScreenMessages.PostScreenMessage(
-                $"{k.name} sent to training → L{targetLevel}   √{fCost:N0}  {rCost:N0} R&D  {trainingDays:F0}d",
+                $"{k.name} sent to training - L{targetLevel}   {fCost:N0} funds  {rCost:N0} R&D  {trainingDays:F0}d",
                 5f, ScreenMessageStyle.UPPER_CENTER);
 
             InvalidateUICaches();
@@ -793,27 +1004,72 @@ namespace RosterRotation
         }
 
         // ── Misc helpers ───────────────────────────────────────────────────────
+        private static MethodInfo GetRejectApplicantMethod()
+        {
+            if (_rejectApplicantMethodResolved) return _cachedRejectApplicantMethod;
+
+            _rejectApplicantMethodResolved = true;
+            foreach (var m in typeof(KerbalRoster).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (m == null) continue;
+                string n = m.Name ?? string.Empty;
+                if (n.IndexOf("remove", StringComparison.OrdinalIgnoreCase) < 0
+                    && n.IndexOf("delete", StringComparison.OrdinalIgnoreCase) < 0
+                    && n.IndexOf("reject", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                var ps = m.GetParameters();
+                if (ps != null && ps.Length == 1 && ps[0].ParameterType == typeof(ProtoCrewMember))
+                {
+                    _cachedRejectApplicantMethod = m;
+                    break;
+                }
+            }
+
+            return _cachedRejectApplicantMethod;
+        }
+
+        private static FieldInfo GetRejectApplicantListField()
+        {
+            if (_rejectApplicantListFieldResolved) return _cachedRejectApplicantListField;
+
+            _rejectApplicantListFieldResolved = true;
+            foreach (var field in typeof(KerbalRoster).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                if (field == null) continue;
+                if (!typeof(List<ProtoCrewMember>).IsAssignableFrom(field.FieldType)) continue;
+
+                _cachedRejectApplicantListField = field;
+                break;
+            }
+
+            return _cachedRejectApplicantListField;
+        }
+
+        private static List<ProtoCrewMember> SnapshotApplicants(KerbalRoster roster)
+        {
+            var result = new List<ProtoCrewMember>();
+            if (roster == null || roster.Applicants == null) return result;
+
+            foreach (var k in roster.Applicants)
+                if (k != null && k.type == ProtoCrewMember.KerbalType.Applicant)
+                    result.Add(k);
+
+            return result;
+        }
+
         private static void RejectApplicant(KerbalRoster roster, ProtoCrewMember applicant)
         {
             try
             {
                 if (roster == null || applicant == null) return;
-                MethodInfo rm = null;
-                foreach (var m in typeof(KerbalRoster).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (m == null) continue;
-                    string n = (m.Name ?? "").ToLowerInvariant();
-                    if (!(n.Contains("remove") || n.Contains("delete") || n.Contains("reject"))) continue;
-                    var ps = m.GetParameters();
-                    if (ps?.Length == 1 && ps[0].ParameterType == typeof(ProtoCrewMember)) { rm = m; break; }
-                }
+                if (applicant.type != ProtoCrewMember.KerbalType.Applicant) return;
+
+                var rm = GetRejectApplicantMethod();
                 if (rm != null) rm.Invoke(roster, new object[] { applicant });
                 else
                 {
-                    var f = typeof(KerbalRoster)
-                        .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                        .FirstOrDefault(fi => fi != null && typeof(List<ProtoCrewMember>).IsAssignableFrom(fi.FieldType));
-                    var list = f?.GetValue(roster) as List<ProtoCrewMember>;
+                    var list = GetRejectApplicantListField()?.GetValue(roster) as List<ProtoCrewMember>;
                     list?.Remove(applicant);
                 }
                 SaveScheduler.RequestSave("reject applicant");

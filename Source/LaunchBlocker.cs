@@ -104,7 +104,7 @@ namespace RosterRotation
         private static string Format(double seconds)
         {
             if (seconds < 0) seconds = 0;
-            double days = seconds / 21600.0;
+            double days = seconds / RosterRotationState.DaySeconds;
             if (days >= 1) return $"{days:0.0}d";
             double hours = seconds / 3600.0;
             if (hours >= 1) return $"{hours:0.0}h";

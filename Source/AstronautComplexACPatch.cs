@@ -366,16 +366,7 @@ private static void EnsureMaxCrewCached()
                         // UIList.SetActive(true) may re-show all child GameObjects
                         if (active && i == 0 && AvailListTransform != null)
                         {
-                            var retiredNames = GetRetiredNames();
-                            for (int r = 0; r < AvailListTransform.childCount; r++)
-                            {
-                                Transform row = AvailListTransform.GetChild(r);
-                                if (row == null || !row.gameObject.activeSelf) continue;
-                                if (RowContainsName(row.gameObject, retiredNames))
-                                {
-                                    row.gameObject.SetActive(false);
-                                }
-                            }
+                            HideRetiredRowsFromAvailable(AvailListTransform, null);
                         }
                     }
                     else
@@ -430,6 +421,81 @@ private static void EnsureMaxCrewCached()
             return true;
         }
 
+        private static void AddHiddenAvailableName(string name,
+            System.Collections.Generic.List<string> names,
+            System.Collections.Generic.HashSet<string> seen)
+        {
+            if (string.IsNullOrEmpty(name) || names == null || seen == null) return;
+            if (!seen.Add(name)) return;
+            names.Add(name);
+        }
+
+        private static System.Collections.Generic.List<string> BuildHiddenAvailableNames(
+            System.Collections.Generic.List<string> retiredNames = null)
+        {
+            var names = new System.Collections.Generic.List<string>();
+            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+
+            if (retiredNames != null)
+            {
+                for (int i = 0; i < retiredNames.Count; i++)
+                    AddHiddenAvailableName(retiredNames[i], names, seen);
+            }
+
+            // Retired kerbals and EAC-deceased kerbals can be temporarily re-enabled
+            // by stock AC list rebuilds. Hide both classes from Available; deceased
+            // kerbals belong in Lost, not Available or Retired.
+            foreach (var kvp in RosterRotationState.Records)
+            {
+                var rec = kvp.Value;
+                if (rec == null) continue;
+                if (rec.Retired || rec.DeathUT > 0)
+                    AddHiddenAvailableName(kvp.Key, names, seen);
+            }
+
+            var roster = HighLogic.CurrentGame?.CrewRoster;
+            if (roster != null)
+            {
+                for (int i = 0; i < roster.Count; i++)
+                {
+                    ProtoCrewMember pcm;
+                    try { pcm = roster[i]; } catch { continue; }
+                    if (pcm == null) continue;
+                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
+                        || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+                    {
+                        AddHiddenAvailableName(pcm.name, names, seen);
+                    }
+                }
+            }
+
+            return names;
+        }
+
+        private static void HideRetiredRowsFromAvailable(Transform availableList = null, System.Collections.Generic.List<string> retiredNames = null)
+        {
+            try
+            {
+                Transform list = availableList ?? AvailListTransform;
+                if (list == null) return;
+
+                var names = BuildHiddenAvailableNames(retiredNames);
+                if (names == null || names.Count == 0) return;
+
+                for (int i = 0; i < list.childCount; i++)
+                {
+                    Transform row = list.GetChild(i);
+                    if (row == null) continue;
+                    if (RowContainsName(row.gameObject, names))
+                        row.gameObject.SetActive(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.hide.retired.available.fail", "Suppressed", ex);
+            }
+        }
+
         // ---------------------------------------------------------------
         // Postfix: CreateAvailableList
         // ---------------------------------------------------------------
@@ -469,18 +535,10 @@ private static void EnsureMaxCrewCached()
                     }
                 }
 
-                // Hide retired rows from Available AFTER measuring
-                if (availList != null && retiredNames.Count > 0)
-                {
-                    int hidden = 0;
-                    for (int i = 0; i < availList.childCount; i++)
-                    {
-                        Transform row = availList.GetChild(i);
-                        if (row == null || !row.gameObject.activeSelf) continue;
-                        if (RowContainsName(row.gameObject, retiredNames))
-                        { row.gameObject.SetActive(false); hidden++; }
-                    }
-                }
+                // Hide retired rows from Available AFTER measuring.
+                // KSP can re-enable row GameObjects during applicant-list rebuilds,
+                // so use the shared helper and do not rely on current active state.
+                HideRetiredRowsFromAvailable(availList, retiredNames);
 
                 if (availList == null)
                 {
@@ -914,7 +972,7 @@ private static void EnsureMaxCrewCached()
                 // hired kerbal's row shows "In introductory training Xd Xh Xm" immediately.
                 PatchAvailableListStatusText();
                 PatchLostListStatusText();
-
+                HideRetiredRowsFromAvailable(AvailListTransform, null);
 
                 var go = (__instance as MonoBehaviour)?.gameObject;
                 if (go == null) return;
@@ -1025,6 +1083,7 @@ private static void EnsureMaxCrewCached()
                 // Also apply updated Available and Lost list status labels right after rebuild.
                 PatchAvailableListStatusText();
                 PatchLostListStatusText();
+                HideRetiredRowsFromAvailable(AvailListTransform, null);
 
                 // If the retired tab was visible, restore its display state.
                 if (wasShowingRetired && RetiredListTransform != null)
@@ -1101,6 +1160,8 @@ private static void EnsureMaxCrewCached()
 
                 if (_updateCrewCountsMethod != null)
                     _updateCrewCountsMethod.Invoke(_cachedACInstance, null);
+
+                HideRetiredRowsFromAvailable(AvailListTransform, null);
             }
             catch (Exception ex)
             {

@@ -500,6 +500,7 @@ namespace RosterRotation
             return s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("In refresher training", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("In training", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Final Exam", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("Retired", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("Age ", StringComparison.OrdinalIgnoreCase) >= 0
                 // Lost tab / Dead / Missing status strings:
@@ -1132,7 +1133,7 @@ namespace RosterRotation
                     if (funds < recallCost)
                     {
                         ScreenMessages.PostScreenMessage(
-                            "Cannot recall " + kerbal.name + " — insufficient funds (need √" + recallCost.ToString("N0") + ").",
+                            "Cannot recall " + kerbal.name + " — insufficient funds (need " + recallCost.ToString("N0") + " funds).",
                             4f, ScreenMessageStyle.UPPER_CENTER);
                         return;
                     }
@@ -1161,6 +1162,7 @@ namespace RosterRotation
                 // KSP's experienceLevel is a float; we set it to the decayed integer value.
                 try { kerbal.experienceLevel = effStars; }
                 catch (Exception ex2) { RRLog.Warn("[RosterRotation] Could not set experienceLevel: " + ex2.Message); }
+                RosterRotationState.SyncCurrentGrantedLevelFromKerbal(kerbal, rec, "retired Kerbal recalled from AC tab");
 
                 // 30-day refresher training
                 double recallSeconds = 30.0 * RosterRotationState.DaySeconds;
@@ -1171,7 +1173,7 @@ namespace RosterRotation
 
                 SaveScheduler.RequestSave("recall retired kerbal");
 
-                string costMsg = recallCost > 0 ? " (√" + recallCost.ToString("N0") + ")" : "";
+                string costMsg = recallCost > 0 ? " (" + recallCost.ToString("N0") + ")" : "";
                 ScreenMessages.PostScreenMessage(kerbal.name + " recalled — 30-day refresher training begins." + costMsg, 4f, ScreenMessageStyle.UPPER_CENTER);
 
                 // Rebuild lists and immediately update status labels so the row shows
@@ -1200,6 +1202,22 @@ namespace RosterRotation
                 }
             }
             return null;
+        }
+
+        private static bool HasGraduationExamStatus(RosterRotationState.KerbalRecord rec)
+        {
+            return RosterRotationState.FinalExamContractsEnabled
+                   && rec != null
+                   && (rec.GraduationExamPending || rec.GraduationExamActive)
+                   && rec.GraduationExamTargetLevel >= 1
+                   && rec.GraduationExamTargetLevel <= 3;
+        }
+
+        private static string BuildGraduationExamStatusText(RosterRotationState.KerbalRecord rec, string agePrefix)
+        {
+            if (!HasGraduationExamStatus(rec)) return null;
+            string label = rec.GraduationExamActive ? "Final Exam Offered" : "Final Exam Pending";
+            return (agePrefix ?? "") + label;
         }
 
         private static string BuildUnavailableStatusText(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT)
@@ -1437,6 +1455,12 @@ namespace RosterRotation
                         if (k != null && k.name == kerbalName) { pcm = k; break; }
                 if (pcm == null) continue;
 
+                // Keep the visible Astronaut Complex star widget in sync after EAC/CC
+                // final-exam reconciliation.  Stock rows can retain an old visual state
+                // until the scene is reopened even though ProtoCrewMember.experienceLevel
+                // has already changed.
+                SetStarsState(row.gameObject, (int)pcm.experienceLevel);
+
                 // Build age prefix — shown for all active kerbals when aging is enabled
                 string agePrefix = "";
                 if (RosterRotationState.AgingEnabled
@@ -1444,6 +1468,23 @@ namespace RosterRotation
                     && recAge.LastAgedYears >= 0)
                 {
                     agePrefix = "Age " + RosterRotationState.GetKerbalAge(recAge, nowUT) + "  ";
+                }
+
+                if (RosterRotationState.Records.TryGetValue(kerbalName, out var recExam))
+                {
+                    if (HasGraduationExamStatus(recExam))
+                    {
+                        // If Contract Configurator already awarded the stock level, clear the
+                        // pending/offered exam state before rewriting the Astronaut Complex status.
+                        RosterRotationKSCUI.TryReconcileGraduationExamAwardForKerbal(pcm);
+                        RosterRotationState.Records.TryGetValue(kerbalName, out recExam);
+                    }
+
+                    if (HasGraduationExamStatus(recExam))
+                    {
+                        ReplaceStatusText(row.gameObject, BuildGraduationExamStatusText(recExam, agePrefix));
+                        continue;
+                    }
                 }
 
                 if (pcm.inactive && pcm.inactiveTimeEnd > nowUT)

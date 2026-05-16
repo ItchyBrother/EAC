@@ -24,6 +24,8 @@ namespace RosterRotation
         public static double TrainingRDPerStar       = 10.0;
         public static double TrainingBaseFundsCost   = 62000;
         public static double RecallFundsCostMultiplier = 1.0; // multiplied by hire cost for recall
+        public static bool   FinalExamContractsEnabled = false; // optional Contract Configurator graduation exams
+        public static string GraduationExamHistory = ""; // save-wide semicolon-delimited trait/level/exam history for CC final exam rotation
 
         public static readonly Dictionary<string, KerbalRecord> Records =
             new Dictionary<string, KerbalRecord>();
@@ -41,7 +43,23 @@ namespace RosterRotation
             public int    ExperienceAtRetire;
             public TrainingType Training           = TrainingType.None;
             public int          TrainingTargetLevel = 0;
+            // Current EAC-certified level.  This can intentionally be lower than a
+            // Kerbal's career high after retirement/recall skill decay so the Kerbal
+            // can retrain and take final exams again.
             public int          GrantedLevel        = -1;
+            // Historical career high kept for history/UI/debugging only; do not use
+            // this field to decide current exam eligibility.
+            public int          HighestLevelEverCertified = -1;
+            // EAC-side generation id.  Names are not enough because a dismissed
+            // Kerbal and a newly hired Kerbal can share the same display name.
+            public string       KerbalIdentityKey = "";
+            public bool         GraduationExamPending = false;
+            public bool         GraduationExamActive  = false;
+            public int          GraduationExamTargetLevel = 0;
+            public string       GraduationExamContractGuid = "";
+            public string       GraduationExamContractType = "";
+            public string       GraduationExamId = "";
+            public double       GraduationExamReadyUT = 0;
             public double BirthUT                = 0;
             public double NaturalRetirementUT    = 0;
             public int    RetirementDelayYears   = 0;
@@ -76,7 +94,7 @@ namespace RosterRotation
         public static bool PortraitCaptureEnabled = true;
         public static bool CrashPenaltyEnabled = true;
         public static bool MissionDeathEnabled = false;
-        public static bool DebugForceMissionDeath = false; // TEMP TEST HOOK
+        public static bool DebugForceMissionDeath = false; // Debug-only mission death override
 
         // Field aliases for EACStateBridge reflection access
         public static bool NotifyHUD { get => HudNotificationsEnabled; set => HudNotificationsEnabled = value; }
@@ -96,21 +114,32 @@ namespace RosterRotation
 
         public static List<string> GetRetiredNames()
         {
-            if (!_retiredCacheDirty && _cachedRetiredNames != null)
-                return _cachedRetiredNames;
+            if (_retiredCacheDirty || _cachedRetiredNames == null)
+            {
+                var names = new List<string>();
+                foreach (var kvp in Records)
+                    if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
 
-            var names = new List<string>();
-            foreach (var kvp in Records)
-                if (kvp.Value != null && kvp.Value.Retired) names.Add(kvp.Key);
+                _cachedRetiredNames = names;
+                _retiredCacheDirty  = false;
+            }
 
-            _cachedRetiredNames = names;
-            _retiredCacheDirty  = false;
-            return names;
+            // Return a defensive copy so callers cannot accidentally mutate the
+            // shared cache used by the Astronaut Complex patches.
+            return new List<string>(_cachedRetiredNames);
         }
 
         // ── Cached crew name set for row matching ───────────────────────────────
         private static HashSet<string> _cachedCrewNames;
         private static int _cachedCrewCount = -1;
+        private static int _cachedCrewNameHash = 0;
+
+        public static void InvalidateCrewNameSet()
+        {
+            _cachedCrewNames = null;
+            _cachedCrewCount = -1;
+            _cachedCrewNameHash = 0;
+        }
 
         public static HashSet<string> GetCrewNameSet()
         {
@@ -118,9 +147,18 @@ namespace RosterRotation
             if (roster == null) return _cachedCrewNames ?? new HashSet<string>();
 
             int count = 0;
-            foreach (var pcm in roster.Crew) if (pcm != null) count++;
+            int hash = 17;
+            unchecked
+            {
+                foreach (var pcm in roster.Crew)
+                {
+                    if (pcm == null) continue;
+                    count++;
+                    hash = hash * 31 + StringComparer.Ordinal.GetHashCode(pcm.name ?? string.Empty);
+                }
+            }
 
-            if (count == _cachedCrewCount && _cachedCrewNames != null)
+            if (count == _cachedCrewCount && hash == _cachedCrewNameHash && _cachedCrewNames != null)
                 return _cachedCrewNames;
 
             var names = new HashSet<string>();
@@ -129,6 +167,7 @@ namespace RosterRotation
 
             _cachedCrewNames = names;
             _cachedCrewCount = count;
+            _cachedCrewNameHash = hash;
             return names;
         }
 
@@ -140,15 +179,14 @@ namespace RosterRotation
 
         public static string FormatGameDate(double ut)
         {
-            double yr  = ut / YearSeconds;
-            double day = (ut % YearSeconds) / DaySeconds;
-            return $"Yr {(int)yr + 1}, Day {(int)day + 1}";
+            KspTimeMath.GetYearDayHourMinute(Math.Max(0d, ut), UseKerbinDays, out int year, out int day, out int hour, out int minute);
+            return $"Yr {year}, Day {day}";
         }
 
         public static string FormatGameDateYM(double ut)
         {
             if (ut < 0) ut = 0;
-            double yearSec = YearSeconds;
+            double yearSec = KspTimeMath.GetDisplayYearSeconds(UseKerbinDays);
             if (yearSec <= 0) return "0Y 0M";
             int year = (int)(ut / yearSec) + 1;
             double monthSec = yearSec / 12.0;
@@ -158,11 +196,7 @@ namespace RosterRotation
 
         public static string FormatGameDateYD(double ut)
         {
-            if (ut < 0) ut = 0;
-            double yearSec = YearSeconds;
-            if (yearSec <= 0) return "Y0 D0";
-            int year = (int)(ut / yearSec) + 1;
-            int day  = (int)((ut % yearSec) / DaySeconds) + 1;
+            KspTimeMath.GetYearDayHourMinute(Math.Max(0d, ut), UseKerbinDays, out int year, out int day, out int hour, out int minute);
             return $"Y{year} D{day}";
         }
 
@@ -178,9 +212,95 @@ namespace RosterRotation
             if (!Records.TryGetValue(name, out var r))
             {
                 r = new KerbalRecord();
+                EnsureKerbalIdentity(r);
                 Records[name] = r;
             }
+            else
+            {
+                EnsureKerbalIdentity(r);
+            }
             return r;
+        }
+
+        public static string EnsureKerbalIdentity(KerbalRecord rec)
+        {
+            if (rec == null) return string.Empty;
+            if (string.IsNullOrEmpty(rec.KerbalIdentityKey))
+                rec.KerbalIdentityKey = Guid.NewGuid().ToString("N");
+            return rec.KerbalIdentityKey;
+        }
+
+        public static bool KerbalIdentityMatches(KerbalRecord rec, string identityKey)
+        {
+            if (rec == null) return false;
+            if (string.IsNullOrEmpty(identityKey)) return true; // Backward compatibility for older offered contracts.
+            return string.Equals(EnsureKerbalIdentity(rec), identityKey, StringComparison.Ordinal);
+        }
+
+        public static bool HasPriorKerbalCareerState(KerbalRecord rec)
+        {
+            if (rec == null) return false;
+            return rec.GrantedLevel >= 0
+                   || rec.HighestLevelEverCertified >= 0
+                   || rec.Flights > 0
+                   || rec.LastFlightUT > 0
+                   || rec.RestUntilUT > 0
+                   || rec.MissionStartUT > 0
+                   || rec.Training != TrainingType.None
+                   || rec.GraduationExamPending
+                   || rec.GraduationExamActive
+                   || rec.Retired
+                   || rec.RetiredUT > 0
+                   || rec.ExperienceAtRetire >= 0
+                   || rec.BirthUT > 0
+                   || rec.NaturalRetirementUT > 0
+                   || rec.DeathUT > 0
+                   || rec.LastAgedYears >= 0;
+        }
+
+        public static KerbalRecord ReplaceWithFreshKerbalRecord(string name, ProtoCrewMember kerbal)
+        {
+            var rec = new KerbalRecord
+            {
+                OriginalTrait = kerbal != null ? kerbal.trait : null,
+                OriginalType = kerbal != null ? kerbal.type : ProtoCrewMember.KerbalType.Crew,
+                KerbalIdentityKey = Guid.NewGuid().ToString("N")
+            };
+            Records[name] = rec;
+            InvalidateRetiredCache();
+            InvalidateCrewNameSet();
+            return rec;
+        }
+
+        public static void NoteCertifiedLevel(KerbalRecord rec, int level)
+        {
+            if (rec == null || level < 0) return;
+            EnsureKerbalIdentity(rec);
+            if (rec.HighestLevelEverCertified < level)
+                rec.HighestLevelEverCertified = level;
+            if (rec.GrantedLevel < level)
+                rec.GrantedLevel = level;
+        }
+
+        public static bool SyncCurrentGrantedLevelFromKerbal(ProtoCrewMember kerbal, KerbalRecord rec, string reason)
+        {
+            if (kerbal == null || rec == null) return false;
+            EnsureKerbalIdentity(rec);
+            int currentLevel = Math.Max(0, Math.Min(3, (int)kerbal.experienceLevel));
+            int historical = Math.Max(rec.HighestLevelEverCertified, Math.Max(rec.GrantedLevel, rec.ExperienceAtRetire));
+            if (historical >= 0 && rec.HighestLevelEverCertified < historical)
+                rec.HighestLevelEverCertified = historical;
+
+            if (rec.GrantedLevel == currentLevel) return false;
+
+            RRLog.Verbose("[EAC] Current certified level synced to Kerbal skill" +
+                          (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")") +
+                          ": kerbal=" + kerbal.name +
+                          " stockLevel=" + currentLevel +
+                          " previousGranted=" + rec.GrantedLevel +
+                          " highestEver=" + rec.HighestLevelEverCertified);
+            rec.GrantedLevel = currentLevel;
+            return true;
         }
 
         private static bool IsNotificationEnabled(EACNotificationType type)

@@ -23,6 +23,61 @@ namespace RosterRotation
         private const double MissionDeathStressMissionDays = 120.0;    // mission length (days) to reach max stress
         private const double MissionDeathAgeFactorScale    = 0.5;      // scale applied to (years past retirement)²
 
+        private const BindingFlags AgingReflectionFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        private sealed class ProtoVesselDetachAccessors
+        {
+            public MethodInfo   GetVesselCrewMethod;
+            public FieldInfo    VesselNameField;
+            public PropertyInfo VesselNameProperty;
+            public FieldInfo    ProtoPartSnapshotsField;
+            public PropertyInfo ProtoPartSnapshotsProperty;
+        }
+
+        private sealed class ProtoPartDetachAccessors
+        {
+            public FieldInfo    ProtoModuleCrewField;
+            public PropertyInfo ProtoModuleCrewProperty;
+        }
+
+        private sealed class ConfigNodeMemberAccessors
+        {
+            public FieldInfo[]    Fields;
+            public PropertyInfo[] Properties;
+        }
+
+        private sealed class ProtoVesselRefreshAccessors
+        {
+            public FieldInfo    VesselCrewField;
+            public PropertyInfo VesselCrewProperty;
+            public FieldInfo    CrewedPartsField;
+            public PropertyInfo CrewedPartsProperty;
+            public FieldInfo    VesselRefField;
+            public PropertyInfo VesselRefProperty;
+        }
+
+        private sealed class VesselRefreshAccessors
+        {
+            public MethodInfo CrewListSetDirtyMethod;
+            public MethodInfo CrewWasModifiedMethod;
+        }
+
+        private static readonly Dictionary<Type, ProtoVesselDetachAccessors> _detachProtoVesselAccessorsByType
+            = new Dictionary<Type, ProtoVesselDetachAccessors>();
+        private static readonly Dictionary<Type, ProtoPartDetachAccessors> _detachProtoPartAccessorsByType
+            = new Dictionary<Type, ProtoPartDetachAccessors>();
+        private static readonly Dictionary<Type, FieldInfo[]> _crewLikeFieldsByOwnerType
+            = new Dictionary<Type, FieldInfo[]>();
+        private static readonly Dictionary<Type, ConfigNodeMemberAccessors> _configNodeMembersByOwnerType
+            = new Dictionary<Type, ConfigNodeMemberAccessors>();
+        private static readonly Dictionary<Type, ProtoVesselRefreshAccessors> _refreshProtoVesselAccessorsByType
+            = new Dictionary<Type, ProtoVesselRefreshAccessors>();
+        private static readonly Dictionary<Type, VesselRefreshAccessors> _refreshVesselAccessorsByType
+            = new Dictionary<Type, VesselRefreshAccessors>();
+
+        private static readonly FieldInfo[]    EmptyFieldInfos    = new FieldInfo[0];
+        private static readonly PropertyInfo[] EmptyPropertyInfos = new PropertyInfo[0];
+
         // ── Aging / retirement loop ────────────────────────────────────────────
 
         private void CheckAgingAndRetirement()
@@ -31,6 +86,7 @@ namespace RosterRotation
             if (roster == null) return;
             double nowUT  = Planetarium.GetUniversalTime();
             double yearSec = RosterRotationState.YearSeconds;
+            double daySec  = RosterRotationState.DaySeconds;
             bool anyDirty = false;
 
             foreach (var k in roster.Crew)
@@ -49,7 +105,7 @@ namespace RosterRotation
 
                 if (!rec.Retired)
                 {
-                    if (CheckAssignedMissionDeath(k, rec, nowUT, currentAge, effectiveRetireUT))
+                    if (CheckAssignedMissionDeath(k, rec, nowUT, currentAge, effectiveRetireUT, yearSec, daySec))
                         anyDirty = true;
                     if (rec.DeathUT > 0) continue;
                 }
@@ -110,7 +166,7 @@ namespace RosterRotation
 
                 int stars = (int)k.experienceLevel;
                 if (stars >= 4) continue;
-                double pRetire = MoraleRetireProbability(k, rec, nowUT, stars);
+                double pRetire = MoraleRetireProbability(k, rec, nowUT, stars, yearSec);
                 if (pRetire <= 0) continue;
                 if (UnityEngine.Random.value < pRetire)
                 {
@@ -142,9 +198,8 @@ namespace RosterRotation
         }
 
         private static double MoraleRetireProbability(
-            ProtoCrewMember k, RosterRotationState.KerbalRecord rec, double nowUT, int stars)
+            ProtoCrewMember k, RosterRotationState.KerbalRecord rec, double nowUT, int stars, double yearSec)
         {
-            double yearSec       = RosterRotationState.YearSeconds;
             double inactiveYears = rec != null && rec.LastFlightUT > 0 ? (nowUT - rec.LastFlightUT) / yearSec : 0;
             int    displayedFlights = GetDisplayedFlights(k, rec);
             return CareerRules.CalculateMoraleRetireProbability(stars, inactiveYears, displayedFlights);
@@ -158,6 +213,7 @@ namespace RosterRotation
             rec.Retired              = true;
             rec.RetiredUT            = nowUT;
             rec.ExperienceAtRetire   = (int)k.experienceLevel;
+            RosterRotationState.NoteCertifiedLevel(rec, (int)k.experienceLevel);
             rec.RetirementWarned     = false;
             rec.RetirementScheduled  = false;
             k.inactive        = true;
@@ -210,7 +266,7 @@ namespace RosterRotation
         // ── Mission-death check ────────────────────────────────────────────────
 
         private bool CheckAssignedMissionDeath(ProtoCrewMember k, RosterRotationState.KerbalRecord rec,
-            double nowUT, int currentAge, double effectiveRetireUT)
+            double nowUT, int currentAge, double effectiveRetireUT, double yearSec, double daySec)
         {
             if (k == null || rec == null) return false;
             if (k.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) return false;
@@ -223,7 +279,6 @@ namespace RosterRotation
             if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT)
                 rec.MissionStartUT = nowUT;
 
-            double daySec       = RosterRotationState.DaySeconds;
             double lastCheckUT  = rec.LastMissionDeathCheckUT > 0 ? rec.LastMissionDeathCheckUT : rec.MissionStartUT;
             double riskStartUT  = forceTest ? lastCheckUT : Math.Max(lastCheckUT, effectiveRetireUT);
             double eligibleElapsedUT = nowUT - riskStartUT;
@@ -231,7 +286,7 @@ namespace RosterRotation
 
             int    elapsedDays          = forceTest ? 1 : Math.Max(1, (int)Math.Floor(eligibleElapsedUT / daySec));
             double missionDays          = rec.MissionStartUT > 0 ? Math.Max(0.0, (nowUT - rec.MissionStartUT) / daySec) : 0.0;
-            double yearsPastRetirement  = forceTest ? 0.0 : Math.Max(0.0, (nowUT - effectiveRetireUT) / RosterRotationState.YearSeconds);
+            double yearsPastRetirement  = forceTest ? 0.0 : Math.Max(0.0, (nowUT - effectiveRetireUT) / yearSec);
 
             // Named constants replace the raw magic numbers that were here previously.
             double ageFactor   = 1.0 + yearsPastRetirement * yearsPastRetirement * MissionDeathAgeFactorScale;
@@ -295,6 +350,167 @@ namespace RosterRotation
 
         // ── Vessel crew detachment helpers ─────────────────────────────────────
 
+        private static ProtoVesselDetachAccessors GetProtoVesselDetachAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            if (_detachProtoVesselAccessorsByType.TryGetValue(type, out var cached))
+                return cached;
+
+            var accessors = new ProtoVesselDetachAccessors
+            {
+                GetVesselCrewMethod       = type.GetMethod("GetVesselCrew", AgingReflectionFlags),
+                VesselNameField           = type.GetField("vesselName", AgingReflectionFlags),
+                VesselNameProperty        = type.GetProperty("vesselName", AgingReflectionFlags),
+                ProtoPartSnapshotsField   = type.GetField("protoPartSnapshots", AgingReflectionFlags),
+                ProtoPartSnapshotsProperty = type.GetProperty("protoPartSnapshots", AgingReflectionFlags)
+            };
+
+            _detachProtoVesselAccessorsByType[type] = accessors;
+            return accessors;
+        }
+
+        private static ProtoPartDetachAccessors GetProtoPartDetachAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            if (_detachProtoPartAccessorsByType.TryGetValue(type, out var cached))
+                return cached;
+
+            var accessors = new ProtoPartDetachAccessors
+            {
+                ProtoModuleCrewField    = type.GetField("protoModuleCrew", AgingReflectionFlags),
+                ProtoModuleCrewProperty = type.GetProperty("protoModuleCrew", AgingReflectionFlags)
+            };
+
+            _detachProtoPartAccessorsByType[type] = accessors;
+            return accessors;
+        }
+
+        private static FieldInfo[] GetCrewLikeFields(Type type)
+        {
+            if (type == null) return new FieldInfo[0];
+
+            if (_crewLikeFieldsByOwnerType.TryGetValue(type, out var cached))
+                return cached;
+
+            var matches = new List<FieldInfo>();
+            foreach (var field in type.GetFields(AgingReflectionFlags))
+            {
+                if (field == null) continue;
+                if (field.FieldType == typeof(string)) continue;
+                if (!typeof(IList).IsAssignableFrom(field.FieldType)) continue;
+                if (field.Name.IndexOf("crew", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                matches.Add(field);
+            }
+
+            cached = matches.ToArray();
+            _crewLikeFieldsByOwnerType[type] = cached;
+            return cached;
+        }
+
+        private static ConfigNodeMemberAccessors GetConfigNodeMembers(Type type)
+        {
+            if (type == null)
+            {
+                return new ConfigNodeMemberAccessors
+                {
+                    Fields     = EmptyFieldInfos,
+                    Properties = EmptyPropertyInfos
+                };
+            }
+
+            if (_configNodeMembersByOwnerType.TryGetValue(type, out var cached))
+                return cached;
+
+            var fields = new List<FieldInfo>();
+            foreach (var field in type.GetFields(AgingReflectionFlags))
+            {
+                if (field == null) continue;
+                if (field.FieldType != typeof(ConfigNode)) continue;
+                fields.Add(field);
+            }
+
+            var properties = new List<PropertyInfo>();
+            foreach (var prop in type.GetProperties(AgingReflectionFlags))
+            {
+                if (prop == null) continue;
+                if (prop.PropertyType != typeof(ConfigNode)) continue;
+                if (!prop.CanRead) continue;
+                if (prop.GetIndexParameters().Length != 0) continue;
+                properties.Add(prop);
+            }
+
+            cached = new ConfigNodeMemberAccessors
+            {
+                Fields     = fields.Count > 0 ? fields.ToArray() : EmptyFieldInfos,
+                Properties = properties.Count > 0 ? properties.ToArray() : EmptyPropertyInfos
+            };
+            _configNodeMembersByOwnerType[type] = cached;
+            return cached;
+        }
+
+        private static ProtoVesselRefreshAccessors GetProtoVesselRefreshAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            if (_refreshProtoVesselAccessorsByType.TryGetValue(type, out var cached))
+                return cached;
+
+            var vesselCrewField = type.GetField("vesselCrew", AgingReflectionFlags);
+            var vesselCrewProp  = type.GetProperty("vesselCrew", AgingReflectionFlags);
+            var crewedPartsField = type.GetField("crewedParts", AgingReflectionFlags);
+            var crewedPartsProp  = type.GetProperty("crewedParts", AgingReflectionFlags);
+
+            cached = new ProtoVesselRefreshAccessors
+            {
+                VesselCrewField     = vesselCrewField != null && vesselCrewField.FieldType == typeof(int) ? vesselCrewField : null,
+                VesselCrewProperty  = vesselCrewProp != null && vesselCrewProp.CanWrite && vesselCrewProp.PropertyType == typeof(int) ? vesselCrewProp : null,
+                CrewedPartsField    = crewedPartsField != null && crewedPartsField.FieldType == typeof(int) ? crewedPartsField : null,
+                CrewedPartsProperty = crewedPartsProp != null && crewedPartsProp.CanWrite && crewedPartsProp.PropertyType == typeof(int) ? crewedPartsProp : null,
+                VesselRefField      = type.GetField("vesselRef", AgingReflectionFlags),
+                VesselRefProperty   = type.GetProperty("vesselRef", AgingReflectionFlags)
+            };
+
+            _refreshProtoVesselAccessorsByType[type] = cached;
+            return cached;
+        }
+
+        private static VesselRefreshAccessors GetVesselRefreshAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            if (_refreshVesselAccessorsByType.TryGetValue(type, out var cached))
+                return cached;
+
+            cached = new VesselRefreshAccessors
+            {
+                CrewListSetDirtyMethod = type.GetMethod("CrewListSetDirty", AgingReflectionFlags),
+                CrewWasModifiedMethod  = type.GetMethod("CrewWasModified",
+                    BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                    null, new[] { type }, null)
+            };
+
+            _refreshVesselAccessorsByType[type] = cached;
+            return cached;
+        }
+
+        private static bool TryGetValue(FieldInfo field, object owner, out object value)
+        {
+            value = null;
+            if (field == null || owner == null) return false;
+            try { value = field.GetValue(owner); return true; }
+            catch (Exception ex) { RRLog.VerboseExceptionOnce("Aging.Reflection.FieldValue", "Suppressed", ex); return false; }
+        }
+
+        private static bool TryGetValue(PropertyInfo prop, object owner, out object value)
+        {
+            value = null;
+            if (prop == null || owner == null || !prop.CanRead || prop.GetIndexParameters().Length != 0) return false;
+            try { value = prop.GetValue(owner, null); return true; }
+            catch (Exception ex) { RRLog.VerboseExceptionOnce("Aging.Reflection.PropertyValue", "Suppressed", ex); return false; }
+        }
+
         private static bool TryDetachKerbalFromAssignedVessel(ProtoCrewMember k, out string vesselName)
         {
             vesselName = null;
@@ -311,10 +527,9 @@ namespace RosterRotation
                     bool foundCrew = false;
                     try
                     {
-                        var pvType  = pv.GetType();
-                        var flags   = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                        var getCrew = pvType.GetMethod("GetVesselCrew", flags);
-                        var crewRaw = getCrew?.Invoke(pv, null) as IEnumerable;
+                        var pvType    = pv.GetType();
+                        var pvAccessors = GetProtoVesselDetachAccessors(pvType);
+                        var crewRaw     = pvAccessors?.GetVesselCrewMethod?.Invoke(pv, null) as IEnumerable;
                         if (crewRaw == null) continue;
 
                         foreach (var crewObj in crewRaw)
@@ -324,9 +539,9 @@ namespace RosterRotation
                             if (string.IsNullOrEmpty(crewName) && crewObj != null)
                             {
                                 var ct = crewObj.GetType();
-                                crewName = ct.GetField("name", flags)?.GetValue(crewObj) as string;
+                                crewName = ct.GetField("name", AgingReflectionFlags)?.GetValue(crewObj) as string;
                                 if (string.IsNullOrEmpty(crewName))
-                                    crewName = ct.GetProperty("name", flags)?.GetValue(crewObj, null) as string;
+                                    crewName = ct.GetProperty("name", AgingReflectionFlags)?.GetValue(crewObj, null) as string;
                             }
                             if (!string.Equals(crewName, k.name, StringComparison.Ordinal)) continue;
                             foundCrew = true;
@@ -334,12 +549,12 @@ namespace RosterRotation
                         }
                         if (!foundCrew) continue;
 
-                        vesselName = pvType.GetField("vesselName", flags)?.GetValue(pv) as string;
+                        vesselName = pvAccessors?.VesselNameField?.GetValue(pv) as string;
                         if (string.IsNullOrEmpty(vesselName))
-                            vesselName = pvType.GetProperty("vesselName", flags)?.GetValue(pv, null) as string;
+                            vesselName = pvAccessors?.VesselNameProperty?.GetValue(pv, null) as string;
 
-                        object partsObj = pvType.GetField("protoPartSnapshots", flags)?.GetValue(pv)
-                                       ?? pvType.GetProperty("protoPartSnapshots", flags)?.GetValue(pv, null);
+                        object partsObj = pvAccessors?.ProtoPartSnapshotsField?.GetValue(pv)
+                                       ?? pvAccessors?.ProtoPartSnapshotsProperty?.GetValue(pv, null);
                         var parts = partsObj as IEnumerable;
                         if (parts == null) return false;
 
@@ -351,8 +566,9 @@ namespace RosterRotation
                             if (partObj == null) continue;
                             var pt = partObj.GetType();
 
-                            object crewListObj = pt.GetField("protoModuleCrew", flags)?.GetValue(partObj)
-                                              ?? pt.GetProperty("protoModuleCrew", flags)?.GetValue(partObj, null);
+                            var partAccessors = GetProtoPartDetachAccessors(pt);
+                            object crewListObj = partAccessors?.ProtoModuleCrewField?.GetValue(partObj)
+                                              ?? partAccessors?.ProtoModuleCrewProperty?.GetValue(partObj, null);
                             var list = crewListObj as IList;
                             if (list != null && list.Count > 0)
                             {
@@ -364,10 +580,10 @@ namespace RosterRotation
                                     if (string.IsNullOrEmpty(crewName) && crewEntry != null)
                                     {
                                         var ct = crewEntry.GetType();
-                                        crewName = ct.GetField("name", flags)?.GetValue(crewEntry) as string;
+                                        crewName = ct.GetField("name", AgingReflectionFlags)?.GetValue(crewEntry) as string;
                                         if (string.IsNullOrEmpty(crewName))
                                         {
-                                            var prop = ct.GetProperty("name", flags);
+                                            var prop = ct.GetProperty("name", AgingReflectionFlags);
                                             if (prop != null && prop.CanRead && prop.GetIndexParameters().Length == 0)
                                                 crewName = prop.GetValue(crewEntry, null) as string;
                                         }
@@ -380,18 +596,20 @@ namespace RosterRotation
 
                             removedCachedCrew += RemoveKerbalFromCrewLikeLists(partObj, k.name);
 
-                            foreach (var field in pt.GetFields(flags))
+                            var configMembers = GetConfigNodeMembers(pt);
+                            foreach (var field in configMembers.Fields)
                             {
-                                if (field == null || field.FieldType != typeof(ConfigNode)) continue;
-                                var node = field.GetValue(partObj) as ConfigNode;
+                                object value;
+                                if (!TryGetValue(field, partObj, out value)) continue;
+                                var node = value as ConfigNode;
                                 if (node == null) continue;
                                 removedConfigCrew += RemoveKerbalFromConfigNodeCrewValues(node, k.name);
                             }
-                            foreach (var prop in pt.GetProperties(flags))
+                            foreach (var prop in configMembers.Properties)
                             {
-                                if (prop == null || prop.PropertyType != typeof(ConfigNode) || !prop.CanRead || prop.GetIndexParameters().Length != 0) continue;
-                                ConfigNode node = null;
-                                try { node = prop.GetValue(partObj, null) as ConfigNode; } catch (Exception ex) { RRLog.VerboseExceptionOnce("Aging.Detach.PropNode", "Suppressed", ex); }
+                                object value;
+                                if (!TryGetValue(prop, partObj, out value)) continue;
+                                var node = value as ConfigNode;
                                 if (node == null) continue;
                                 removedConfigCrew += RemoveKerbalFromConfigNodeCrewValues(node, k.name);
                             }
@@ -457,16 +675,10 @@ namespace RosterRotation
             if (owner == null || string.IsNullOrEmpty(kerbalName)) return 0;
 
             int  removed = 0;
-            var  flags   = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             var  type    = owner.GetType();
 
-            foreach (var field in type.GetFields(flags))
+            foreach (var field in GetCrewLikeFields(type))
             {
-                if (field == null) continue;
-                if (field.FieldType == typeof(string)) continue;
-                if (!typeof(IList).IsAssignableFrom(field.FieldType)) continue;
-                if (field.Name.IndexOf("crew", StringComparison.OrdinalIgnoreCase) < 0) continue;
-
                 var list = field.GetValue(owner) as IList;
                 if (list == null || list.Count == 0) continue;
 
@@ -481,10 +693,10 @@ namespace RosterRotation
                     if (string.IsNullOrEmpty(entryName))
                     {
                         var et = entry.GetType();
-                        entryName = et.GetField("name", flags)?.GetValue(entry) as string;
+                        entryName = et.GetField("name", AgingReflectionFlags)?.GetValue(entry) as string;
                         if (string.IsNullOrEmpty(entryName))
                         {
-                            var prop = et.GetProperty("name", flags);
+                            var prop = et.GetProperty("name", AgingReflectionFlags);
                             if (prop != null && prop.CanRead && prop.GetIndexParameters().Length == 0)
                                 entryName = prop.GetValue(entry, null) as string;
                         }
@@ -504,50 +716,70 @@ namespace RosterRotation
             if (protoVessel == null) return;
             try
             {
-                var flags  = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-                var pvType = protoVessel.GetType();
+                var pvType          = protoVessel.GetType();
+                var detachAccessors = GetProtoVesselDetachAccessors(pvType);
+                var refreshAccessors = GetProtoVesselRefreshAccessors(pvType);
 
                 int totalCrew = 0, crewedParts = 0;
-                object partsObj = pvType.GetField("protoPartSnapshots", flags)?.GetValue(protoVessel)
-                               ?? pvType.GetProperty("protoPartSnapshots", flags)?.GetValue(protoVessel, null);
+
+                object partsObj = null;
+                object value;
+                if (detachAccessors != null && TryGetValue(detachAccessors.ProtoPartSnapshotsField, protoVessel, out value))
+                    partsObj = value;
+                if (partsObj == null && detachAccessors != null && TryGetValue(detachAccessors.ProtoPartSnapshotsProperty, protoVessel, out value))
+                    partsObj = value;
+
                 var parts = partsObj as IEnumerable;
                 if (parts != null)
                 {
                     foreach (var partObj in parts)
                     {
                         if (partObj == null) continue;
-                        var    pt         = partObj.GetType();
-                        object crewListObj = pt.GetField("protoModuleCrew", flags)?.GetValue(partObj)
-                                          ?? pt.GetProperty("protoModuleCrew", flags)?.GetValue(partObj, null);
-                        int count = (crewListObj as IList)?.Count ?? 0;
-                        if (count > 0) { totalCrew += count; crewedParts++; }
+
+                        var partAccessors = GetProtoPartDetachAccessors(partObj.GetType());
+                        object crewListObj = null;
+                        if (partAccessors != null && TryGetValue(partAccessors.ProtoModuleCrewField, partObj, out value))
+                            crewListObj = value;
+                        if (crewListObj == null && partAccessors != null && TryGetValue(partAccessors.ProtoModuleCrewProperty, partObj, out value))
+                            crewListObj = value;
+
+                        var crewList = crewListObj as IList;
+                        int count = crewList != null ? crewList.Count : 0;
+                        if (count > 0)
+                        {
+                            totalCrew += count;
+                            crewedParts++;
+                        }
                     }
                 }
 
-                var vesselCrewField = pvType.GetField("vesselCrew", flags);
-                if (vesselCrewField != null && vesselCrewField.FieldType == typeof(int))
-                    vesselCrewField.SetValue(protoVessel, totalCrew);
-                var vesselCrewProp = pvType.GetProperty("vesselCrew", flags);
-                if (vesselCrewProp != null && vesselCrewProp.CanWrite && vesselCrewProp.PropertyType == typeof(int))
-                    vesselCrewProp.SetValue(protoVessel, totalCrew, null);
-
-                var crewedPartsField = pvType.GetField("crewedParts", flags);
-                if (crewedPartsField != null && crewedPartsField.FieldType == typeof(int))
-                    crewedPartsField.SetValue(protoVessel, crewedParts);
-                var crewedPartsProp = pvType.GetProperty("crewedParts", flags);
-                if (crewedPartsProp != null && crewedPartsProp.CanWrite && crewedPartsProp.PropertyType == typeof(int))
-                    crewedPartsProp.SetValue(protoVessel, crewedParts, null);
-
-                object vesselRef = pvType.GetField("vesselRef", flags)?.GetValue(protoVessel)
-                               ?? pvType.GetProperty("vesselRef", flags)?.GetValue(protoVessel, null);
-                if (vesselRef != null)
+                if (refreshAccessors != null)
                 {
-                    var vt = vesselRef.GetType();
-                    vt.GetMethod("CrewListSetDirty", flags)?.Invoke(vesselRef, null);
-                    var crewWasModified = vt.GetMethod("CrewWasModified",
-                        BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                        null, new[] { vt }, null);
-                    crewWasModified?.Invoke(null, new[] { vesselRef });
+                    if (refreshAccessors.VesselCrewField != null)
+                        refreshAccessors.VesselCrewField.SetValue(protoVessel, totalCrew);
+                    if (refreshAccessors.VesselCrewProperty != null)
+                        refreshAccessors.VesselCrewProperty.SetValue(protoVessel, totalCrew, null);
+
+                    if (refreshAccessors.CrewedPartsField != null)
+                        refreshAccessors.CrewedPartsField.SetValue(protoVessel, crewedParts);
+                    if (refreshAccessors.CrewedPartsProperty != null)
+                        refreshAccessors.CrewedPartsProperty.SetValue(protoVessel, crewedParts, null);
+
+                    object vesselRef = null;
+                    if (TryGetValue(refreshAccessors.VesselRefField, protoVessel, out value))
+                        vesselRef = value;
+                    if (vesselRef == null && TryGetValue(refreshAccessors.VesselRefProperty, protoVessel, out value))
+                        vesselRef = value;
+
+                    if (vesselRef != null)
+                    {
+                        var vesselAccessors = GetVesselRefreshAccessors(vesselRef.GetType());
+                        if (vesselAccessors != null)
+                        {
+                            vesselAccessors.CrewListSetDirtyMethod?.Invoke(vesselRef, null);
+                            vesselAccessors.CrewWasModifiedMethod?.Invoke(null, new[] { vesselRef });
+                        }
+                    }
                 }
             }
             catch (Exception ex) { RRLog.Verbose("[EAC] Failed refreshing proto vessel crew caches: " + ex.Message); }

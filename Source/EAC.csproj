@@ -6,10 +6,27 @@
     <RootNamespace>RosterRotation</RootNamespace>
     <LangVersion>latest</LangVersion>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
 
     <KspRoot>J:\SteamLibrary\steamapps\common\Code - Kerbal Space Program\Kerbal Space Program</KspRoot>
     <KspManaged>$(KspRoot)\KSP_x64_Data\Managed</KspManaged>
     <KspModDir>$(KspRoot)\GameData\EAC</KspModDir>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugType>portable</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -29,6 +46,7 @@
     <Compile Include="Mod.FlightTracker.cs" />
     <Compile Include="Mod.Roster.cs" />
     <Compile Include="Mod.TraitGrowth.cs" />
+    <Compile Include="Mod.GraduationExams.cs" />
     <Compile Include="Mod.cs" />
     <Compile Include="Persistence.cs" />
     <Compile Include="EACGameSettings.cs" />
@@ -104,9 +122,27 @@
 
   <Target Name="CopyToGameData" AfterTargets="Build">
     <MakeDir Directories="$(KspModDir)\Plugins" />
+    <MakeDir Directories="$(KspModDir)\Contracts" />
+    <MakeDir Directories="$(KspModDir)\Craft" />
     <Copy SourceFiles="$(TargetPath)"
           DestinationFiles="$(KspModDir)\Plugins\$(AssemblyName).dll"
           OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="GameData\EAC\Contracts\EAC_Graduation.cfg"
+          DestinationFiles="$(KspModDir)\Contracts\EAC_Graduation.cfg"
+          OverwriteReadOnlyFiles="true"
+          Condition="Exists('GameData\EAC\Contracts\EAC_Graduation.cfg')" />
+    <Copy SourceFiles="GameData\EAC\Craft\T-38.craft"
+          DestinationFiles="$(KspModDir)\Craft\T-38.craft"
+          OverwriteReadOnlyFiles="true"
+          Condition="Exists('GameData\EAC\Craft\T-38.craft')" />
+    <Copy SourceFiles="GameData\EAC\Craft\T-38-EAC-L1.craft"
+          DestinationFiles="$(KspModDir)\Craft\T-38-EAC-L1.craft"
+          OverwriteReadOnlyFiles="true"
+          Condition="Exists('GameData\EAC\Craft\T-38-EAC-L1.craft')" />
+    <Copy SourceFiles="GameData\EAC\Craft\EAC-Engineer-Science-Rover-L1.craft"
+          DestinationFiles="$(KspModDir)\Craft\EAC-Engineer-Science-Rover-L1.craft"
+          OverwriteReadOnlyFiles="true"
+          Condition="Exists('GameData\EAC\Craft\EAC-Engineer-Science-Rover-L1.craft')" />
   </Target>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

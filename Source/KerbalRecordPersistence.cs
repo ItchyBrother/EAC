@@ -29,6 +29,8 @@ namespace RosterRotation
         public bool VerboseAgeLogging = false;
         public bool SyncFlightTrackerFromEacOnce = false;
         public bool TraitGrowthEnabled = false;
+        public bool FinalExamContractsEnabled = false;
+        public string GraduationExamHistory = "";
         public bool PortraitCaptureEnabled = true;
         public bool MissionDeathEnabled = false;
     }
@@ -63,6 +65,8 @@ namespace RosterRotation
                 VerboseAgeLogging = RosterRotationState.VerboseAgeLogging,
                 SyncFlightTrackerFromEacOnce = RosterRotationState.SyncFlightTrackerFromEacOnce,
                 TraitGrowthEnabled = RosterRotationState.TraitGrowthEnabled,
+                FinalExamContractsEnabled = RosterRotationState.FinalExamContractsEnabled,
+                GraduationExamHistory = RosterRotationState.GraduationExamHistory,
                 PortraitCaptureEnabled = RosterRotationState.PortraitCaptureEnabled,
                 MissionDeathEnabled = RosterRotationState.MissionDeathEnabled
             };
@@ -100,6 +104,8 @@ namespace RosterRotation
             settings.VerboseAgeLogging = PB(settingsNode.GetValue("verboseAgeLogging"), false);
             settings.SyncFlightTrackerFromEacOnce = PB(settingsNode.GetValue("syncFlightTrackerFromEacOnce"), false);
             settings.TraitGrowthEnabled = PB(settingsNode.GetValue("traitGrowthEnabled"), false);
+            settings.FinalExamContractsEnabled = PB(settingsNode.GetValue("finalExamContractsEnabled"), false);
+            settings.GraduationExamHistory = settingsNode.GetValue("graduationExamHistory") ?? "";
             settings.PortraitCaptureEnabled = PB(settingsNode.GetValue("portraitCaptureEnabled"), true);
             settings.MissionDeathEnabled = PB(settingsNode.GetValue("missionDeathEnabled"), false);
             return settings;
@@ -136,6 +142,8 @@ namespace RosterRotation
             }
             RosterRotationState.SyncFlightTrackerFromEacOnce = settings.SyncFlightTrackerFromEacOnce;
             RosterRotationState.TraitGrowthEnabled = settings.TraitGrowthEnabled;
+            RosterRotationState.FinalExamContractsEnabled = settings.FinalExamContractsEnabled;
+            RosterRotationState.GraduationExamHistory = settings.GraduationExamHistory ?? "";
             RosterRotationState.PortraitCaptureEnabled = settings.PortraitCaptureEnabled;
             RosterRotationState.MissionDeathEnabled = settings.MissionDeathEnabled;
             RosterRotationState.DebugForceMissionDeath = false;
@@ -170,6 +178,8 @@ namespace RosterRotation
             node.AddValue("verboseAgeLogging", settings.VerboseAgeLogging.ToString(ci));
             node.AddValue("syncFlightTrackerFromEacOnce", settings.SyncFlightTrackerFromEacOnce.ToString(ci));
             node.AddValue("traitGrowthEnabled", settings.TraitGrowthEnabled.ToString(ci));
+            node.AddValue("finalExamContractsEnabled", settings.FinalExamContractsEnabled.ToString(ci));
+            if (!string.IsNullOrEmpty(settings.GraduationExamHistory)) node.AddValue("graduationExamHistory", settings.GraduationExamHistory);
             node.AddValue("portraitCaptureEnabled", settings.PortraitCaptureEnabled.ToString(ci));
             node.AddValue("missionDeathEnabled", settings.MissionDeathEnabled.ToString(ci));
         }
@@ -195,6 +205,15 @@ namespace RosterRotation
                 Training = (TrainingType)PI(recordNode.GetValue("trainingType"), 0),
                 TrainingTargetLevel = PI(recordNode.GetValue("trainingTargetLevel"), 0),
                 GrantedLevel = PI(recordNode.GetValue("grantedLevel"), -1),
+                HighestLevelEverCertified = PI(recordNode.GetValue("highestLevelEverCertified"), PI(recordNode.GetValue("grantedLevel"), -1)),
+                KerbalIdentityKey = recordNode.GetValue("kerbalIdentityKey") ?? recordNode.GetValue("eacKerbalId") ?? "",
+                GraduationExamPending = PB(recordNode.GetValue("graduationExamPending"), false),
+                GraduationExamActive = PB(recordNode.GetValue("graduationExamActive"), false),
+                GraduationExamTargetLevel = PI(recordNode.GetValue("graduationExamTargetLevel"), 0),
+                GraduationExamContractGuid = recordNode.GetValue("graduationExamContractGuid") ?? "",
+                GraduationExamContractType = recordNode.GetValue("graduationExamContractType") ?? "",
+                GraduationExamId = recordNode.GetValue("graduationExamId") ?? "",
+                GraduationExamReadyUT = PD(recordNode.GetValue("graduationExamReadyUT"), 0),
                 BirthUT = PD(recordNode.GetValue("birthUT"), 0),
                 NaturalRetirementUT = PD(recordNode.GetValue("naturalRetirementUT"), 0),
                 RetirementDelayYears = PI(recordNode.GetValue("retirementDelayYears"), 0),
@@ -208,6 +227,10 @@ namespace RosterRotation
                 TrainingEndUT = PD(recordNode.GetValue("trainingEndUT"), 0),
                 LastAgedYears = PI(recordNode.GetValue("lastAgedYears"), -1),
             };
+
+            RosterRotationState.EnsureKerbalIdentity(record);
+            if (record.HighestLevelEverCertified < record.GrantedLevel)
+                record.HighestLevelEverCertified = record.GrantedLevel;
 
             return true;
         }
@@ -230,6 +253,15 @@ namespace RosterRotation
             node.AddValue("trainingType", ((int)record.Training).ToString(ci));
             node.AddValue("trainingTargetLevel", record.TrainingTargetLevel.ToString(ci));
             if (record.GrantedLevel >= 0) node.AddValue("grantedLevel", record.GrantedLevel.ToString(ci));
+            if (record.HighestLevelEverCertified >= 0) node.AddValue("highestLevelEverCertified", record.HighestLevelEverCertified.ToString(ci));
+            if (!string.IsNullOrEmpty(record.KerbalIdentityKey)) node.AddValue("kerbalIdentityKey", record.KerbalIdentityKey);
+            if (record.GraduationExamPending) node.AddValue("graduationExamPending", record.GraduationExamPending.ToString(ci));
+            if (record.GraduationExamActive) node.AddValue("graduationExamActive", record.GraduationExamActive.ToString(ci));
+            if (record.GraduationExamTargetLevel > 0) node.AddValue("graduationExamTargetLevel", record.GraduationExamTargetLevel.ToString(ci));
+            if (!string.IsNullOrEmpty(record.GraduationExamContractGuid)) node.AddValue("graduationExamContractGuid", record.GraduationExamContractGuid);
+            if (!string.IsNullOrEmpty(record.GraduationExamContractType)) node.AddValue("graduationExamContractType", record.GraduationExamContractType);
+            if (!string.IsNullOrEmpty(record.GraduationExamId)) node.AddValue("graduationExamId", record.GraduationExamId);
+            if (record.GraduationExamReadyUT > 0) node.AddValue("graduationExamReadyUT", record.GraduationExamReadyUT.ToString("R", ci));
             if (record.TrainingEndUT > 0) node.AddValue("trainingEndUT", record.TrainingEndUT.ToString("R", ci));
             if (record.LastAgedYears >= 0)
             {

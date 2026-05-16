@@ -89,6 +89,7 @@ namespace RosterRotation
         private static readonly Dictionary<Guid, CrashTrackedVessel> Tracked = new Dictionary<Guid, CrashTrackedVessel>();
         private static readonly Dictionary<Guid, DetachedVesselSnapshot> DetachedSnapshots = new Dictionary<Guid, DetachedVesselSnapshot>();
         private static readonly Dictionary<string, Guid> CrewToVessel = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<Guid, double> SeatEvaTransitionGraceUntil = new Dictionary<Guid, double>();
 
         internal static void RememberCrewIncident(string kerbalName, Guid vesselId)
         {
@@ -96,8 +97,189 @@ namespace RosterRotation
             CrewToVessel[kerbalName] = vesselId;
         }
 
+        internal static bool IsEvaVessel(Vessel vessel)
+        {
+            if (vessel == null) return false;
+            if (vessel.isEVA) return true;
+            return vessel.vesselType == VesselType.EVA;
+        }
 
+        private static string PartInternalName(Part part)
+        {
+            if (part == null) return string.Empty;
+            if (part.partInfo != null && !string.IsNullOrEmpty(part.partInfo.name)) return part.partInfo.name;
+            if (!string.IsNullOrEmpty(part.partName)) return part.partName;
+            return !string.IsNullOrEmpty(part.name) ? part.name : string.Empty;
+        }
 
+        private static bool PartHasModule(Part part, params string[] moduleNames)
+        {
+            if (part == null || part.Modules == null || moduleNames == null) return false;
+            for (int i = 0; i < part.Modules.Count; i++)
+            {
+                PartModule module = part.Modules[i];
+                if (module == null || string.IsNullOrEmpty(module.moduleName)) continue;
+                for (int j = 0; j < moduleNames.Length; j++)
+                {
+                    if (string.Equals(module.moduleName, moduleNames[j], StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        internal static bool IsEvaPart(Part part)
+        {
+            if (part == null) return false;
+            if (IsEvaVessel(part.vessel)) return true;
+            if (PartHasModule(part, "ModuleKerbalEVA")) return true;
+
+            string partName = PartInternalName(part);
+            return !string.IsNullOrEmpty(partName)
+                && partName.IndexOf("kerbal", StringComparison.OrdinalIgnoreCase) >= 0
+                && partName.IndexOf("eva", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static bool IsExternalCommandSeatPart(Part part)
+        {
+            if (part == null) return false;
+            if (PartHasModule(part, "KerbalSeat", "ModuleCommandSeat")) return true;
+
+            string partName = PartInternalName(part);
+            return !string.IsNullOrEmpty(partName)
+                && partName.IndexOf("seatExternalCmd", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        internal static void MarkSeatEvaTransition(Vessel vessel, string context)
+        {
+            if (vessel == null || vessel.id == Guid.Empty) return;
+            if (IsEvaVessel(vessel)) return;
+
+            double now = Planetarium.GetUniversalTime();
+            SeatEvaTransitionGraceUntil[vessel.id] = now + 45.0;
+            RRLog.Verbose("[EAC] crew EVA/boarding transition grace started for vessel=" + SafeVesselName(vessel)
+                + ", context=" + (string.IsNullOrEmpty(context) ? "<none>" : context));
+        }
+
+        private static bool IsWithinSeatEvaTransitionGrace(Vessel vessel)
+        {
+            if (vessel == null || vessel.id == Guid.Empty) return false;
+            double until;
+            if (!SeatEvaTransitionGraceUntil.TryGetValue(vessel.id, out until)) return false;
+
+            double now = Planetarium.GetUniversalTime();
+            if (now <= until) return true;
+
+            SeatEvaTransitionGraceUntil.Remove(vessel.id);
+            return false;
+        }
+
+        private static bool IsKnownEvaConstructionPracticePart(Part part)
+        {
+            string partName = PartInternalName(part);
+            if (string.IsNullOrEmpty(partName)) return false;
+
+            return string.Equals(partName, "strutCube", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(partName, "batteryPack", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(partName, "solarPanels5", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static ProtoCrewMember FindCrewMemberByName(string crewName)
+        {
+            if (string.IsNullOrEmpty(crewName)) return null;
+            if (HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null) return null;
+
+            foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
+            {
+                if (pcm == null) continue;
+                if (string.Equals(pcm.name, crewName, StringComparison.OrdinalIgnoreCase))
+                    return pcm;
+            }
+
+            return null;
+        }
+
+        private static bool RecordIsActiveGraduationExam(string crewName, string requiredTrait, int requiredLevel)
+        {
+            if (string.IsNullOrEmpty(crewName)) return false;
+
+            RosterRotationState.KerbalRecord rec;
+            if (!RosterRotationState.Records.TryGetValue(crewName, out rec) || rec == null) return false;
+            if (!rec.GraduationExamActive) return false;
+            if (requiredLevel > 0 && rec.GraduationExamTargetLevel != requiredLevel) return false;
+
+            if (!string.IsNullOrEmpty(requiredTrait))
+            {
+                ProtoCrewMember pcm = FindCrewMemberByName(crewName);
+
+                if (pcm != null && !string.Equals(pcm.trait, requiredTrait, StringComparison.OrdinalIgnoreCase))
+                    return false;
+
+                if (pcm == null)
+                {
+                    string contractType = rec.GraduationExamContractType ?? string.Empty;
+                    if (contractType.IndexOf(requiredTrait, StringComparison.OrdinalIgnoreCase) < 0)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool CrewListContainsActiveGraduationExamKerbal(IEnumerable<ProtoCrewMember> crew, string requiredTrait, int requiredLevel)
+        {
+            if (crew == null) return false;
+            foreach (ProtoCrewMember pcm in crew)
+            {
+                if (pcm == null) continue;
+                if (RecordIsActiveGraduationExam(pcm.name, requiredTrait, requiredLevel))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool CrewNamesContainActiveGraduationExamKerbal(IEnumerable<string> crewNames, string requiredTrait, int requiredLevel)
+        {
+            if (crewNames == null) return false;
+            foreach (string crewName in crewNames)
+            {
+                if (RecordIsActiveGraduationExam(crewName, requiredTrait, requiredLevel))
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool VesselHasActiveGraduationExamKerbal(Vessel vessel, string requiredTrait, int requiredLevel)
+        {
+            if (vessel == null) return false;
+
+            if (CrewListContainsActiveGraduationExamKerbal(vessel.GetVesselCrew(), requiredTrait, requiredLevel))
+                return true;
+
+            CrashTrackedVessel tracked;
+            if (vessel.id != Guid.Empty && Tracked.TryGetValue(vessel.id, out tracked) && tracked != null &&
+                CrewNamesContainActiveGraduationExamKerbal(tracked.CrewSnapshot, requiredTrait, requiredLevel))
+                return true;
+
+            return false;
+        }
+
+        private static bool ShouldTreatSmallPartLossAsBenignTrainingTransition(Vessel vessel, int partLossDelta)
+        {
+            if (vessel == null || partLossDelta <= 0) return false;
+
+            // A command-seat/EVA transition or an EVA construction exercise can legitimately
+            // alter the loaded part graph without being a crash. Keep this deliberately narrow:
+            // only small deltas are ignored, so a real hard landing that destroys multiple parts
+            // can still be evaluated by the crash system.
+            if (IsWithinSeatEvaTransitionGrace(vessel) && partLossDelta <= 2)
+                return true;
+
+            if (partLossDelta <= 3 && VesselHasActiveGraduationExamKerbal(vessel, "Engineer", 1))
+                return true;
+
+            return false;
+        }
 
 
 
@@ -114,7 +296,7 @@ namespace RosterRotation
             {
                 Vessel vessel = loaded[i];
                 if (vessel == null) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() <= 0) continue;
 
                 ObserveVessel(vessel);
@@ -124,6 +306,7 @@ namespace RosterRotation
         internal static void ObserveVessel(Vessel vessel)
         {
             if (vessel == null || vessel.id == Guid.Empty) return;
+            if (IsEvaVessel(vessel)) return;
             if (vessel.GetCrewCount() <= 0) return;
 
             CrashTrackedVessel tracked;
@@ -151,9 +334,31 @@ namespace RosterRotation
                 tracked.MaxPartsObserved = currentParts;
 
             double now = Planetarium.GetUniversalTime();
+            if (IsWithinSeatEvaTransitionGrace(vessel))
+            {
+                tracked.LastSeenParts = currentParts;
+                tracked.LastObservedUT = now;
+                tracked.VesselName = SafeVesselName(vessel);
+                tracked.SnapshotCrew(vessel);
+                return;
+            }
+
             if (tracked.LastSeenParts > 0 && currentParts > 0 && currentParts < tracked.LastSeenParts)
             {
                 int delta = tracked.LastSeenParts - currentParts;
+                if (ShouldTreatSmallPartLossAsBenignTrainingTransition(vessel, delta))
+                {
+                    tracked.LastSeenParts = currentParts;
+                    tracked.LastObservedUT = now;
+                    tracked.VesselName = SafeVesselName(vessel);
+                    tracked.SnapshotCrew(vessel);
+                    RRLog.Verbose("[EAC] benign EVA/construction part-count change ignored for vessel=" + tracked.VesselName
+                        + ": delta=" + delta
+                        + ", lastSeenParts=" + tracked.LastSeenParts
+                        + ", currentParts=" + currentParts);
+                    return;
+                }
+
                 StartImplicitSeparationGrace(tracked, now, "part-loss");
                 tracked.PendingSeparationDelta += delta;
                 InferDetachedVesselsForTracked(tracked, vessel, now);
@@ -233,6 +438,7 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (vessel == null) return;
+            if (IsEvaVessel(vessel)) return;
             CrashTrackedVessel tracked = GetOrCreate(vessel);
             if (tracked == null) return;
 
@@ -266,7 +472,7 @@ namespace RosterRotation
                 Vessel vessel = loaded[i];
                 if (vessel == null) continue;
                 if (vessel.id == Guid.Empty) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() > 0) continue;
 
                 seenNow.Add(vessel.id);
@@ -442,7 +648,7 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (createdVessel == null) return;
-            if (createdVessel.isEVA) return;
+            if (IsEvaVessel(createdVessel)) return;
 
             CrashTrackedVessel source = FindBestSeparationSource(createdVessel, true, 600.0);
             if (source == null)
@@ -509,6 +715,8 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (vessel == null) return;
+            if (IsEvaVessel(vessel)) return;
+            if (IsWithinSeatEvaTransitionGrace(vessel)) return;
             CrashTrackedVessel tracked = GetOrCreate(vessel);
             if (tracked == null) return;
 
@@ -524,6 +732,14 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (part == null || part.vessel == null) return;
+            if (IsEvaPart(part)) return;
+            if (IsWithinSeatEvaTransitionGrace(part.vessel) && !IsExternalCommandSeatPart(part)) return;
+            if (IsKnownEvaConstructionPracticePart(part) && VesselHasActiveGraduationExamKerbal(part.vessel, "Engineer", 1))
+            {
+                RRLog.Verbose("[EAC] ignoring intentional Engineer exam EVA construction/removal part event: vessel="
+                    + SafeVesselName(part.vessel) + ", part=" + SafePartName(part));
+                return;
+            }
             CrashTrackedVessel tracked = GetOrCreate(part.vessel);
             if (tracked == null) return;
 
@@ -541,6 +757,8 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (vessel == null) return;
+            if (IsEvaVessel(vessel)) return;
+            if (IsWithinSeatEvaTransitionGrace(vessel)) return;
             CrashTrackedVessel tracked = GetOrCreate(vessel);
             if (tracked == null) return;
 
@@ -557,6 +775,8 @@ namespace RosterRotation
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (vessel == null) return;
+            if (IsEvaVessel(vessel)) return;
+            if (IsWithinSeatEvaTransitionGrace(vessel)) return;
             CrashTrackedVessel tracked = GetOrCreate(vessel);
             if (tracked == null) return;
 
@@ -641,11 +861,19 @@ namespace RosterRotation
                 + ", fatalities=" + tracked.KilledCrew.Count);
 
             Tracked.Remove(vesselId);
+            SeatEvaTransitionGraceUntil.Remove(vesselId);
         }
 
         internal static void HandleRecovery(Vessel vessel, double now)
         {
             if (vessel == null) return;
+
+            if (IsEvaVessel(vessel))
+            {
+                Forget(vessel.id);
+                RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(vessel, now);
+                return;
+            }
 
             if (!RosterRotationState.CrashPenaltyEnabled)
             {
@@ -891,6 +1119,8 @@ namespace RosterRotation
         private static CrashTrackedVessel GetOrCreate(Vessel vessel)
         {
             if (vessel == null || vessel.id == Guid.Empty) return null;
+            if (IsEvaVessel(vessel)) return null;
+            if (IsWithinSeatEvaTransitionGrace(vessel)) return null;
             if (vessel.GetCrewCount() <= 0) return null;
 
             CrashTrackedVessel tracked;
@@ -944,19 +1174,28 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public sealed class EACCrashIncidentCollector : MonoBehaviour
     {
+        private readonly List<Action> _unregisterActions = new List<Action>();
         private float _nextObserveTime;
 
         private void Start()
         {
             RRLog.Verbose("[EAC] Crash incident collector initialized");
-            GameEvents.onPartDie.Add(OnPartDie);
-            GameEvents.onPartExplode.Add(OnPartExplode);
-            GameEvents.onCollision.Add(OnCollision);
-            GameEvents.onCrash.Add(OnCrash);
-            GameEvents.onCrashSplashdown.Add(OnCrashSplashdown);
-            GameEvents.onStageSeparation.Add(OnStageSeparation);
-            GameEvents.onVesselCreate.Add(OnVesselCreate);
-            GameEvents.onKerbalStatusChange.Add(OnKerbalStatusChange);
+
+            // Do not let one unavailable or version-sensitive KSP event prevent the
+            // whole crash collector from starting.  ExceptionDetector logs showed a
+            // NullReferenceException inside EventData<T>.Add() from this Start()
+            // method, which makes a per-event guarded registration safer than a
+            // single uninterrupted block of Add() calls.
+            TryRegister("onPartDie", GameEvents.onPartDie, OnPartDie);
+            TryRegister("onPartExplode", GameEvents.onPartExplode, OnPartExplode);
+            TryRegister("onCollision", GameEvents.onCollision, OnCollision);
+            TryRegister("onCrash", GameEvents.onCrash, OnCrash);
+            TryRegister("onCrashSplashdown", GameEvents.onCrashSplashdown, OnCrashSplashdown);
+            TryRegister("onStageSeparation", GameEvents.onStageSeparation, OnStageSeparation);
+            TryRegister("onVesselCreate", GameEvents.onVesselCreate, OnVesselCreate);
+            TryRegister("onCrewOnEva", GameEvents.onCrewOnEva, OnCrewOnEva);
+            TryRegister("onCrewBoardVessel", GameEvents.onCrewBoardVessel, OnCrewBoardVessel);
+            TryRegister("onKerbalStatusChange", GameEvents.onKerbalStatusChange, OnKerbalStatusChange);
         }
 
         private void Update()
@@ -970,23 +1209,86 @@ namespace RosterRotation
         private void OnDestroy()
         {
             RRLog.Verbose("[EAC] Crash incident collector destroyed");
-            GameEvents.onPartDie.Remove(OnPartDie);
-            GameEvents.onPartExplode.Remove(OnPartExplode);
-            GameEvents.onCollision.Remove(OnCollision);
-            GameEvents.onCrash.Remove(OnCrash);
-            GameEvents.onCrashSplashdown.Remove(OnCrashSplashdown);
-            GameEvents.onStageSeparation.Remove(OnStageSeparation);
-            GameEvents.onVesselCreate.Remove(OnVesselCreate);
-            GameEvents.onKerbalStatusChange.Remove(OnKerbalStatusChange);
+
+            for (int i = _unregisterActions.Count - 1; i >= 0; i--)
+            {
+                try { _unregisterActions[i](); }
+                catch (Exception ex)
+                {
+                    RRLog.WarnExceptionOnce("EACCrashIncidentCollector.Unregister." + i,
+                        "[EAC] Crash incident collector failed while unregistering a KSP event", ex);
+                }
+            }
+            _unregisterActions.Clear();
         }
 
-        private static void OnPartDie(Part part)
+        private void TryRegister<T>(string eventName, EventData<T> eventData, EventData<T>.OnEvent handler)
+        {
+            if (eventData == null)
+            {
+                RRLog.WarnOnce("EACCrashIncidentCollector.NullEvent." + eventName,
+                    "[EAC] Crash incident collector skipped null KSP event " + eventName + ".");
+                return;
+            }
+            if (handler == null)
+            {
+                RRLog.WarnOnce("EACCrashIncidentCollector.NullHandler." + eventName,
+                    "[EAC] Crash incident collector skipped null handler for " + eventName + ".");
+                return;
+            }
+
+            try
+            {
+                // Remove first to keep scene reloads/idempotent startup from producing
+                // duplicate listeners if Unity/KSP leaves an old delegate behind.
+                eventData.Remove(handler);
+                eventData.Add(handler);
+                _unregisterActions.Add(delegate { eventData.Remove(handler); });
+                RRLog.Verbose("[EAC] Crash incident collector registered " + eventName);
+            }
+            catch (Exception ex)
+            {
+                RRLog.ErrorExceptionOnce("EACCrashIncidentCollector.Register." + eventName,
+                    "[EAC] Crash incident collector could not register KSP event " + eventName, ex);
+            }
+        }
+
+        private void TryRegister<T1, T2, T3>(string eventName, EventData<T1, T2, T3> eventData, EventData<T1, T2, T3>.OnEvent handler)
+        {
+            if (eventData == null)
+            {
+                RRLog.WarnOnce("EACCrashIncidentCollector.NullEvent." + eventName,
+                    "[EAC] Crash incident collector skipped null KSP event " + eventName + ".");
+                return;
+            }
+            if (handler == null)
+            {
+                RRLog.WarnOnce("EACCrashIncidentCollector.NullHandler." + eventName,
+                    "[EAC] Crash incident collector skipped null handler for " + eventName + ".");
+                return;
+            }
+
+            try
+            {
+                eventData.Remove(handler);
+                eventData.Add(handler);
+                _unregisterActions.Add(delegate { eventData.Remove(handler); });
+                RRLog.Verbose("[EAC] Crash incident collector registered " + eventName);
+            }
+            catch (Exception ex)
+            {
+                RRLog.ErrorExceptionOnce("EACCrashIncidentCollector.Register." + eventName,
+                    "[EAC] Crash incident collector could not register KSP event " + eventName, ex);
+            }
+        }
+
+        private void OnPartDie(Part part)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             CrashSeverityState.MarkPartDestroyed(part);
         }
 
-        private static void OnPartExplode(GameEvents.ExplosionReaction reaction)
+        private void OnPartExplode(GameEvents.ExplosionReaction reaction)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
 
@@ -1007,6 +1309,8 @@ namespace RosterRotation
                 "explodedPart",
                 "sourcePart",
                 "originPart") as Part;
+            if (part != null && CrashSeverityState.IsEvaPart(part))
+                return null;
             if (part != null && part.vessel != null)
                 return part.vessel;
 
@@ -1025,6 +1329,8 @@ namespace RosterRotation
                 "from",
                 "to");
             Part relatedPart = related as Part;
+            if (relatedPart != null && CrashSeverityState.IsEvaPart(relatedPart))
+                return null;
             if (relatedPart != null && relatedPart.vessel != null)
                 return relatedPart.vessel;
 
@@ -1079,6 +1385,116 @@ namespace RosterRotation
             return vessels;
         }
 
+        private static bool EventReportLooksLikeSeatEvaTransition(EventReport report)
+        {
+            if (report == null) return false;
+
+            bool hasEva = false;
+            bool hasSeat = false;
+
+            Action<Part> inspectPart = delegate(Part part)
+            {
+                if (part == null) return;
+                if (CrashSeverityState.IsEvaPart(part)) hasEva = true;
+                if (CrashSeverityState.IsExternalCommandSeatPart(part)) hasSeat = true;
+            };
+
+            inspectPart(report.origin);
+
+            object boxed = report;
+            Type reportType = boxed.GetType();
+            string[] memberNames = new[]
+            {
+                "sender", "source", "host", "target", "otherPart", "other", "part", "part1", "part2",
+                "p", "p1", "p2", "vessel", "from", "to", "obj", "obj1", "obj2"
+            };
+
+            for (int i = 0; i < memberNames.Length; i++)
+            {
+                object value = ReflectionUtils.GetMemberObject(boxed, reportType, "CrashSeverity:SeatEvaReportMember:" + memberNames[i], memberNames[i]);
+                Part part = value as Part;
+                if (part != null)
+                {
+                    inspectPart(part);
+                    continue;
+                }
+
+                GameObject go = value as GameObject;
+                if (go != null)
+                {
+                    Part goPart = go.GetComponent<Part>();
+                    inspectPart(goPart);
+                }
+            }
+
+            string text = ((report.other ?? string.Empty) + " " + (report.msg ?? string.Empty)).ToLowerInvariant();
+            if (text.Contains("eva") || text.Contains("kerbal")) hasEva = true;
+            if (text.Contains("seat")) hasSeat = true;
+
+            return hasEva && hasSeat;
+        }
+
+        private static void MarkSeatEvaTransitionForVessels(IEnumerable<Vessel> vessels, string context)
+        {
+            if (vessels == null) return;
+            foreach (Vessel vessel in vessels)
+            {
+                if (vessel == null) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
+                CrashSeverityState.MarkSeatEvaTransition(vessel, context);
+            }
+        }
+
+
+        private static void AddTransitionPartVessel(HashSet<Vessel> vessels, Part part)
+        {
+            if (vessels == null || part == null || part.vessel == null) return;
+            if (CrashSeverityState.IsEvaVessel(part.vessel)) return;
+            vessels.Add(part.vessel);
+        }
+
+        private static Part GetTransitionPartMember(object action, Type actionType, string label, params string[] memberNames)
+        {
+            if (action == null || actionType == null || memberNames == null) return null;
+            return ReflectionUtils.GetMemberObject(action, actionType, "CrashSeverity:CrewEvaTransition:" + label, memberNames) as Part;
+        }
+
+        private static void MarkCrewEvaTransition(GameEvents.FromToAction<Part, Part> action, string context)
+        {
+            if (!RosterRotationState.CrashPenaltyEnabled) return;
+
+            object boxed = action;
+            Type actionType = boxed.GetType();
+            HashSet<Vessel> vessels = new HashSet<Vessel>();
+
+            AddTransitionPartVessel(vessels, GetTransitionPartMember(boxed, actionType, "from", "from", "From", "fromPart", "source", "Source", "host", "Host"));
+            AddTransitionPartVessel(vessels, GetTransitionPartMember(boxed, actionType, "to", "to", "To", "toPart", "target", "Target"));
+
+            // The explicit crew EVA/boarding events are more reliable than trying to infer
+            // EVA transitions from crash/collision reports.  Mark a short grace period on
+            // the parent vessel so any KSP event noise from hatch exits, command-seat exits,
+            // or boarding does not become crash damage.
+            if (vessels.Count > 0)
+            {
+                MarkSeatEvaTransitionForVessels(vessels, context + " [crew EVA transition]");
+                RRLog.Verbose("[EAC] Marked EVA transition grace from " + context + ", vesselCount=" + vessels.Count);
+            }
+            else
+            {
+                RRLog.Verbose("[EAC] " + context + " fired but no non-EVA parent vessel could be resolved for crash grace.");
+            }
+        }
+
+        private void OnCrewOnEva(GameEvents.FromToAction<Part, Part> action)
+        {
+            MarkCrewEvaTransition(action, "onCrewOnEva");
+        }
+
+        private void OnCrewBoardVessel(GameEvents.FromToAction<Part, Part> action)
+        {
+            MarkCrewEvaTransition(action, "onCrewBoardVessel");
+        }
+
         private static string DescribeEventReport(EventReport report)
         {
             if (report == null) return "<null>";
@@ -1096,7 +1512,7 @@ namespace RosterRotation
             return "origin=" + originName + ", other=" + other + ", msg=" + msg;
         }
 
-        private static void OnCollision(EventReport report)
+        private void OnCollision(EventReport report)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
 
@@ -1106,18 +1522,25 @@ namespace RosterRotation
             string context = DescribeEventReport(report);
             RRLog.Verbose("[EAC] onCollision fired: " + context + ", vesselCount=" + vessels.Count);
 
+            if (EventReportLooksLikeSeatEvaTransition(report))
+            {
+                MarkSeatEvaTransitionForVessels(vessels, context + " [seat/eva collision transition]");
+                RRLog.Verbose("[EAC] Ignoring command-seat/EVA transition collision event: " + context);
+                return;
+            }
+
             bool hasDistinctVessels = vessels.Count > 1;
             foreach (Vessel vessel in vessels)
             {
                 if (vessel == null) continue;
                 if (!hasDistinctVessels) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() <= 0) continue;
                 CrashSeverityState.MarkCollisionEvent(vessel, context);
             }
         }
 
-        private static void OnCrashSplashdown(EventReport report)
+        private void OnCrashSplashdown(EventReport report)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
 
@@ -1125,16 +1548,23 @@ namespace RosterRotation
             string context = DescribeEventReport(report);
             RRLog.Verbose("[EAC] onCrashSplashdown fired: " + context + ", vesselCount=" + vessels.Count);
 
+            if (EventReportLooksLikeSeatEvaTransition(report))
+            {
+                MarkSeatEvaTransitionForVessels(vessels, context + " [seat/eva splashdown transition]");
+                RRLog.Verbose("[EAC] Ignoring command-seat/EVA transition splashdown event: " + context);
+                return;
+            }
+
             foreach (Vessel vessel in vessels)
             {
                 if (vessel == null) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() <= 0) continue;
                 CrashSeverityState.MarkCrashEvent(vessel, context + " [splashdown]");
             }
         }
 
-        private static void OnCrash(EventReport report)
+        private void OnCrash(EventReport report)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
 
@@ -1142,16 +1572,23 @@ namespace RosterRotation
             string context = DescribeEventReport(report);
             RRLog.Verbose("[EAC] onCrash fired: " + context + ", vesselCount=" + vessels.Count);
 
+            if (EventReportLooksLikeSeatEvaTransition(report))
+            {
+                MarkSeatEvaTransitionForVessels(vessels, context + " [seat/eva crash transition]");
+                RRLog.Verbose("[EAC] Ignoring command-seat/EVA transition crash event: " + context);
+                return;
+            }
+
             foreach (Vessel vessel in vessels)
             {
                 if (vessel == null) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() <= 0) continue;
                 CrashSeverityState.MarkCrashEvent(vessel, context);
             }
         }
 
-        private static void OnStageSeparation(EventReport report)
+        private void OnStageSeparation(EventReport report)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
 
@@ -1159,16 +1596,23 @@ namespace RosterRotation
             string context = DescribeEventReport(report);
             RRLog.Verbose("[EAC] onStageSeparation fired: " + context + ", vesselCount=" + vessels.Count);
 
+            if (EventReportLooksLikeSeatEvaTransition(report))
+            {
+                MarkSeatEvaTransitionForVessels(vessels, context + " [seat/eva separation transition]");
+                RRLog.Verbose("[EAC] Ignoring command-seat/EVA transition separation event: " + context);
+                return;
+            }
+
             foreach (Vessel vessel in vessels)
             {
                 if (vessel == null) continue;
-                if (vessel.isEVA) continue;
+                if (CrashSeverityState.IsEvaVessel(vessel)) continue;
                 if (vessel.GetCrewCount() <= 0) continue;
                 CrashSeverityState.MarkStageSeparation(vessel, context);
             }
         }
 
-        private static void OnVesselCreate(Vessel vessel)
+        private void OnVesselCreate(Vessel vessel)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             if (vessel == null) return;
@@ -1180,7 +1624,7 @@ namespace RosterRotation
             CrashSeverityState.RegisterCreatedDetachedVessel(vessel, "onVesselCreate");
         }
 
-        private static void OnKerbalStatusChange(ProtoCrewMember pcm, ProtoCrewMember.RosterStatus oldStatus, ProtoCrewMember.RosterStatus newStatus)
+        private void OnKerbalStatusChange(ProtoCrewMember pcm, ProtoCrewMember.RosterStatus oldStatus, ProtoCrewMember.RosterStatus newStatus)
         {
             if (!RosterRotationState.CrashPenaltyEnabled) return;
             RRLog.Verbose("[EAC] onKerbalStatusChange: kerbal=" + (pcm != null ? pcm.name : "<null>")

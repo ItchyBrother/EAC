@@ -139,6 +139,13 @@ namespace RosterRotation
 
                 // Training
                 EACStateBridge.SetBool("TraitGrowthEnabled", trn.TraitGrowth);
+                bool finalExamContractsAvailable = EACContractConfiguratorBridge.IsAvailable;
+                if (trn.FinalExamContracts && !finalExamContractsAvailable)
+                {
+                    RRLog.VerboseWarn("[EAC] Final exam contracts requested in settings but unavailable: " + EACContractConfiguratorBridge.AvailabilitySummary);
+                    trn.FinalExamContracts = false;
+                }
+                EACStateBridge.SetBool("FinalExamContractsEnabled", trn.FinalExamContracts && finalExamContractsAvailable);
                 EACStateBridge.SetInt("TrainingInitialDays", trn.TrainingInitialDays);
                 EACStateBridge.SetInt("TrainingStarDays", trn.TrainingStarDays);
                 EACStateBridge.SetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
@@ -198,6 +205,8 @@ namespace RosterRotation
 
                 // Training
                 trn.TraitGrowth            = EACStateBridge.GetBool("TraitGrowthEnabled", trn.TraitGrowth);
+                trn.FinalExamContractsStatus = EACContractConfiguratorBridge.AvailabilitySummary;
+                trn.FinalExamContracts     = EACContractConfiguratorBridge.IsAvailable && EACStateBridge.GetBool("FinalExamContractsEnabled", trn.FinalExamContracts);
                 trn.TrainingInitialDays     = EACStateBridge.GetInt("TrainingInitialDays", trn.TrainingInitialDays);
                 trn.TrainingStarDays        = EACStateBridge.GetInt("TrainingStarDays", trn.TrainingStarDays);
                 trn.TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", trn.TrainingFundsMultiplier);
@@ -363,11 +372,38 @@ namespace RosterRotation
     {
         public override string Title => "Training";
 
+        public override bool Enabled(MemberInfo member, GameParameters parameters)
+        {
+            if (member != null && member.Name == "FinalExamContracts")
+                return EACContractConfiguratorBridge.IsAvailable;
+            return true;
+        }
+
+        public override bool Interactible(MemberInfo member, GameParameters parameters)
+        {
+            if (member != null && member.Name == "FinalExamContracts")
+                return EACContractConfiguratorBridge.IsAvailable;
+            return true;
+        }
+
         [GameParameters.CustomParameterUI(
             "Trait Growth",
             toolTip = "Allow level-training completions and veteran recoveries to slightly increase Courage and reduce Stupidity.",
             autoPersistance = false)]
         public bool TraitGrowth = false;
+
+        [GameParameters.CustomStringParameterUI(
+            "",
+            title = "Final exam availability",
+            lines = 2,
+            autoPersistance = false)]
+        public string FinalExamContractsStatus = "";
+
+        [GameParameters.CustomParameterUI(
+            "Final exam contracts",
+            toolTip = "Require a Contract Configurator graduation exam before awarding trained experience levels. This option is only available when Contract Configurator and EAC_CCBridge.dll are loaded.",
+            autoPersistance = false)]
+        public bool FinalExamContracts = false;
 
         [GameParameters.CustomIntParameterUI(
             "Init days",
@@ -414,6 +450,10 @@ namespace RosterRotation
         protected override void PullFromState()
         {
             TraitGrowth             = EACStateBridge.GetBool("TraitGrowthEnabled", false);
+            FinalExamContractsStatus = EACContractConfiguratorBridge.AvailabilitySummary;
+            FinalExamContracts      = EACContractConfiguratorBridge.IsAvailable && EACStateBridge.GetBool("FinalExamContractsEnabled", false);
+            if (!EACContractConfiguratorBridge.IsAvailable)
+                EACStateBridge.SetBool("FinalExamContractsEnabled", false);
             TrainingInitialDays     = EACStateBridge.GetInt("TrainingInitialDays", 30);
             TrainingStarDays        = EACStateBridge.GetInt("TrainingStarDays", 30);
             TrainingFundsMultiplier = (float)EACStateBridge.GetDouble("TrainingFundsMultiplier", 1.0);
@@ -425,6 +465,14 @@ namespace RosterRotation
         protected override void PushToState()
         {
             EACStateBridge.SetBool("TraitGrowthEnabled", TraitGrowth);
+            bool finalExamContractsAvailable = EACContractConfiguratorBridge.IsAvailable;
+            FinalExamContractsStatus = EACContractConfiguratorBridge.AvailabilitySummary;
+            if (FinalExamContracts && !finalExamContractsAvailable)
+            {
+                RRLog.VerboseWarn("[EAC] Final exam contracts cannot be enabled: " + EACContractConfiguratorBridge.AvailabilitySummary);
+                FinalExamContracts = false;
+            }
+            EACStateBridge.SetBool("FinalExamContractsEnabled", FinalExamContracts && finalExamContractsAvailable);
             EACStateBridge.SetInt("TrainingInitialDays", TrainingInitialDays);
             EACStateBridge.SetInt("TrainingStarDays", TrainingStarDays);
             EACStateBridge.SetDouble("TrainingFundsMultiplier", TrainingFundsMultiplier);

@@ -175,6 +175,14 @@ namespace RosterRotation
             WriteGeneral("VERBOSE", msg);
         }
 
+        internal static void VerboseWarn(string msg)
+        {
+            if (!VerboseEnabled) return;
+            string formatted = P(msg);
+            Debug.LogWarning(formatted);
+            WriteGeneral("VERBOSE_WARN", msg);
+        }
+
         internal static void WarnOnce(string key, string msg)
         {
             if (_once.Add("W:" + (key ?? msg ?? ""))) Warn(msg);

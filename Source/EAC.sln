@@ -4,6 +4,8 @@ VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EAC", "EAC.csproj", "{2A72ECEF-2E04-64AC-8991-FE947F2C27BA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EAC_CCBridge", "EAC_CCBridge.csproj", "{1E0FE1B8-3DB8-4E0F-9C5E-A6F3F733A26A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,6 +16,10 @@ Global
 		{2A72ECEF-2E04-64AC-8991-FE947F2C27BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2A72ECEF-2E04-64AC-8991-FE947F2C27BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2A72ECEF-2E04-64AC-8991-FE947F2C27BA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1E0FE1B8-3DB8-4E0F-9C5E-A6F3F733A26A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1E0FE1B8-3DB8-4E0F-9C5E-A6F3F733A26A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1E0FE1B8-3DB8-4E0F-9C5E-A6F3F733A26A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1E0FE1B8-3DB8-4E0F-9C5E-A6F3F733A26A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

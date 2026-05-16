@@ -143,7 +143,9 @@ namespace RosterRotation
                     IsLost            = isLost,
                     IsAssigned        = onMission,
                     Status            = BuildStatusString(k, r, now, hasFlown, retired),
-                    AgeText           = GetAgeDisplay(r, now),
+                    // Lost rows already include age-at-death in the status text,
+                    // so leave the live/current age column blank for that tab.
+                    AgeText           = isLost ? "" : GetAgeDisplay(r, now),
                     DisplayFlights    = displayFlights,
                     EffectiveStars    = retired ? RosterRotationState.GetRetiredEffectiveStars(k, r, now) : 0,
                     InTrainingLockout = r != null && r.TrainingEndUT > 0
@@ -166,24 +168,27 @@ namespace RosterRotation
             foreach (var k in roster.Crew)
             {
                 if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
-                if (k.inactive || k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned) continue;
+                if (k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                     k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 if (k.experienceLevel >= 3f) continue;
 
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
-                if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
+                if (r != null && (r.Retired || r.DeathUT > 0)) continue;
+                if (HasGraduationExam(r)) continue;
 
-                if (!k.inactive || k.inactiveTimeEnd <= now)
+                if (r != null && r.Training != TrainingType.None)
                 {
-                    if (r.Training != TrainingType.None)
-                    {
-                        RRLog.Verbose($"[EAC] Cleaning up stale training record for dismissed Kerbal: {k.name}");
-                        ClearTrainingState(r);
-                    }
+                    // Do not clear completed-but-not-yet-processed training here.
+                    // The training candidate list can be rebuilt before the periodic
+                    // CheckTrainingCompletion() pass runs after a time warp.  Clearing
+                    // the record here races that completion pass and can erase the
+                    // ExperienceUpgrade state before EAC marks the final exam pending,
+                    // which makes L1/L2/L3 exams never appear after training completes.
                     continue;
                 }
 
+                if (k.inactive && k.inactiveTimeEnd > now) continue;
                 list.Add(k);
             }
 
@@ -245,6 +250,7 @@ namespace RosterRotation
             rec.Training = TrainingType.None;
             rec.TrainingTargetLevel = 0;
             rec.TrainingEndUT = 0;
+            ClearGraduationExamState(rec);
         }
 
         // ── Display helpers ────────────────────────────────────────────────────
@@ -274,6 +280,10 @@ namespace RosterRotation
                 int eff = RosterRotationState.GetRetiredEffectiveStars(k, r, now);
                 return $"RETIRED L{eff} ({RosterRotationState.FormatTimeAgo(r.RetiredUT, now)})";
             }
+            if (r != null && r.GraduationExamActive)
+                return $"Final exam active → L{r.GraduationExamTargetLevel}";
+            if (r != null && r.GraduationExamPending)
+                return $"Final exam ready → L{r.GraduationExamTargetLevel}";
             if (r != null && r.Training != TrainingType.None && k.inactive && k.inactiveTimeEnd > now)
             {
                 double rem = k.inactiveTimeEnd - now;
