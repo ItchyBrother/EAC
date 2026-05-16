@@ -2,6 +2,60 @@
 
 # Change Log
 
+### 2026-0516: EAC v1.3.0 for KSP >= 1.12.x
+
+This release is a targeted optimization, stability, and Contract Configurator integration update. It improves Astronaut Complex roster behavior, training/final-exam recovery, applicant handling, mission old-age death cleanup, and several internal performance paths.  PLEASE SEE NOTES FOR IMPORTANT INFORMATION
+
+#### Contract Configurator final exams
+
+- Added optional Contract Configurator final-exam support for EAC training progression.
+- Added support for EAC final exam requirements and completion behaviours through the EAC CC bridge.
+- Added final exam tracking by Kerbal trait, target level, and exam ID.
+- Added exam rotation support so the same exam is not repeatedly selected when alternatives exist.
+- Added recovery handling for Kerbals who were pending or active in a Contract Configurator final exam when final exams are later disabled or Contract Configurator is removed.
+- EAC now falls back to the normal training award path when final exam contracts are no longer available.
+
+#### Scenario vessel and craft provisioning
+
+- Added support for EAC-provided exam craft and scenario vessels for Contract Configurator exams.
+- Added support for loading scenario vessels into the current save for contracts that require a pre-positioned test article.
+- Added cleanup safeguards so spawned scenario vessels can be removed after use while protecting crewed vessels.
+
+#### Applicant management
+
+- Optimized applicant rejection by caching reflected KerbalRoster rejection methods.
+- Fixed Reject All so it rejects all intended applicants instead of skipping entries while the applicant list changes.
+- Added validation so applicant rejection only acts on valid applicant Kerbals.
+
+#### Astronaut Complex roster fixes
+
+- Fixed cases where retired Kerbals could temporarily appear in the Available tab after applicant rejection or retirement.
+- Fixed cases where dead or missing Kerbals could appear in the Available tab after KSP rebuilt the Astronaut Complex roster.
+- Improved Available / Retired / Lost tab cleanup after KSP UI refreshes.
+- Cleaned up the EAC LOST tab so dead Kerbals no longer show an unnecessary current-age column while still showing useful age-at-death text.
+
+#### Aging, retirement, and mission death
+
+- Optimized aging and mission-death cleanup reflection paths.
+- Cached proto-vessel and ConfigNode member lookups used when removing deceased Kerbals from assigned vessels.
+- Confirmed mission old-age death cleanup removes deceased Kerbals from assigned but unlaunched vessels.
+- Improved retirement and recall timestamp handling.
+
+#### Performance and internal cleanup
+
+- Reduced repeated reflection scans in applicant, vessel, aging, and mission-death paths.
+- Reduced unnecessary roster and vessel list allocations.
+- Improved crew-name cache correctness when roster contents change without a crew-count change.
+- Preserved Contract Configurator spawned-vessel association order while reducing avoidable list copies.
+
+## Notes:
+
+###	1. Contract Configurator remains optional. EAC should still load without Contract Configurator installed.
+### 2. Final exam contract mode is only available when Contract Configurator and the EAC CC bridge are present.
+### 3. Mods that heavily replace or rebuild the Astronaut Complex UI may still conflict with EAC’s roster-tab adjustments.
+
+##	
+
 ### 2026-0505: EAC V1.2.1 for KSP >= 1.12.X
 -	Fixed potential issues with Kerbin/Earth time.  Earth time will now show correctly throughout EAC.
 -	Fixed issue with dismissed Kerbals who were Training still showing up.
