@@ -325,24 +325,6 @@ Check that:
 - the latest `VERSION` block in `Changelog.cfg` has a valid three- or four-part numeric version such as `1.3.1` or `1.3.1.0`,
 - `showChangelog = True` is present.
 
-## Packaging Checklist
-
-A normal EAC release should declare HarmonyKSP/Harmony2 as a required dependency. CKAN metadata should include a `Harmony2` dependency. Manual release notes should tell players to install `GameData/000_Harmony/` before EAC.
-
-The EAC release zip should include at least:
-
-```text
-GameData/000_Harmony/                              # required dependency if bundling HarmonyKSP; otherwise declare/install separately
-GameData/EAC/Changelog.cfg                       # optional Kerbal Changelog release notes
-GameData/EAC/Plugins/EAC.dll
-GameData/EAC/Plugins/EAC_CCBridge.dll            # optional Contract Configurator bridge
-GameData/EAC/Contracts/*.cfg                     # optional final exam contracts
-GameData/EAC/Agencies/*.cfg                      # optional contract agencies
-GameData/EAC/Agencies/*.png                      # optional agency logos
-GameData/EAC/Craft/*.craft                       # optional provided craft
-GameData/EAC/Scenarios/*.cfg                     # optional scenario vessels
-```
-
 ## License
 
 This mod is licensed under a [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License](https://creativecommons.org/licenses/by-nc-nd/4.0/).
