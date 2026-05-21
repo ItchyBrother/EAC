@@ -76,6 +76,10 @@ EAC requires HarmonyKSP/Harmony2. Beyond that required dependency, EAC can integ
 
 Contract Configurator is optional.
 
+####  IMPORTANT: EAC by default has the bridge that it uses with Contract Configurator disabled. You must rename the EAC_CCBridge from:
+
+####  EAC_CCBridge.dll.disabled TO EAC_CCBridge.dll <- This file is located in the Plugins Folder of EAC
+
 When Contract Configurator and the EAC CC bridge are installed, EAC can use Contract Configurator contracts as final exams for training advancement. EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
 
 If Contract Configurator is not installed, EAC should still load without a hard dependency error. Final exam contract mode will simply be unavailable.
