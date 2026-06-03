@@ -50,7 +50,6 @@ This release also fixes several Astronaut Complex tab contamination paths, adds 
 - Added loaded-assembly detection for Earn Your Stripes.
 - If Earn Your Stripes is loaded, EAC defers veteran, suit, and starting crew behavior to Earn Your Stripes.
 - If Earn Your Stripes is not loaded, EAC can provide EAC-native veteran recognition, suit presentation, and starting crew setup.
-- ZIP-only Earn Your Stripes files in `GameData` do not trigger delegation.
 
 ### EAC-native veteran recognition
 
@@ -168,7 +167,6 @@ This release also fixes several Astronaut Complex tab contamination paths, adds 
 4. Earn Your Stripes remains optional. If loaded, EAC delegates overlapping veteran, suit, and starting-crew behavior.
 5. DeepFreeze remains optional. If loaded, EAC excludes frozen time from recovery fatigue.
 6. Suggested Next Crew is advisory-only in EAC 1.4. Stock crew auto-fill is intentionally deferred.
-7. EAC delegates only when another mod's DLL is actually loaded by KSP. ZIP files in `GameData` are ignored for delegation decisions.
 
 ## 2026-0520: EAC v1.3.1 for KSP >= 1.12.x
 
