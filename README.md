@@ -22,7 +22,7 @@ EAC's advantage is integration:
 
 EAC does not try to copy every design choice from Crew R&R or Earn Your Stripes. Instead, it provides built-in EAC-native alternatives for players who prefer one integrated crew-management experience.
 
-Important: EAC only delegates when the other mod's DLL is actually loaded by KSP. A ZIP file sitting in `GameData` does not count as installed.
+Important: EAC only delegates when the other mod's DLL is actually loaded by KSP. 
 
 ## Main Features
 
