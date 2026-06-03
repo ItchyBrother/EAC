@@ -172,13 +172,23 @@ CKAN installs should include the Harmony2 dependency.
 
 ### Contract Configurator
 
-Contract Configurator is optional. When Contract Configurator and the EAC CC bridge are installed, EAC can use Contract Configurator contracts as final exams for training advancement.
+Contract Configurator is optional, but the EAC Contract Configurator bridge has a hard dependency on Contract Configurator. To avoid dependency errors for players who do not use Contract Configurator, the release package ships the bridge disabled as:
 
-EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
+```
 
-If Contract Configurator is not installed, EAC should still load without a hard dependency error. Final exam contract mode will simply be unavailable.
+If you want to use Contract Configurator final exams, install Contract Configurator and then rename the bridge file to:
 
-If final exams are disabled after a Kerbal has already entered the final-exam path, or if Contract Configurator is removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
+```
+
+When Contract Configurator and the enabled EAC CC bridge are both installed, EAC can use Contract Configurator contracts as final exams for training advancement. EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
+
+If Contract Configurator is not installed, leave `EAC_CCBridge.dll.disabled` disabled. Final exam contract mode will be unavailable, and EAC's non-contract training path remains available.
+
+If final exams are disabled after a Kerbal has already entered the final-exam path, or if Contract Configurator/the enabled bridge are later removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
 
 For contract authors, see:
 
@@ -250,7 +260,7 @@ Kerbal Space Program/
       Changelog.cfg
       Plugins/
         EAC.dll
-        EAC_CCBridge.dll
+        EAC_CCBridge.dll.disabled
       Contracts/
       Agencies/
       Craft/
@@ -326,6 +336,8 @@ If manually editing saves, make a backup first.
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
 - Contract Configurator is optional.
 - Final exam contract mode requires Contract Configurator and the EAC CC bridge.
+- The release package ships the bridge as `EAC_CCBridge.dll.disabled`; rename it to `EAC_CCBridge.dll` only when Contract Configurator is installed.
+- Do not enable `EAC_CCBridge.dll` without Contract Configurator installed, because the bridge depends on Contract Configurator.
 - Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
 - EAC delegates to Crew R&R or Earn Your Stripes only when those mods are actually loaded as assemblies.
 
@@ -382,7 +394,7 @@ Use verbose logging only while troubleshooting because it can create more log ou
 Check that:
 
 - Contract Configurator is installed,
-- `EAC_CCBridge.dll` is installed,
+- `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled` has been renamed to `GameData/EAC/Plugins/EAC_CCBridge.dll`,
 - the contract group exists,
 - the contract uses the expected EAC requirement and behaviour blocks,
 - the contract's trait, target level, and exam ID match the pending Kerbal's final exam state.
@@ -399,7 +411,7 @@ Check that:
 
 ### A Kerbal Is Stuck in Training or Final Exam State
 
-Check whether final exam mode was disabled or Contract Configurator was removed after the Kerbal entered the exam path. EAC includes recovery handling for this case, but the save may need to be loaded at the Space Center for EAC to reconcile the state.
+Check whether final exam mode was disabled, Contract Configurator was removed, or `EAC_CCBridge.dll` was disabled after the Kerbal entered the exam path. EAC includes recovery handling for this case, but the save may need to be loaded at the Space Center for EAC to reconcile the state.
 
 ### Crew R&R or Earn Your Stripes Options Are Unavailable
 
@@ -414,13 +426,27 @@ A normal EAC release should include at least:
 ```text
 GameData/EAC/Changelog.cfg
 GameData/EAC/Plugins/EAC.dll
-GameData/EAC/Plugins/EAC_CCBridge.dll
+GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
 GameData/EAC/Contracts/*.cfg
 GameData/EAC/Agencies/*.cfg
 GameData/EAC/Agencies/*.png
 GameData/EAC/Craft/*.craft
 GameData/EAC/Scenarios/*.cfg
 ```
+
+For players using Contract Configurator final exams, rename:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
+```
+
+to:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
+```
+
+Only do this when Contract Configurator is installed.
 
 Do not include development artifacts such as:
 
