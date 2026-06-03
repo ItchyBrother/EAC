@@ -12,7 +12,6 @@ This release also fixes several Astronaut Complex tab contamination paths, adds 
 - EAC now provides built-in recovery leave, veteran recognition, suit presentation, Badass progression, starting crew setup, and Suggested Next Crew behavior when the relevant external specialist mod is not loaded.
 - For players who want fewer overlapping mods, EAC can now handle the major Crew R&R / Earn Your Stripes style functions itself, plus EAC-specific systems such as training, retirement, Astronaut Complex tab management, Hall of History records, DeepFreeze-aware mission-time handling, and advisory crew recommendations.
 - EAC still defers to Crew R&R and Earn Your Stripes when those mods are installed as loaded assemblies.
-- ZIP files sitting in `GameData` do not count as installed for delegation purposes.
 
 ### Astronaut Complex roster fixes
 
