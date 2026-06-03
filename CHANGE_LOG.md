@@ -29,7 +29,6 @@ This release also fixes several Astronaut Complex tab contamination paths, adds 
 - Added loaded-assembly detection for Crew R&R.
 - If Crew R&R is loaded, EAC recovery settings are disabled/delegated and EAC does not apply its own recovery leave.
 - If Crew R&R is not loaded, EAC recovery settings remain available.
-- ZIP-only Crew R&R files in `GameData` do not trigger delegation.
 - Fixed recovery leave not appearing after some recovery paths.
 - Added support for focused-vessel recovery and Space Center / Tracking Station / map-style recovery paths.
 - Added recovery-state rehydration from EAC records if KSP clears stock inactive state during scene changes.
