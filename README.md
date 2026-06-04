@@ -228,6 +228,12 @@ When Earn Your Stripes is installed as a loaded assembly, EAC defers veteran/sui
 
 When FlightTracker is installed, EAC can prefer FlightTracker's flight-history data where appropriate.
 
+Flight Tracker is optional but recommended if you want EAC veteran eligibility or career history displays to use long-term recorded mission hours.
+
+Flight Tracker runs independently of Earn Your Stripes. If Earn Your Stripes is not installed but Flight Tracker remains installed, EAC can still read Flight Tracker’s recorded flight count and mission-hour data.
+
+If Flight Tracker is not installed, EAC can still use its own flight-count records, but total historical mission-hour requirements should be set to 0 unless/until EAC gains its own full mission-hour tracking.
+
 ### DeepFreeze
 
 DeepFreeze is optional.
