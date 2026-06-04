@@ -1,5 +1,16 @@
 # Enhanced Astronaut Complex (EAC) Change Log
 
+## 2026-0604: EAC v1.4.1 for KSP >= 1.12.x
+
+This hotfix addresses GitHub issue #41, where the **EAC Starting Crew Setup** configuration dialog could appear repeatedly in existing saves after entering and exiting buildings or otherwise changing scenes.
+
+### Starting crew setup
+
+- Fixed the **EAC Starting Crew Setup** dialog appearing repeatedly in existing saves after scene changes.
+- Made the starting crew setup session identity stable across scene changes by using save folder, save title, and game seed instead of unstable runtime state.
+- Existing EAC-managed saves with persisted EAC roster records are now treated as already past starting crew setup if they do not yet have the EAC 1.4 setup-complete flag.
+- No save-breaking changes.
+
 ## 2026-0603: EAC v1.4.0 for KSP >= 1.12.x
 
 EAC 1.4.0 is a major stabilization, refactor, and career-management release. Crew R&R and Earn Your Stripes remain optional as they always were, but EAC now includes EAC-native systems that cover their major overlapping use cases while adding broader integrated crew-career management.
