@@ -11,6 +11,94 @@ namespace RosterRotation
 {
     internal static partial class ACPatches
     {
+        private static Type _assignedDurationCachedProtoVesselType;
+        private static MethodInfo _assignedDurationCachedProtoGetVesselCrewMethod;
+        private static FieldInfo _assignedDurationCachedProtoVesselNameField;
+        private static PropertyInfo _assignedDurationCachedProtoVesselNameProp;
+
+        private static readonly Dictionary<Type, PropertyInfo> _textPropertyCache =
+            new Dictionary<Type, PropertyInfo>();
+
+        private static PropertyInfo GetTextProperty(Component c)
+        {
+            if (c == null) return null;
+
+            Type type = c.GetType();
+            PropertyInfo prop;
+            if (_textPropertyCache.TryGetValue(type, out prop))
+                return prop;
+
+            prop = type.GetProperty("text",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            if (prop != null && prop.PropertyType != typeof(string)) prop = null;
+            _textPropertyCache[type] = prop;
+            return prop;
+        }
+
+        private static bool TryGetText(Component c, out string text)
+        {
+            text = null;
+            PropertyInfo prop = GetTextProperty(c);
+            if (prop == null) return false;
+
+            try
+            {
+                text = prop.GetValue(c, null) as string;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TrySetText(Component c, string text)
+        {
+            PropertyInfo prop = GetTextProperty(c);
+            if (prop == null) return false;
+
+            try
+            {
+                prop.SetValue(c, text, null);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static HashSet<string> BuildAllRosterNameSet()
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var roster = HighLogic.CurrentGame?.CrewRoster;
+            if (roster == null) return names;
+
+            int count = 0;
+            try { count = roster.Count; } catch { count = 0; }
+
+            for (int i = 0; i < count; i++)
+            {
+                ProtoCrewMember pcm = null;
+                try { pcm = roster[i]; } catch { }
+                if (pcm != null && !string.IsNullOrEmpty(pcm.name)) names.Add(pcm.name);
+            }
+
+            try
+            {
+                if (roster.Crew != null)
+                {
+                    foreach (var pcm in roster.Crew)
+                    {
+                        if (pcm != null && !string.IsNullOrEmpty(pcm.name)) names.Add(pcm.name);
+                    }
+                }
+            }
+            catch { }
+
+            return names;
+        }
+
         // Attempts to locate any kerbal by name in the current game's CrewRoster.
         // Uses a reflection-based fallback so it works across KSP builds.
         private static ProtoCrewMember FindKerbalByName(string name)
@@ -34,6 +122,41 @@ namespace RosterRotation
             catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:34", "Suppressed exception in AstronautComplexACPatch.Rows.cs:34", ex); }
             return null;
         }
+
+        private static List<ProtoCrewMember> EnumerateAllRosterKerbals()
+        {
+            var result = new List<ProtoCrewMember>();
+            var roster = HighLogic.CurrentGame?.CrewRoster;
+            if (roster == null) return result;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+
+            try
+            {
+                if (roster.Crew != null)
+                {
+                    foreach (var k in roster.Crew)
+                    {
+                        if (k == null || string.IsNullOrEmpty(k.name)) continue;
+                        if (seen.Add(k.name)) result.Add(k);
+                    }
+                }
+            }
+            catch { }
+
+            int count = 0;
+            try { count = roster.Count; } catch { count = 0; }
+            for (int i = 0; i < count; i++)
+            {
+                ProtoCrewMember pcm = null;
+                try { pcm = roster[i]; } catch { }
+                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                if (seen.Add(pcm.name)) result.Add(pcm);
+            }
+
+            return result;
+        }
+
 
         private static int GetRetiredEffectiveStarsSafe(ProtoCrewMember k, RosterRotationState.KerbalRecord r, double nowUT)
         {
@@ -301,17 +424,21 @@ namespace RosterRotation
                 ProtoCrewMember pcm;
                 try { pcm = roster[i]; } catch { continue; }
                 if (pcm == null) continue;
-                if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
-                    pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+                RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
+                bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                if (!frozen &&
+                    (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                     pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing))
                     deadNames.Add(pcm.name);
             }
             if (deadNames.Count == 0) return false;
 
+            var allRosterNames = BuildAllRosterNameSet();
             for (int i = 0; i < list.childCount; i++)
             {
                 Transform row = list.GetChild(i);
                 if (row == null) continue;
-                string name = GetKerbalNameFromRowAllRoster(row.gameObject);
+                string name = GetKerbalNameFromRowAllRoster(row.gameObject, allRosterNames);
                 if (name != null && deadNames.Contains(name)) return true;
             }
             return false;
@@ -323,25 +450,18 @@ namespace RosterRotation
         /// </summary>
         private static string GetKerbalNameFromRowAllRoster(GameObject row)
         {
-            if (row == null || HighLogic.CurrentGame?.CrewRoster == null) return null;
-            // Build lookup once (cheaper than per-component)
-            var roster = HighLogic.CurrentGame.CrewRoster;
-            var names = new System.Collections.Generic.HashSet<string>();
-            for (int i = 0; i < roster.Count; i++)
-            {
-                ProtoCrewMember pcm;
-                try { pcm = roster[i]; } catch { continue; }
-                if (pcm != null) names.Add(pcm.name);
-            }
-            if (names.Count == 0) return null;
+            return GetKerbalNameFromRowAllRoster(row, BuildAllRosterNameSet());
+        }
+
+        private static string GetKerbalNameFromRowAllRoster(GameObject row, HashSet<string> names)
+        {
+            if (row == null || names == null || names.Count == 0) return null;
+
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (!string.IsNullOrEmpty(s) && names.Contains(s)) return s;
             }
             return null;
@@ -353,11 +473,8 @@ namespace RosterRotation
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (string.IsNullOrEmpty(s)) continue;
                 foreach (string n in names) if (s == n) return true;
             }
@@ -408,10 +525,9 @@ namespace RosterRotation
                 string goName   = c.gameObject.name;
                 // Try to get text value
                 string textVal = "";
-                var tp = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (tp != null && tp.PropertyType == typeof(string))
-                    try { textVal = " text='" + tp.GetValue(c, null) + "'"; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:387", "Suppressed exception in AstronautComplexACPatch.Rows.cs:387", ex); }
+                string rowText;
+                if (TryGetText(c, out rowText))
+                    textVal = " text='" + rowText + "'";
                 // Check for onClick
                 bool hasClick = c.GetType().GetProperty("onClick",
                     BindingFlags.Instance | BindingFlags.Public) != null;
@@ -444,14 +560,160 @@ namespace RosterRotation
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (!string.IsNullOrEmpty(s) && names.Contains(s)) return s;
             }
             return null;
+        }
+
+        // Robust row-name resolver for AC filtering.  The stock Available list can
+        // temporarily contain Assigned/Lost/Retired rows, and some of those names are
+        // not present in CrewRoster.Crew.  Check the full roster first, then EAC's
+        // persisted records so retired-only rows are still identified.
+        private static string GetKerbalNameFromRowAny(GameObject row)
+        {
+            return GetKerbalNameFromRowAny(row, BuildAllRosterNameSet());
+        }
+
+        private static string GetKerbalNameFromRowAny(GameObject row, HashSet<string> allRosterNames)
+        {
+            string name = GetKerbalNameFromRowAllRoster(row, allRosterNames) ?? GetKerbalNameFromRow(row);
+            if (!string.IsNullOrEmpty(name)) return name;
+            if (row == null || RosterRotationState.Records == null || RosterRotationState.Records.Count == 0) return null;
+
+            foreach (Component c in row.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                string text;
+                if (!TryGetText(c, out text)) continue;
+                if (string.IsNullOrEmpty(text)) continue;
+
+                foreach (var kvp in RosterRotationState.Records)
+                {
+                    if (!string.IsNullOrEmpty(kvp.Key) && string.Equals(text, kvp.Key, StringComparison.Ordinal))
+                        return kvp.Key;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool IsDeepFreezeUnavailable(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec)
+        {
+            try { return RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive); }
+            catch { return rec != null && rec.DeepFreezeActive; }
+        }
+
+        private static bool IsKerbalAllowedInNativeCrewTab(string kerbalName, int nativeIndex)
+        {
+            if (string.IsNullOrEmpty(kerbalName)) return true;
+            nativeIndex = NormalizeNativeListIndex(nativeIndex);
+
+            RosterRotationState.Records.TryGetValue(kerbalName, out var rec);
+            ProtoCrewMember pcm = FindKerbalByName(kerbalName);
+            bool frozen = IsDeepFreezeUnavailable(pcm, rec);
+            bool recordedDeath = rec != null && rec.DeathUT > 0 && !frozen;
+
+            // Death/Missing belongs only to Lost.  This intentionally takes
+            // precedence over Retired so a retired death never appears in Available.
+            if (recordedDeath)
+                return nativeIndex == 2;
+
+            if (pcm != null)
+            {
+                if (pcm.type == ProtoCrewMember.KerbalType.Applicant)
+                    return false;
+
+                if (!frozen &&
+                    (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                     pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing))
+                    return nativeIndex == 2;
+            }
+
+            // Retired is EAC's synthetic tab and should not be visible in any
+            // stock/native crew tab.
+            if (rec != null && rec.Retired)
+                return false;
+
+            // DeepFreeze/frozen rows are treated as unavailable/assigned for AC
+            // ownership purposes, never Available.
+            if (frozen)
+                return nativeIndex == 1;
+
+            if (pcm == null)
+            {
+                // Unknown rows may be non-crew UI entries. Do not hide what we
+                // cannot confidently classify.
+                return true;
+            }
+
+            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
+                return nativeIndex == 1;
+
+            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Available)
+                return nativeIndex == 0;
+
+            // Conservative fallback: anything that is not explicitly Available,
+            // Assigned, Lost/Dead/Missing, or Retired should not pollute Available.
+            return nativeIndex != 0;
+        }
+
+        public static int EnforceNativeCrewTabOwnership(int nativeIndex, Transform list = null, string reason = null)
+        {
+            int hidden = 0;
+            try
+            {
+                nativeIndex = NormalizeNativeListIndex(nativeIndex);
+                if (list == null)
+                {
+                    if (nativeIndex == 0) list = AvailListTransform;
+                    else if (nativeIndex == 1) list = AssignedListTransform;
+                    else if (nativeIndex == 2) list = LostListTransform;
+                }
+                if (list == null) return 0;
+
+                var allRosterNames = BuildAllRosterNameSet();
+                for (int i = 0; i < list.childCount; i++)
+                {
+                    Transform row = list.GetChild(i);
+                    if (row == null) continue;
+
+                    string kerbalName = GetKerbalNameFromRowAny(row.gameObject, allRosterNames);
+                    if (string.IsNullOrEmpty(kerbalName)) continue;
+
+                    if (!IsKerbalAllowedInNativeCrewTab(kerbalName, nativeIndex))
+                    {
+                        if (row.gameObject.activeSelf) hidden++;
+                        row.gameObject.SetActive(false);
+                    }
+                }
+
+                if (hidden > 0 && RRLog.VerboseEnabled)
+                    RRLog.Verbose("[EAC] AC " + NativeListName(nativeIndex) + " ownership filter"
+                        + (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")")
+                        + ": hid " + hidden + " row(s). list=" + GetTransformPath(list));
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.native.ownership.filter.fail." + nativeIndex, "[EAC] ACPatch: native tab ownership filter failed.", ex);
+            }
+            return hidden;
+        }
+
+        public static void EnforceCurrentNativeCrewTabOwnership(string reason = null)
+        {
+            try
+            {
+                if (RetiredTabShowing) return;
+                int index = NormalizeNativeListIndex(_lastNativeListIndex);
+                Transform list = index == 0 ? AvailListTransform : (index == 1 ? AssignedListTransform : LostListTransform);
+                EnforceNativeCrewTabOwnership(index, list, reason ?? "current-tab");
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.native.ownership.current.fail", "[EAC] ACPatch: current tab ownership filter failed.", ex);
+            }
         }
 
         // Replaces the status text on a kerbal row.
@@ -465,11 +727,7 @@ namespace RosterRotation
             {
                 if (c == null) continue;
                 if (c.gameObject.name != "label") continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                try { p.SetValue(c, newText, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:444", "Suppressed exception in AstronautComplexACPatch.Rows.cs:444", ex); }
-                return;
+                if (TrySetText(c, newText)) return;
             }
 
             // Fallback: pattern-match but skip 'name', 'stats', 'label_courage', 'label_stupidity'
@@ -479,15 +737,12 @@ namespace RosterRotation
                 string goName = c.gameObject.name ?? "";
                 if (goName == "name" || goName == "stats" ||
                     goName.StartsWith("label_", StringComparison.Ordinal)) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (string.IsNullOrEmpty(s)) continue;
                 if (IsStatusText(s))
                 {
-                    try { p.SetValue(c, newText, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:463", "Suppressed exception in AstronautComplexACPatch.Rows.cs:463", ex); }
+                    TrySetText(c, newText);
                     return;
                 }
             }
@@ -500,9 +755,12 @@ namespace RosterRotation
             return s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("In refresher training", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("In training", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("In recovery", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Inactive", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("Final Exam", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("Retired", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("Age ", StringComparison.OrdinalIgnoreCase) >= 0
+                || s.IndexOf("Assigned:", StringComparison.OrdinalIgnoreCase) >= 0
                 // Lost tab / Dead / Missing status strings:
                 || s.IndexOf("K.I.A", StringComparison.OrdinalIgnoreCase) >= 0
                 || s.IndexOf("KIA", StringComparison.OrdinalIgnoreCase) >= 0
@@ -522,18 +780,15 @@ namespace RosterRotation
             foreach (Component c in row.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (string.IsNullOrEmpty(s)) continue;
                 // Only replace if it's the vanilla default or already our age-prefixed default
                 if (s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0
                     || (s.IndexOf("Age ", StringComparison.OrdinalIgnoreCase) >= 0
                         && s.IndexOf("Available for next mission", StringComparison.OrdinalIgnoreCase) >= 0))
                 {
-                    try { p.SetValue(c, newText, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:508", "Suppressed exception in AstronautComplexACPatch.Rows.cs:508", ex); }
+                    TrySetText(c, newText);
                     return;
                 }
             }
@@ -549,19 +804,13 @@ namespace RosterRotation
                 foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                     if (ch.name == goName) { t = ch; break; }
             }
-            if (t == null) { RRLog.Warn("[RosterRotation] ACPatch: SetTextOnGO — GO '" + goName + "' not found."); return; }
+            if (t == null) { RRLog.WarnOnce("ac.settext.missinggo." + goName, "[RosterRotation] ACPatch: SetTextOnGO — GO '" + goName + "' not found."); return; }
             foreach (Component c in t.GetComponents<Component>())
             {
                 if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p != null && p.PropertyType == typeof(string))
-                {
-                    try { p.SetValue(c, text, null); return; }
-                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:533", "Suppressed exception in AstronautComplexACPatch.Rows.cs:533", ex); }
-                }
+                if (TrySetText(c, text)) return;
             }
-            RRLog.Warn("[RosterRotation] ACPatch: SetTextOnGO — no text component on '" + goName + "'");
+            RRLog.WarnOnce("ac.settext.notext." + goName, "[RosterRotation] ACPatch: SetTextOnGO — no text component on '" + goName + "'");
         }
 
         private static void SetStarsState(GameObject row, int stars)
@@ -783,7 +1032,7 @@ namespace RosterRotation
                 Transform btnT = null;
                 foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                     if (ch.name == "Button") { btnT = ch; break; }
-                if (btnT == null) { RRLog.Warn("[RosterRotation] WireRecallButton — 'Button' GO not found for " + kerbal.name); return; }
+                if (btnT == null) { RRLog.WarnOnce("ac.recall.button.missing." + kerbal.name, "[RosterRotation] WireRecallButton — 'Button' GO not found for " + kerbal.name); return; }
 
                 bool canRecall = effStars > 0;
 
@@ -871,7 +1120,7 @@ namespace RosterRotation
                             }
 
                             if (!spriteSet)
-                                RRLog.Warn("[RosterRotation] ACPatch: could not set Button sprite for " + kerbal.name + " — check ButtonState DUMP above for field names.");
+                                RRLog.WarnOnce("ac.recall.buttonsprite." + kerbal.name, "[RosterRotation] ACPatch: could not set Button sprite for " + kerbal.name + " — check ButtonState DUMP above for field names.");
                         }
                     }
                 }
@@ -991,7 +1240,7 @@ namespace RosterRotation
                                     }
                                 }
                                 if (!tipSet)
-                                    RRLog.Warn("[RosterRotation] ACPatch: tooltip[" + si + "] — could not find text field (known: tooltipText, text, tip, message, content, label)");
+                                    RRLog.WarnOnce("ac.recall.tooltip.textfield." + si, "[RosterRotation] ACPatch: tooltip[" + si + "] — could not find text field (known: tooltipText, text, tip, message, content, label)");
                             }
                             try { tsF.SetValue(tooltip, arr); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:968", "Suppressed exception in AstronautComplexACPatch.Rows.cs:968", ex); }
                         }
@@ -1108,9 +1357,12 @@ namespace RosterRotation
                         {
                             if (pcm == null) continue;
                             if (pcm.type == ProtoCrewMember.KerbalType.Applicant) { applicantSkipped++; continue; }
-                            if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
-                                pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) { deadSkipped++; continue; }
-                            if (RosterRotationState.Records.TryGetValue(pcm.name, out var pr) && pr != null && pr.Retired) { retiredSkipped++; continue; }
+                            RosterRotationState.Records.TryGetValue(pcm.name, out var pr);
+                            bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (pr != null && pr.DeepFreezeActive);
+                            if (!frozen &&
+                                (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                                 pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)) { deadSkipped++; continue; }
+                            if (pr != null && pr.Retired) { retiredSkipped++; continue; }
                             active++;
                         }
                     int maxCrew = ACPatches.GetCachedMaxCrew();
@@ -1232,7 +1484,17 @@ namespace RosterRotation
             string timeLeft = untilUT > nowUT ? FormatCountdownStatic(untilUT - nowUT) : "";
 
             string label = "Unavailable";
-            if (rec != null)
+            if (pcm != null && (RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive)))
+            {
+                if (RosterRotationKSCUI.TryGetDeepFreezeVesselName(pcm.name, out var frozenVessel))
+                    label = "Frozen: " + frozenVessel;
+                else if (rec != null && !string.IsNullOrEmpty(rec.DeepFreezeLastKnownVesselName))
+                    label = "Frozen: " + rec.DeepFreezeLastKnownVesselName;
+                else
+                    label = "Frozen";
+                timeLeft = "";
+            }
+            else if (rec != null)
             {
                 if (rec.Training == TrainingType.InitialHire)
                     label = "In introductory training";
@@ -1387,11 +1649,12 @@ namespace RosterRotation
             if (roster == null) return;
 
             var visibleNames = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+            var allRosterNames = BuildAllRosterNameSet();
             for (int i = 0; i < availList.childCount; i++)
             {
                 var row = availList.GetChild(i);
                 if (row == null) continue;
-                var name = GetKerbalNameFromRow(row.gameObject);
+                var name = GetKerbalNameFromRowAny(row.gameObject, allRosterNames);
                 if (!string.IsNullOrEmpty(name)) visibleNames.Add(name);
             }
 
@@ -1407,9 +1670,11 @@ namespace RosterRotation
 
                 RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
                 if (rec != null && rec.Retired) continue;
-                if (rec != null && rec.DeathUT > 0) continue;
+                bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                if (rec != null && rec.DeathUT > 0 && !frozen) continue;
 
                 bool shouldShow = false;
+                if (frozen) continue; // frozen Kerbals belong in Assigned, not Available
                 if (rec != null && rec.RestUntilUT > nowUT) shouldShow = true;
                 if (pcm.inactive && pcm.inactiveTimeEnd > nowUT) shouldShow = true;
                 if (rec != null && (rec.Training == TrainingType.InitialHire || rec.Training == TrainingType.ExperienceUpgrade || rec.Training == TrainingType.RecallRefresher) && pcm.inactive && pcm.inactiveTimeEnd > nowUT)
@@ -1439,20 +1704,279 @@ namespace RosterRotation
             }
         }
 
+        private static void InjectFrozenAssignedRows(Transform assignedList, Transform templateList, float rowH)
+        {
+            if (assignedList == null) return;
+
+            // Remove old synthetic frozen rows before rebuilding.
+            for (int i = assignedList.childCount - 1; i >= 0; i--)
+            {
+                var ch = assignedList.GetChild(i);
+                if (ch != null && ch.name != null && ch.name.StartsWith("EAC_FrozenAssigned_", StringComparison.Ordinal))
+                    UnityEngine.Object.DestroyImmediate(ch.gameObject);
+            }
+
+            var visibleNames = new HashSet<string>(StringComparer.Ordinal);
+            var allRosterNames = BuildAllRosterNameSet();
+            for (int i = 0; i < assignedList.childCount; i++)
+            {
+                var row = assignedList.GetChild(i);
+                if (row == null) continue;
+                var name = GetKerbalNameFromRowAllRoster(row.gameObject, allRosterNames) ?? GetKerbalNameFromRow(row.gameObject);
+                if (!string.IsNullOrEmpty(name)) visibleNames.Add(name);
+            }
+
+            Transform template = FindAnyCrewRowTemplate(assignedList);
+            if (template == null && templateList != null)
+                template = FindAnyCrewRowTemplate(templateList);
+            if (template == null) return;
+
+            double nowUT = Planetarium.GetUniversalTime();
+            int injected = 0;
+
+            // DeepFreeze removes frozen Kerbals from the normal Crew collection and
+            // stores them in its own FrozenKerbals dictionary.  Enumerate that small
+            // dictionary directly instead of scanning the entire KSP roster every
+            // time the Astronaut Complex rows refresh.
+            RosterRotation.DeepFreeze.EACDeepFreezeBridge.Update();
+            foreach (var frozenInfo in RosterRotation.DeepFreeze.EACDeepFreezeBridge.FrozenKerbals.Values)
+            {
+                if (frozenInfo == null || string.IsNullOrEmpty(frozenInfo.Name)) continue;
+                string kerbalName = frozenInfo.Name;
+                if (visibleNames.Contains(kerbalName)) continue;
+
+                ProtoCrewMember pcm = FindKerbalByName(kerbalName);
+                if (pcm != null && pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
+
+                RosterRotationState.Records.TryGetValue(kerbalName, out var rec);
+                if (rec != null && rec.Retired) continue;
+
+                GameObject clone = UnityEngine.Object.Instantiate(template.gameObject, assignedList);
+                clone.name = "EAC_FrozenAssigned_" + kerbalName;
+                clone.SetActive(true);
+
+                bool rebound = pcm != null && RebindSyntheticCrewRow(clone, pcm);
+                if (!rebound)
+                    DisableSyntheticRowTooltips(clone);
+
+                SetTextOnGO(clone, "name", kerbalName);
+                if (pcm != null)
+                {
+                    SetTextOnGO(clone, "stats", GetCrewRoleText(pcm));
+                    ApplyCrewVitalsToRow(clone, pcm);
+                    ReplaceStatusText(clone, BuildUnavailableStatusText(pcm, rec, nowUT));
+                    SetStarsState(clone, (int)pcm.experienceLevel);
+                }
+                else
+                {
+                    SetTextOnGO(clone, "stats", frozenInfo.ExperienceTraitName ?? string.Empty);
+                    string vesselName = !string.IsNullOrEmpty(frozenInfo.VesselName)
+                        ? frozenInfo.VesselName
+                        : (rec != null ? rec.DeepFreezeLastKnownVesselName : string.Empty);
+                    ReplaceStatusText(clone, string.IsNullOrEmpty(vesselName) ? "Frozen" : "Frozen: " + vesselName);
+                    SetStarsState(clone, 0);
+                }
+
+                var cloneRT = clone.GetComponent<RectTransform>();
+                if (cloneRT != null && rowH > 1f)
+                    cloneRT.sizeDelta = new Vector2(cloneRT.sizeDelta.x, rowH);
+
+                visibleNames.Add(kerbalName);
+                injected++;
+            }
+
+            if (injected > 0)
+                RRLog.Verbose("[EAC] ACPatch: injected " + injected + " DeepFreeze frozen row(s) into Assigned list from DeepFreeze cache.");
+        }
+
+        private static void PatchAssignedListStatusText()
+        {
+            if (AssignedListTransform == null) return;
+
+            double nowUT = Planetarium.GetUniversalTime();
+            var allRosterNames = BuildAllRosterNameSet();
+            for (int i = 0; i < AssignedListTransform.childCount; i++)
+            {
+                Transform row = AssignedListTransform.GetChild(i);
+                if (row == null) continue;
+
+                string kerbalName = GetKerbalNameFromRowAllRoster(row.gameObject, allRosterNames) ?? GetKerbalNameFromRow(row.gameObject);
+                if (string.IsNullOrEmpty(kerbalName)) continue;
+
+                ProtoCrewMember pcm = FindKerbalByName(kerbalName);
+                if (pcm == null) continue;
+
+                RosterRotationState.Records.TryGetValue(kerbalName, out var rec);
+                bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                if (frozen)
+                {
+                    ReplaceStatusText(row.gameObject, BuildUnavailableStatusText(pcm, rec, nowUT));
+                    SetStarsState(row.gameObject, (int)pcm.experienceLevel);
+                    continue;
+                }
+
+                if (pcm.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) continue;
+
+                if (MissionTimeTracker.SyncKerbal(pcm, nowUT, resetWhenNotAssigned: false))
+                {
+                    SaveScheduler.RequestSave("assigned tab mission tracking sync");
+                    RosterRotationState.Records.TryGetValue(kerbalName, out rec);
+                }
+
+                ReplaceStatusText(row.gameObject, BuildAssignedStatusText(pcm, rec, nowUT));
+                SetStarsState(row.gameObject, (int)pcm.experienceLevel);
+            }
+        }
+
+        private static string BuildAssignedStatusText(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT)
+        {
+            string duration = "just assigned";
+            if (rec != null && rec.MissionStartUT > 0 && rec.MissionStartUT <= nowUT)
+                duration = FormatAssignmentDurationStatic(nowUT - rec.MissionStartUT);
+
+            if (TryGetAssignedVesselNameForAc(pcm, out var vesselName))
+                return "Assigned: " + vesselName + " - " + duration;
+
+            return "Assigned: " + duration;
+        }
+
+        private static string FormatAssignmentDurationStatic(double seconds)
+        {
+            if (seconds <= 0) return "0m";
+
+            double daySec = RosterRotationState.DaySeconds;
+            if (daySec <= 0) daySec = KspTimeMath.KerbinSecondsPerDay;
+
+            int totalDays = Math.Max(0, (int)Math.Floor(seconds / daySec));
+            int hours = Math.Max(0, (int)Math.Floor((seconds % daySec) / 3600.0));
+            int minutes = Math.Max(0, (int)Math.Floor((seconds % 3600.0) / 60.0));
+
+            int displayDaysPerYear = RosterRotationState.UseKerbinDays
+                ? (int)KspTimeMath.KerbinDisplayDaysPerYear
+                : (int)KspTimeMath.EarthDisplayDaysPerYear;
+
+            if (displayDaysPerYear > 0 && totalDays >= displayDaysPerYear)
+            {
+                int years = totalDays / displayDaysPerYear;
+                int days = totalDays % displayDaysPerYear;
+                return years + "y " + days + "d " + hours + "h";
+            }
+
+            if (totalDays > 0) return totalDays + "d " + hours + "h";
+            if (hours > 0) return hours + "h " + minutes + "m";
+            return minutes + "m";
+        }
+
+        private static bool TryGetAssignedVesselNameForAc(ProtoCrewMember k, out string vesselName)
+        {
+            vesselName = null;
+            if (k == null || string.IsNullOrEmpty(k.name)) return false;
+
+            try
+            {
+                var vessels = FlightGlobals.Vessels;
+                if (vessels != null)
+                {
+                    foreach (var vessel in vessels)
+                    {
+                        if (vessel == null) continue;
+                        try
+                        {
+                            var crew = vessel.GetVesselCrew();
+                            if (crew == null) continue;
+
+                            bool found = false;
+                            foreach (var crewMember in crew)
+                            {
+                                if (crewMember != null && string.Equals(crewMember.name, k.name, StringComparison.Ordinal))
+                                {
+                                    found = true;
+                                    break;
+                                }
+                            }
+
+                            if (!found) continue;
+                            vesselName = vessel.vesselName;
+                            return !string.IsNullOrEmpty(vesselName);
+                        }
+                        catch (Exception ex) { RRLog.VerboseExceptionOnce("ACPatch.AssignedDuration.Live:" + vessel.id, "Suppressed", ex); }
+                    }
+                }
+            }
+            catch (Exception ex) { RRLog.VerboseExceptionOnce("ACPatch.AssignedDuration.LiveOuter", "Suppressed", ex); }
+
+            try
+            {
+                var protoVessels = HighLogic.CurrentGame?.flightState?.protoVessels as IEnumerable;
+                if (protoVessels == null) return false;
+
+                const BindingFlags bf = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                foreach (var pv in protoVessels)
+                {
+                    if (pv == null) continue;
+                    try
+                    {
+                        var pvType = pv.GetType();
+                        if (!ReferenceEquals(pvType, _assignedDurationCachedProtoVesselType))
+                        {
+                            _assignedDurationCachedProtoVesselType = pvType;
+                            _assignedDurationCachedProtoGetVesselCrewMethod = pvType.GetMethod("GetVesselCrew", bf);
+                            _assignedDurationCachedProtoVesselNameField = pvType.GetField("vesselName", bf);
+                            _assignedDurationCachedProtoVesselNameProp = pvType.GetProperty("vesselName", bf);
+                        }
+
+                        var crewRaw = _assignedDurationCachedProtoGetVesselCrewMethod?.Invoke(pv, null) as IEnumerable;
+                        if (crewRaw == null) continue;
+
+                        bool found = false;
+                        foreach (var crewObj in crewRaw)
+                        {
+                            var crew = crewObj as ProtoCrewMember;
+                            if (crew == null) continue;
+                            if (!string.Equals(crew.name, k.name, StringComparison.Ordinal)) continue;
+                            found = true;
+                            break;
+                        }
+                        if (!found) continue;
+
+                        vesselName = _assignedDurationCachedProtoVesselNameField?.GetValue(pv) as string;
+                        if (string.IsNullOrEmpty(vesselName))
+                            vesselName = _assignedDurationCachedProtoVesselNameProp?.GetValue(pv, null) as string;
+
+                        return !string.IsNullOrEmpty(vesselName);
+                    }
+                    catch (Exception ex) { RRLog.VerboseExceptionOnce("ACPatch.AssignedDuration.Proto", "Suppressed", ex); }
+                }
+            }
+            catch (Exception ex) { RRLog.VerboseExceptionOnce("ACPatch.AssignedDuration.ProtoOuter", "Suppressed", ex); }
+
+            return false;
+        }
+
         public static void PatchAvailableListStatusText()
         {
             if (AvailListTransform == null) return;
             double nowUT = Planetarium.GetUniversalTime();
+            var allRosterNames = BuildAllRosterNameSet();
             for (int i = 0; i < AvailListTransform.childCount; i++)
             {
                 Transform row = AvailListTransform.GetChild(i);
                 if (row == null) continue;
-                string kerbalName = GetKerbalNameFromRow(row.gameObject);
+                string kerbalName = GetKerbalNameFromRowAny(row.gameObject, allRosterNames);
                 if (kerbalName == null) continue;
-                ProtoCrewMember pcm = null;
-                if (HighLogic.CurrentGame?.CrewRoster != null)
-                    foreach (var k in HighLogic.CurrentGame.CrewRoster.Crew)
-                        if (k != null && k.name == kerbalName) { pcm = k; break; }
+
+                // Hard ownership rule for the Available tab.  Available may only
+                // show non-applicant Kerbals whose real state is Available and who
+                // are not Assigned, Lost/Dead/Missing, DeepFrozen, or EAC-Retired.
+                bool belongsInAvailable = IsKerbalAllowedInNativeCrewTab(kerbalName, 0);
+                if (!belongsInAvailable)
+                {
+                    if (_lastNativeListIndex == 0 && !RetiredTabShowing)
+                        row.gameObject.SetActive(false);
+                    continue;
+                }
+
+                ProtoCrewMember pcm = FindKerbalByName(kerbalName);
                 if (pcm == null) continue;
 
                 // Keep the visible Astronaut Complex star widget in sync after EAC/CC
@@ -1468,6 +1992,13 @@ namespace RosterRotation
                     && recAge.LastAgedYears >= 0)
                 {
                     agePrefix = "Age " + RosterRotationState.GetKerbalAge(recAge, nowUT) + "  ";
+                }
+
+                if (RosterRotationState.Records.TryGetValue(kerbalName, out var recFrozen) &&
+                    (RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || recFrozen.DeepFreezeActive))
+                {
+                    ReplaceStatusText(row.gameObject, BuildUnavailableStatusText(pcm, recFrozen, nowUT));
+                    continue;
                 }
 
                 if (RosterRotationState.Records.TryGetValue(kerbalName, out var recExam))
@@ -1487,27 +2018,27 @@ namespace RosterRotation
                     }
                 }
 
-                if (pcm.inactive && pcm.inactiveTimeEnd > nowUT)
-                {
-                    string timeLeft = FormatCountdownStatic(pcm.inactiveTimeEnd - nowUT);
+                RosterRotationState.KerbalRecord recStatus;
+                RosterRotationState.Records.TryGetValue(kerbalName, out recStatus);
+                double unavailableUntil = 0;
+                if (recStatus != null && recStatus.RestUntilUT > nowUT) unavailableUntil = Math.Max(unavailableUntil, recStatus.RestUntilUT);
+                if (pcm.inactive && pcm.inactiveTimeEnd > nowUT) unavailableUntil = Math.Max(unavailableUntil, pcm.inactiveTimeEnd);
 
-                    string label = "In refresher training"; // fallback / RecallRefresher
-                    if (RosterRotationState.Records.TryGetValue(kerbalName, out var rec))
+                if (unavailableUntil > nowUT)
+                {
+                    string timeLeft = FormatCountdownStatic(unavailableUntil - nowUT);
+
+                    string label = "Inactive";
+                    if (recStatus != null)
                     {
-                        if (rec.Training == TrainingType.InitialHire)
+                        if (recStatus.Training == TrainingType.InitialHire)
                             label = "In introductory training";
-                        else if (rec.Training == TrainingType.ExperienceUpgrade)
-                            label = "In Level " + rec.TrainingTargetLevel + " training";
-                        else if (rec.Training == TrainingType.RecallRefresher)
+                        else if (recStatus.Training == TrainingType.ExperienceUpgrade)
+                            label = "In Level " + recStatus.TrainingTargetLevel + " training";
+                        else if (recStatus.Training == TrainingType.RecallRefresher)
                             label = "In refresher training";
-                        else if (rec.RestUntilUT > nowUT)
+                        else if (recStatus.RestUntilUT > nowUT)
                             label = "In recovery";
-                        else
-                            label = "Inactive";
-                    }
-                    else
-                    {
-                        label = "Inactive";
                     }
 
                     ReplaceStatusText(row.gameObject, agePrefix + label + " " + timeLeft);
@@ -1548,6 +2079,23 @@ namespace RosterRotation
             foreach (var kvp in RosterRotationState.Records)
             {
                 if (kvp.Value == null || kvp.Value.DeathUT <= 0) continue;
+                ProtoCrewMember pcm = null;
+                try
+                {
+                    if (HighLogic.CurrentGame?.CrewRoster != null)
+                    {
+                        foreach (var k in HighLogic.CurrentGame.CrewRoster.Crew)
+                        {
+                            if (k != null && string.Equals(k.name, kvp.Key, StringComparison.Ordinal))
+                            {
+                                pcm = k;
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+                if (pcm != null && (RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || kvp.Value.DeepFreezeActive)) continue;
                 deadKerbals[kvp.Key] = kvp.Value;
             }
 
@@ -1564,12 +2112,8 @@ namespace RosterRotation
             foreach (Component c in allComponents)
             {
                 if (c == null) continue;
-                var textProp = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (textProp == null || textProp.PropertyType != typeof(string)) continue;
-
-                string textVal = null;
-                try { textVal = textProp.GetValue(c, null) as string; } catch { continue; }
+                string textVal;
+                if (!TryGetText(c, out textVal)) continue;
                 if (string.IsNullOrEmpty(textVal)) continue;
 
                 // Is this text a dead kerbal's name?
@@ -1613,7 +2157,7 @@ namespace RosterRotation
                 if (replaced)
                     patched++;
                 else
-                    RRLog.Warn("[RosterRotation] ACPatch LostTab: could not replace status for '" + kerbalName + "'");
+                    RRLog.WarnOnce("ac.losttab.replacestatus." + kerbalName, "[RosterRotation] ACPatch LostTab: could not replace status for '" + kerbalName + "'");
             }
 
         }
@@ -1655,22 +2199,13 @@ namespace RosterRotation
                 if (c == null) continue;
                 if (c.gameObject.name != "label") continue;
 
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
 
                 // Skip if already replaced
                 if (s == newText) return true;
 
-                try
-                {
-                    p.SetValue(c, newText, null);
-                    return true;
-                }
-                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1598", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1598", ex); }
+                if (TrySetText(c, newText)) return true;
             }
 
             // Fallback: try any text component that matches a known status pattern
@@ -1683,22 +2218,13 @@ namespace RosterRotation
                     goName == "label_courage" || goName == "label_stupidity")
                     continue;
 
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
+                string s;
+                if (!TryGetText(c, out s)) continue;
                 if (string.IsNullOrEmpty(s)) continue;
                 if (s == kerbalName || s == newText) continue;
                 if (!IsStatusText(s)) continue;
 
-                try
-                {
-                    p.SetValue(c, newText, null);
-                    return true;
-                }
-                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1626", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1626", ex); }
+                if (TrySetText(c, newText)) return true;
             }
 
             return false;

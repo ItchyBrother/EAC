@@ -34,6 +34,18 @@ namespace RosterRotation
         // ── One-time sync flag ─────────────────────────────────────────────────
         private bool _flightTrackerSyncExecutedThisSession;
 
+        // ── Short-lived cache for GUI/aging roster draws ───────────────────────
+        private const float FlightTrackerFlightsCacheSeconds = 2.0f;
+        private sealed class FlightTrackerFlightsCacheEntry
+        {
+            public bool Available;
+            public int Flights;
+            public string Reason;
+            public float Realtime;
+        }
+        private static readonly Dictionary<string, FlightTrackerFlightsCacheEntry> _flightTrackerFlightsCache =
+            new Dictionary<string, FlightTrackerFlightsCacheEntry>(StringComparer.OrdinalIgnoreCase);
+
         // ── API discovery ──────────────────────────────────────────────────────
 
         private static MethodInfo GetFlightTrackerFlightsMethod()
@@ -177,11 +189,23 @@ namespace RosterRotation
             catch (Exception ex) { reason = ex.GetType().Name + ": " + ex.Message; return false; }
         }
 
-        private static bool TryGetFlightTrackerFlights(string kerbalName, out int flights, out string reason)
+        private static bool TryGetFlightTrackerFlights(string kerbalName, out int flights, out string reason, bool bypassCache = false)
         {
             flights = 0;
             reason  = null;
             if (string.IsNullOrEmpty(kerbalName)) { reason = "kerbal name missing"; return false; }
+
+            if (!bypassCache)
+            {
+                FlightTrackerFlightsCacheEntry cached;
+                if (_flightTrackerFlightsCache.TryGetValue(kerbalName, out cached)
+                    && Time.realtimeSinceStartup - cached.Realtime < FlightTrackerFlightsCacheSeconds)
+                {
+                    flights = cached.Flights;
+                    reason  = cached.Reason;
+                    return cached.Available;
+                }
+            }
 
             try
             {
@@ -198,14 +222,26 @@ namespace RosterRotation
                         else
                         {
                             object raw = api.Invoke(target, new object[] { kerbalName });
-                            if (raw != null) { flights = Math.Max(0, Convert.ToInt32(raw)); reason = "api"; return true; }
+                            if (raw != null)
+                            {
+                                flights = Math.Max(0, Convert.ToInt32(raw));
+                                reason = "api";
+                                CacheFlightTrackerFlights(kerbalName, true, flights, reason);
+                                return true;
+                            }
                             reason = "FlightTracker API returned null";
                         }
                     }
                     else
                     {
                         object raw = api.Invoke(null, new object[] { kerbalName });
-                        if (raw != null) { flights = Math.Max(0, Convert.ToInt32(raw)); reason = "api"; return true; }
+                        if (raw != null)
+                        {
+                            flights = Math.Max(0, Convert.ToInt32(raw));
+                            reason = "api";
+                            CacheFlightTrackerFlights(kerbalName, true, flights, reason);
+                            return true;
+                        }
                         reason = "FlightTracker API returned null";
                     }
                 }
@@ -225,6 +261,7 @@ namespace RosterRotation
                     object raw = dict.Contains(kerbalName) ? dict[kerbalName] : 0;
                     flights = Math.Max(0, Convert.ToInt32(raw));
                     reason  = "store";
+                    CacheFlightTrackerFlights(kerbalName, true, flights, reason);
                     return true;
                 }
                 catch (Exception ex) { reason = ex.GetType().Name + ": " + ex.Message; return false; }
@@ -232,7 +269,25 @@ namespace RosterRotation
 
             if (!string.IsNullOrEmpty(dictReason))
                 reason = string.IsNullOrEmpty(reason) ? dictReason : (reason + "; " + dictReason);
+            CacheFlightTrackerFlights(kerbalName, false, 0, reason);
             return false;
+        }
+
+        internal static bool TryGetFlightTrackerRecordedFlights(string kerbalName, out int flights, out string reason)
+        {
+            return TryGetFlightTrackerFlights(kerbalName, out flights, out reason);
+        }
+
+        private static void CacheFlightTrackerFlights(string kerbalName, bool available, int flights, string reason)
+        {
+            if (string.IsNullOrEmpty(kerbalName)) return;
+            _flightTrackerFlightsCache[kerbalName] = new FlightTrackerFlightsCacheEntry
+            {
+                Available = available,
+                Flights   = Math.Max(0, flights),
+                Reason    = reason,
+                Realtime  = Time.realtimeSinceStartup
+            };
         }
 
         private static bool TrySetFlightTrackerFlights(string kerbalName, int newValue, out int previousValue, out string reason)
@@ -246,6 +301,7 @@ namespace RosterRotation
             {
                 previousValue = dict.Contains(kerbalName) ? Math.Max(0, Convert.ToInt32(dict[kerbalName])) : 0;
                 dict[kerbalName] = Math.Max(0, newValue);
+                CacheFlightTrackerFlights(kerbalName, true, newValue, "store");
                 return true;
             }
             catch (Exception ex) { reason = ex.GetType().Name + ": " + ex.Message; return false; }
@@ -309,7 +365,7 @@ namespace RosterRotation
 
                     int    eacFlights = Math.Max(0, rec.Flights);
                     int    ftFlights; string ftReason;
-                    bool   ftAvailable = TryGetFlightTrackerFlights(kerbalName, out ftFlights, out ftReason);
+                    bool   ftAvailable = TryGetFlightTrackerFlights(kerbalName, out ftFlights, out ftReason, bypassCache: true);
                     compared++;
 
                     if (!ftAvailable)

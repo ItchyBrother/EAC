@@ -54,6 +54,12 @@ namespace RosterRotation
                     if (pcm == null) continue;
                     if (pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
 
+                    if (RosterRotationKSCUI.IsDeepFreezeFrozen(pcm))
+                    {
+                        ShowBlocked($"Unable to launch: {pcm.name} is frozen.");
+                        return false;
+                    }
+
                     if (RosterRotationState.Records.TryGetValue(pcm.name, out var rec) && rec.Retired)
                     {
                         ShowBlocked($"Unable to launch: {pcm.name} is retired.");

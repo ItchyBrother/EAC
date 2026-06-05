@@ -166,6 +166,7 @@ namespace RosterRotation
         public static float LastRetiredRowH = 54f;           // most recently measured single-row height, for post-show repositioning
 
         public static Transform AvailListTransform = null;
+        public static Transform AssignedListTransform = null;
         public static Transform ApplicantsListTransform = null;
         public static Transform LostListTransform  = null;
         private static object _cachedACInstance = null;  // for forced refresh
@@ -177,11 +178,311 @@ namespace RosterRotation
         private static bool _warnedNoHireButtons;
         private static bool _warnedMaxCrewUnknown;
         private static bool _populatingRetiredList = false; // re-entrancy guard for clone block
+        private static int _lastNativeListIndex = 0; // KSP native crew tabs: Available=0, Assigned=1, Lost=2
+        private static int _forceRefreshTraceId = 0;
 
         public static void RegisterProxy(RetiredTabClickProxy proxy)
         {
             _retiredProxy = proxy;
         }
+
+
+        // A UIListToggleController may contain only the three native lists while
+        // Astronaut Complex setup is still in progress. Do not assume that the
+        // last entry is EAC's Retired list; before Retired is registered, the
+        // last native entry is Lost.
+        private static bool IsRetiredUIList(object uiList)
+        {
+            try
+            {
+                if (uiList == null || RetiredListTransform == null) return false;
+                var comp = uiList as Component;
+                if (comp == null || comp.transform == null) return false;
+
+                Transform tr = comp.transform;
+                if (tr == RetiredListTransform
+                    || tr.IsChildOf(RetiredListTransform)
+                    || RetiredListTransform.IsChildOf(tr))
+                    return true;
+
+                // In KSP's UIListToggleController, the UIList component often
+                // lives on the tab button and points at the actual scroll list
+                // through customListAnchor. Compare that target as well.
+                Transform content = FindUIListContent(uiList);
+                Transform root = ScrollListRoot(content);
+                return root != null && root == RetiredListTransform;
+            }
+            catch { return false; }
+        }
+
+        private static Transform ScrollListRoot(Transform t)
+        {
+            if (t == null) return null;
+            Transform cur = t;
+            while (cur != null)
+            {
+                string nm = cur.name ?? string.Empty;
+                if (nm.StartsWith("scrollList_", StringComparison.OrdinalIgnoreCase))
+                    return cur;
+                cur = cur.parent;
+            }
+            return t;
+        }
+
+        private static bool IsNativeCrewScrollList(Transform ch)
+        {
+            if (ch == null || ch.name == null) return false;
+            if (!ch.name.StartsWith("scrollList_", StringComparison.OrdinalIgnoreCase)) return false;
+            if (RetiredListTransform != null && ch == RetiredListTransform) return false;
+            if (string.Equals(ch.name, "scrollList_retired", StringComparison.OrdinalIgnoreCase)) return false;
+            if (ch.name.IndexOf("Applicant", StringComparison.OrdinalIgnoreCase) >= 0) return false;
+            return true;
+        }
+
+        private static Transform FindNativeScrollListByIndex(int index, Transform vesselScrollRect)
+        {
+            try
+            {
+                if (index == 0 && AvailListTransform != null) return ScrollListRoot(AvailListTransform);
+                if (index == 1 && AssignedListTransform != null) return ScrollListRoot(AssignedListTransform);
+                if (index == 2 && LostListTransform != null) return ScrollListRoot(LostListTransform);
+
+                if (vesselScrollRect == null)
+                {
+                    Transform known = AvailListTransform ?? AssignedListTransform ?? LostListTransform ?? RetiredListTransform;
+                    if (known != null) vesselScrollRect = ScrollListRoot(known)?.parent;
+                }
+                if (vesselScrollRect == null) return null;
+
+                if (index == 0)
+                {
+                    Transform avail = vesselScrollRect.Find("scrollList_Available");
+                    if (avail != null) return avail;
+                }
+
+                if (index == 2)
+                {
+                    Transform namedLost = vesselScrollRect.Find("scrollList_lost") ?? vesselScrollRect.Find("scrollList_Lost");
+                    if (namedLost != null) return namedLost;
+
+                    for (int i = 0; i < vesselScrollRect.childCount; i++)
+                    {
+                        Transform ch = vesselScrollRect.GetChild(i);
+                        if (!IsNativeCrewScrollList(ch)) continue;
+                        if (HasDeadKerbalRow(ch)) return ch;
+                    }
+                }
+
+                // Last-resort order fallback. KSP's native crew tabs are Available,
+                // Assigned, Lost. Ignore applicants and EAC's Retired list.
+                int seen = 0;
+                for (int i = 0; i < vesselScrollRect.childCount; i++)
+                {
+                    Transform ch = vesselScrollRect.GetChild(i);
+                    if (!IsNativeCrewScrollList(ch)) continue;
+                    if (seen == index) return ch;
+                    seen++;
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.tabs.findnative.fail." + index, "[EAC] ACPatch: FindNativeScrollListByIndex failed.", ex);
+            }
+            return null;
+        }
+
+        public static void ShowOnlyNativeScrollList(int index, Transform vesselScrollRect = null)
+        {
+            try
+            {
+                index = NormalizeNativeListIndex(index);
+                _lastNativeListIndex = index;
+
+                Transform selected = FindNativeScrollListByIndex(index, vesselScrollRect);
+
+                if (vesselScrollRect == null)
+                {
+                    Transform known = selected ?? AvailListTransform ?? AssignedListTransform ?? LostListTransform ?? RetiredListTransform;
+                    if (known != null) vesselScrollRect = ScrollListRoot(known)?.parent;
+                }
+                if (vesselScrollRect == null) return;
+
+                bool changedAny = false;
+                for (int i = 0; i < vesselScrollRect.childCount; i++)
+                {
+                    Transform ch = vesselScrollRect.GetChild(i);
+                    if (!IsNativeCrewScrollList(ch)) continue;
+
+                    // If we could not confidently identify the selected native list,
+                    // fall back to the old safe behavior: re-enable native lists rather
+                    // than leaving the Astronaut Complex visually empty.
+                    bool shouldBeActive = selected == null || ch == selected;
+                    if (ch.gameObject.activeSelf != shouldBeActive)
+                        ch.gameObject.SetActive(shouldBeActive);
+                    changedAny = true;
+                }
+
+                if (RetiredListTransform != null && RetiredListTransform.gameObject.activeSelf)
+                    RetiredListTransform.gameObject.SetActive(false);
+
+                if (selected != null && index == 0)
+                    HideRetiredRowsFromAvailable(AvailListTransform ?? selected, null, true);
+
+                if (!changedAny)
+                    RRLog.VerboseOnce("ac.tabs.shownative.none", "[EAC] ACPatch: no native scrollList_* children found while switching AC tabs.");
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.tabs.shownative.fail." + index, "[EAC] ACPatch: ShowOnlyNativeScrollList failed.", ex);
+            }
+        }
+
+        private static int NormalizeNativeListIndex(int index)
+        {
+            return (index >= 0 && index <= 2) ? index : 0;
+        }
+
+        private static string NativeListName(int index)
+        {
+            switch (NormalizeNativeListIndex(index))
+            {
+                case 0: return "Available";
+                case 1: return "Assigned";
+                case 2: return "Lost";
+                default: return "Available";
+            }
+        }
+
+        private static Transform FindCrewScrollListParent(Transform knownParent = null)
+        {
+            if (knownParent != null) return knownParent;
+            Transform known = AvailListTransform ?? AssignedListTransform ?? LostListTransform ?? RetiredListTransform;
+            Transform root = ScrollListRoot(known);
+            return root != null ? root.parent : null;
+        }
+
+        private static bool IsDirectlyActive(Transform t)
+        {
+            try { return t != null && t.gameObject != null && t.gameObject.activeSelf; }
+            catch { return false; }
+        }
+
+        private static int GetVisibleNativeListIndex(Transform vesselScrollRect = null)
+        {
+            try
+            {
+                vesselScrollRect = FindCrewScrollListParent(vesselScrollRect);
+
+                bool availActive = IsDirectlyActive(FindNativeScrollListByIndex(0, vesselScrollRect));
+                bool assignedActive = IsDirectlyActive(FindNativeScrollListByIndex(1, vesselScrollRect));
+                bool lostActive = IsDirectlyActive(FindNativeScrollListByIndex(2, vesselScrollRect));
+
+                int visibleCount = (availActive ? 1 : 0) + (assignedActive ? 1 : 0) + (lostActive ? 1 : 0);
+                if (visibleCount == 1)
+                {
+                    if (availActive) return 0;
+                    if (assignedActive) return 1;
+                    if (lostActive) return 2;
+                }
+
+                // If multiple native lists are active, trust the last real tab activation.
+                // This is exactly the broken state ForceRefresh has to normalize.
+                return NormalizeNativeListIndex(_lastNativeListIndex);
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.tabs.visibleindex.fail", "[EAC] ACPatch: GetVisibleNativeListIndex failed; falling back to Available.", ex);
+                return 0;
+            }
+        }
+
+        private static int CountVisibleNativeScrollLists(Transform vesselScrollRect = null)
+        {
+            try
+            {
+                vesselScrollRect = FindCrewScrollListParent(vesselScrollRect);
+                if (vesselScrollRect == null) return -1;
+
+                int count = 0;
+                for (int i = 0; i < vesselScrollRect.childCount; i++)
+                {
+                    Transform ch = vesselScrollRect.GetChild(i);
+                    if (IsNativeCrewScrollList(ch) && IsDirectlyActive(ch)) count++;
+                }
+                return count;
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.tabs.countvisible.fail", "[EAC] ACPatch: CountVisibleNativeScrollLists failed.", ex);
+                return -1;
+            }
+        }
+
+        private static string FormatScrollListState(string label, Transform t)
+        {
+            if (t == null) return label + "=<missing>";
+            bool activeSelf = false;
+            bool activeHierarchy = false;
+            try
+            {
+                activeSelf = t.gameObject.activeSelf;
+                activeHierarchy = t.gameObject.activeInHierarchy;
+            }
+            catch { }
+            return label + "=" + t.name + "{self=" + activeSelf + ",hier=" + activeHierarchy + ",rows=" + t.childCount + "}";
+        }
+
+        private static string DescribeCrewListVisibility(Transform vesselScrollRect = null)
+        {
+            try
+            {
+                vesselScrollRect = FindCrewScrollListParent(vesselScrollRect);
+                return FormatScrollListState("Available", FindNativeScrollListByIndex(0, vesselScrollRect))
+                    + "; " + FormatScrollListState("Assigned", FindNativeScrollListByIndex(1, vesselScrollRect))
+                    + "; " + FormatScrollListState("Lost", FindNativeScrollListByIndex(2, vesselScrollRect))
+                    + "; " + FormatScrollListState("Retired", RetiredListTransform);
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.tabs.describe.fail", "[EAC] ACPatch: DescribeCrewListVisibility failed.", ex);
+                return "<visibility unavailable>";
+            }
+        }
+
+        private static void TraceForceRefreshState(int traceId, string phase, int intendedNativeIndex, Transform vesselScrollRect = null)
+        {
+            if (!RRLog.VerboseEnabled) return;
+
+            int visibleNativeCount = CountVisibleNativeScrollLists(vesselScrollRect);
+            bool selectedActive = IsDirectlyActive(FindNativeScrollListByIndex(NormalizeNativeListIndex(intendedNativeIndex), FindCrewScrollListParent(vesselScrollRect)));
+            RRLog.Verbose("[EAC] AC ForceRefresh trace #" + traceId
+                + " " + phase
+                + " intended=" + NativeListName(intendedNativeIndex)
+                + " lastNative=" + NativeListName(_lastNativeListIndex)
+                + " retiredShowing=" + RetiredTabShowing
+                + " selectedActive=" + selectedActive
+                + " visibleNativeCount=" + visibleNativeCount
+                + " :: " + DescribeCrewListVisibility(vesselScrollRect));
+        }
+
+        private static void VerifyForceRefreshVisibility(int traceId, int intendedNativeIndex, Transform vesselScrollRect = null)
+        {
+            if (!RRLog.VerboseEnabled) return;
+
+            vesselScrollRect = FindCrewScrollListParent(vesselScrollRect);
+            int normalized = NormalizeNativeListIndex(intendedNativeIndex);
+            int visibleNativeCount = CountVisibleNativeScrollLists(vesselScrollRect);
+            bool selectedActive = IsDirectlyActive(FindNativeScrollListByIndex(normalized, vesselScrollRect));
+            bool retiredActive = IsDirectlyActive(RetiredListTransform);
+            bool ok = selectedActive && visibleNativeCount == 1 && !retiredActive;
+            RRLog.Verbose("[EAC] AC ForceRefresh visibility verify #" + traceId
+                + " target=" + NativeListName(normalized)
+                + " result=" + (ok ? "OK" : "CHECK")
+                + " selectedActive=" + selectedActive
+                + " visibleNativeCount=" + visibleNativeCount
+                + " retiredActive=" + retiredActive);
+        }
+
 
 
         public static void CacheToggleControllerFields(Type tcType)
@@ -327,6 +628,9 @@ private static void EnsureMaxCrewCached()
                 // Fall through — let ActivateList proceed normally
             }
 
+            if (index >= 0 && index <= 2 && !_refreshing)
+                _lastNativeListIndex = index;
+
             try
             {
                 if (_tcListsField == null) return true;
@@ -341,9 +645,11 @@ private static void EnsureMaxCrewCached()
                     object uiList = lists.GetValue(i);
                     if (uiList == null) continue;
                     bool active = (i == index);
-                    bool isOurList = (i == lists.Length - 1);
+                    bool isOurList = IsRetiredUIList(uiList);
 
-                    if (!isOurList)
+                    bool isNativeList = (i >= 0 && i <= 2 && !isOurList);
+
+                    if (isNativeList)
                     {
                         if (!_uiListSetActiveSearched)
                         {
@@ -355,22 +661,30 @@ private static void EnsureMaxCrewCached()
                         if (_uiListSetActiveMethod != null)
                             ReflectionUtils.TryInvoke(_uiListSetActiveMethod, uiList, new object[] { active }, "ACPatch.Prefix_ActivateList.SetActive(" + i + ")");
 
-                        // Capture the Lost list content from lists[2]'s UIList
-                        // lists[i] is a UIList on the TAB BUTTON — we reflect to find content.
-                        if (i == 2 && LostListTransform == null)
+                        // Capture native crew-list transforms from the controller array.
+                        // Native KSP order is Available=0, Assigned=1, Lost=2.
+                        Transform listContent = FindUIListContent(uiList);
+                        if (listContent != null)
                         {
-                            LostListTransform = FindUIListContent(uiList);
+                            Transform listRoot = ScrollListRoot(listContent);
+                            if (i == 0 && AvailListTransform == null) AvailListTransform = listRoot ?? listContent;
+                            else if (i == 1 && AssignedListTransform == null) AssignedListTransform = listRoot ?? listContent;
+                            else if (i == 2 && LostListTransform == null) LostListTransform = listRoot ?? listContent;
                         }
 
                         // After activating the Available list, re-hide any retired rows
                         // UIList.SetActive(true) may re-show all child GameObjects
                         if (active && i == 0 && AvailListTransform != null)
                         {
-                            HideRetiredRowsFromAvailable(AvailListTransform, null);
+                            HideRetiredRowsFromAvailable(AvailListTransform, null, true);
                         }
                     }
                     else
                     {
+                        // Never invoke KSP.UI.UIList.SetActive for synthetic/EAC lists
+                        // or any list beyond the three native Astronaut Complex tabs.
+                        // The cloned Retired list has been observed to throw inside
+                        // UIList.SetActive, so toggle its GameObject directly instead.
                         try
                         {
                             var comp = uiList as Component;
@@ -384,6 +698,39 @@ private static void EnsureMaxCrewCached()
                         }
                         catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:387", "Suppressed exception in AstronautComplexACPatch.cs:387", ex); }
                     }
+                }
+
+                // AFTER activation: make sure a native tab does not leave another
+                // scrollList_* visible underneath it. If discovery fails, the helper
+                // falls back to the old behavior of re-enabling native lists so the
+                // Astronaut Complex does not appear empty.
+                if (index >= 0 && index <= 2)
+                {
+                    ShowOnlyNativeScrollList(index, null);
+                    Transform activeList = index == 0 ? AvailListTransform : (index == 1 ? AssignedListTransform : LostListTransform);
+                    EnforceNativeCrewTabOwnership(index, activeList, "activate");
+                }
+
+                // AFTER activation: keep native tab overlays/synthetic rows in sync.
+                // The Assigned list can be rebuilt or reactivated by KSP after EAC's
+                // CreateAvailableList postfix, so inject DeepFreeze frozen rows again
+                // when the player actually opens Assigned.
+                if (index == 1)
+                {
+                    if (AssignedListTransform == null)
+                    {
+                        try
+                        {
+                            object assignedUIList = lists.Length > 1 ? lists.GetValue(1) : null;
+                            Transform assignedContent = FindUIListContent(assignedUIList);
+                            AssignedListTransform = ScrollListRoot(assignedContent) ?? assignedContent;
+                        }
+                        catch { }
+                    }
+
+                    InjectFrozenAssignedRows(AssignedListTransform, AvailListTransform, LastRetiredRowH > 1f ? LastRetiredRowH : 72f);
+                    FixAssignedBadge((__instance as MonoBehaviour)?.gameObject);
+                    PatchAssignedListStatusText();
                 }
 
                 // AFTER activation: patch Lost tab labels if Lost tab was just shown
@@ -431,7 +778,8 @@ private static void EnsureMaxCrewCached()
         }
 
         private static System.Collections.Generic.List<string> BuildHiddenAvailableNames(
-            System.Collections.Generic.List<string> retiredNames = null)
+            System.Collections.Generic.List<string> retiredNames = null,
+            bool hideAssignedKerbals = false)
         {
             var names = new System.Collections.Generic.List<string>();
             var seen = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
@@ -449,7 +797,7 @@ private static void EnsureMaxCrewCached()
             {
                 var rec = kvp.Value;
                 if (rec == null) continue;
-                if (rec.Retired || rec.DeathUT > 0)
+                if (rec.Retired || rec.DeathUT > 0 || rec.DeepFreezeActive)
                     AddHiddenAvailableName(kvp.Key, names, seen);
             }
 
@@ -461,8 +809,12 @@ private static void EnsureMaxCrewCached()
                     ProtoCrewMember pcm;
                     try { pcm = roster[i]; } catch { continue; }
                     if (pcm == null) continue;
-                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
-                        || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
+                    RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
+                    bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                    if (frozen ||
+                        pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
+                        pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing ||
+                        (hideAssignedKerbals && pcm.rosterStatus == ProtoCrewMember.RosterStatus.Assigned))
                     {
                         AddHiddenAvailableName(pcm.name, names, seen);
                     }
@@ -472,27 +824,84 @@ private static void EnsureMaxCrewCached()
             return names;
         }
 
-        private static void HideRetiredRowsFromAvailable(Transform availableList = null, System.Collections.Generic.List<string> retiredNames = null)
+        private static int HideRetiredRowsFromAvailable(Transform availableList = null, System.Collections.Generic.List<string> retiredNames = null, bool hideAssignedKerbals = false)
         {
+            int hidden = 0;
             try
             {
                 Transform list = availableList ?? AvailListTransform;
-                if (list == null) return;
+                if (list == null) return hidden;
 
-                var names = BuildHiddenAvailableNames(retiredNames);
-                if (names == null || names.Count == 0) return;
-
-                for (int i = 0; i < list.childCount; i++)
+                var names = BuildHiddenAvailableNames(retiredNames, hideAssignedKerbals);
+                if (names != null && names.Count > 0)
                 {
-                    Transform row = list.GetChild(i);
-                    if (row == null) continue;
-                    if (RowContainsName(row.gameObject, names))
-                        row.gameObject.SetActive(false);
+                    for (int i = 0; i < list.childCount; i++)
+                    {
+                        Transform row = list.GetChild(i);
+                        if (row == null) continue;
+                        if (RowContainsName(row.gameObject, names))
+                        {
+                            if (row.gameObject.activeSelf) hidden++;
+                            row.gameObject.SetActive(false);
+                        }
+                    }
                 }
+
+                // Belt-and-suspenders: the name-list path above exists so retired
+                // rows can still be cloned into the Retired tab, but the final
+                // visible Available tab should be governed by one ownership rule.
+                if (hideAssignedKerbals || (_lastNativeListIndex == 0 && !RetiredTabShowing))
+                    hidden += EnforceNativeCrewTabOwnership(0, list, "available-helper");
             }
             catch (Exception ex)
             {
                 RRLog.VerboseExceptionOnce("ac.hide.retired.available.fail", "Suppressed", ex);
+            }
+            return hidden;
+        }
+
+
+
+        public static void SanitizeAvailableListAfterOpen(string reason = null)
+        {
+            try
+            {
+                if (RetiredTabShowing) return;
+
+                if (string.Equals(reason, "open-pass 0", StringComparison.Ordinal))
+                    _lastNativeListIndex = 0;
+                if (_lastNativeListIndex != 0) return;
+
+                Transform availList = AvailListTransform;
+                if (availList == null)
+                {
+                    var mb = _cachedACInstance as MonoBehaviour;
+                    if (mb != null && mb.gameObject != null)
+                        availList = FindDescendant(mb.gameObject.transform, "scrollList_Available");
+                    if (availList != null) AvailListTransform = availList;
+                }
+
+                int hidden = HideRetiredRowsFromAvailable(availList, null, true);
+                PatchAvailableListStatusText();
+
+                // Opening the Astronaut Complex always lands on the native Available tab.
+                // Re-assert the tab's visibility after other AC decorators have had a chance
+                // to rebuild rows, then enforce the Available ownership rule again because
+                // UIList activation can re-enable child rows.
+                if (_lastNativeListIndex == 0 && availList != null)
+                {
+                    ShowOnlyNativeScrollList(0, availList.parent);
+                    hidden += EnforceNativeCrewTabOwnership(0, availList, reason ?? "open-sanitize");
+                }
+
+                if (RRLog.VerboseEnabled && hidden > 0)
+                    RRLog.Verbose("[EAC] AC Available sanitize"
+                        + (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")")
+                        + ": hid " + hidden + " non-Available row(s).");
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.available.sanitize.fail", "[EAC] ACPatch: Available sanitize failed.", ex);
             }
         }
 
@@ -538,7 +947,7 @@ private static void EnsureMaxCrewCached()
                 // Hide retired rows from Available AFTER measuring.
                 // KSP can re-enable row GameObjects during applicant-list rebuilds,
                 // so use the shared helper and do not rely on current active state.
-                HideRetiredRowsFromAvailable(availList, retiredNames);
+                HideRetiredRowsFromAvailable(availList, retiredNames, _lastNativeListIndex == 0 && !RetiredTabShowing);
 
                 if (availList == null)
                 {
@@ -831,9 +1240,21 @@ private static void EnsureMaxCrewCached()
                 // Available list when another mod changes rosterStatus away from Available.
                 InjectUnavailableVisibleRows(availList, ROW_H);
 
+                // DeepFreeze moves frozen kerbals out of roster.Crew and often leaves them
+                // as Unowned/Dead in the stock roster while the DeepFreeze frozen dictionary
+                // owns their real state.  Stock AC does not list those kerbals anywhere, so
+                // EAC adds display-only rows to the native Assigned tab.
+                if (AssignedListTransform == null && vesselScrollRect != null)
+                    AssignedListTransform = FindNativeScrollListByIndex(1, vesselScrollRect);
+                InjectFrozenAssignedRows(AssignedListTransform, availList, ROW_H);
+                FixAssignedBadge(go);
+
                 // Available badge is fixed in Postfix_UpdateCrewCounts which runs after KSP sets it
                 // Patch "In training" / recovery status text on kerbals in Available list
                 PatchAvailableListStatusText();
+                if (_lastNativeListIndex == 0 && !RetiredTabShowing)
+                    EnforceNativeCrewTabOwnership(0, availList, "create-available");
+                PatchAssignedListStatusText();
                 PatchLostListStatusText();
             }
             catch (Exception ex)
@@ -907,6 +1328,7 @@ private static void EnsureMaxCrewCached()
                 if (go != null)
                 {
                     FixAvailableBadge(go, GetRetiredNames());
+                    FixAssignedBadge(go);
                     FixLostBadge(go);
 
                     // Fix hire button: KSP disabled it because activeCrews (including retired) >= max.
@@ -945,6 +1367,13 @@ private static void EnsureMaxCrewCached()
                         FixHireButtons(go, true);
                     }
                 }
+                if (_lastNativeListIndex == 0 && !RetiredTabShowing)
+                {
+                    HideRetiredRowsFromAvailable(AvailListTransform, null, true);
+                    PatchAvailableListStatusText();
+                    EnforceNativeCrewTabOwnership(0, AvailListTransform, "crew-counts");
+                }
+                PatchAssignedListStatusText();
                 PatchLostListStatusText();  // Refresh K.I.A./Died labels whenever crew counts update
             }
             catch (Exception ex)
@@ -972,7 +1401,9 @@ private static void EnsureMaxCrewCached()
                 // hired kerbal's row shows "In introductory training Xd Xh Xm" immediately.
                 PatchAvailableListStatusText();
                 PatchLostListStatusText();
-                HideRetiredRowsFromAvailable(AvailListTransform, null);
+                HideRetiredRowsFromAvailable(AvailListTransform, null, _lastNativeListIndex == 0 && !RetiredTabShowing);
+                if (_lastNativeListIndex == 0 && !RetiredTabShowing)
+                    EnforceNativeCrewTabOwnership(0, AvailListTransform, "create-applicant");
 
                 var go = (__instance as MonoBehaviour)?.gameObject;
                 if (go == null) return;
@@ -1039,6 +1470,10 @@ private static void EnsureMaxCrewCached()
                 }
 
                 bool wasShowingRetired = RetiredTabShowing;
+                Transform vesselScrollRect = FindCrewScrollListParent(RetiredListTransform != null ? RetiredListTransform.parent : null);
+                int restoreNativeIndex = GetVisibleNativeListIndex(vesselScrollRect);
+                int refreshTraceId = ++_forceRefreshTraceId;
+                TraceForceRefreshState(refreshTraceId, "before", restoreNativeIndex, vesselScrollRect);
 
                 // Deactivate the retired list before CreateAvailableList clones rows into it.
                 // Rows parented into an ACTIVE GO get OnEnable fired immediately, which corrupts
@@ -1081,14 +1516,22 @@ private static void EnsureMaxCrewCached()
                 }
 
                 // Also apply updated Available and Lost list status labels right after rebuild.
-                PatchAvailableListStatusText();
+                if (restoreNativeIndex == 0)
+                {
+                    PatchAvailableListStatusText();
+                    HideRetiredRowsFromAvailable(AvailListTransform, null, true);
+                    EnforceNativeCrewTabOwnership(0, AvailListTransform, "force-refresh");
+                }
                 PatchLostListStatusText();
-                HideRetiredRowsFromAvailable(AvailListTransform, null);
 
-                // If the retired tab was visible, restore its display state.
+                TraceForceRefreshState(refreshTraceId, "after-rebuild", restoreNativeIndex, vesselScrollRect);
+
+                // Restore the currently selected list immediately. Without this, KSP's
+                // CreateAvailableList rebuild can leave every native scrollList_* active
+                // until the player clicks another AC tab.
                 if (wasShowingRetired && RetiredListTransform != null)
                 {
-                    Transform vesselScrollRect = RetiredListTransform.parent;
+                    vesselScrollRect = RetiredListTransform.parent;
                     if (vesselScrollRect != null)
                     {
                         for (int i = 0; i < vesselScrollRect.childCount; i++)
@@ -1105,6 +1548,30 @@ private static void EnsureMaxCrewCached()
                     RepositionRetiredRows(RetiredListTransform);
                     RewireTooltipsInRetiredList(RetiredListTransform);
                     ReenableRetiredButtons(RetiredListTransform);
+                    TraceForceRefreshState(refreshTraceId, "after-retired-restore", restoreNativeIndex, vesselScrollRect);
+                }
+                else
+                {
+                    RetiredTabShowing = false;
+                    ShowOnlyNativeScrollList(restoreNativeIndex, vesselScrollRect);
+
+                    if (restoreNativeIndex == 1)
+                    {
+                        InjectFrozenAssignedRows(AssignedListTransform, AvailListTransform, LastRetiredRowH > 1f ? LastRetiredRowH : 72f);
+                        FixAssignedBadge(mb.gameObject);
+                        PatchAssignedListStatusText();
+                    }
+                    else if (restoreNativeIndex == 2)
+                    {
+                        PatchLostListStatusText();
+                    }
+                    else
+                    {
+                        HideRetiredRowsFromAvailable(AvailListTransform, null, true);
+                    }
+
+                    TraceForceRefreshState(refreshTraceId, "after-native-restore", restoreNativeIndex, vesselScrollRect);
+                    VerifyForceRefreshVisibility(refreshTraceId, restoreNativeIndex, vesselScrollRect);
                 }
             }
             catch (Exception ex)
@@ -1161,7 +1628,7 @@ private static void EnsureMaxCrewCached()
                 if (_updateCrewCountsMethod != null)
                     _updateCrewCountsMethod.Invoke(_cachedACInstance, null);
 
-                HideRetiredRowsFromAvailable(AvailListTransform, null);
+                HideRetiredRowsFromAvailable(AvailListTransform, null, true);
             }
             catch (Exception ex)
             {
@@ -1265,7 +1732,33 @@ private static void EnsureMaxCrewCached()
         RRLog.WarnOnce("ac.fixhire.nobuttons", "[RosterRotation] FixHireButtons: no Button components found under applicants list rows — cannot adjust hire buttons.");
     }
 }
-private static void FixAvailableBadge(GameObject acGo,
+private static bool IsStockAstronautCrew(ProtoCrewMember pcm)
+        {
+            return pcm != null && pcm.type == ProtoCrewMember.KerbalType.Crew;
+        }
+
+        private static ProtoCrewMember FindRosterKerbalByNameForAcCount(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            foreach (var pcm in EnumerateAllRosterKerbals())
+            {
+                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                if (string.Equals(pcm.name, name, StringComparison.Ordinal))
+                    return pcm;
+            }
+            return null;
+        }
+
+        private static bool IsStockAstronautCrewNameForAcCount(string name)
+        {
+            var pcm = FindRosterKerbalByNameForAcCount(name);
+            // DeepFreeze can have names cached while the stock roster entry is temporarily
+            // absent.  If we cannot resolve the name, keep the DeepFreeze row/count rather
+            // than dropping a legitimate frozen astronaut.
+            return pcm == null || IsStockAstronautCrew(pcm);
+        }
+
+        private static void FixAvailableBadge(GameObject acGo,
             System.Collections.Generic.List<string> retiredNames)
         {
             try
@@ -1287,6 +1780,7 @@ private static void FixAvailableBadge(GameObject acGo,
                 int count = 0;
                 foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
                 {
+                    if (!IsStockAstronautCrew(pcm)) continue;
                     if (pcm.rosterStatus != ProtoCrewMember.RosterStatus.Available) continue;
                     if (retiredNames.Contains(pcm.name)) continue;
                     count++;
@@ -1309,6 +1803,12 @@ private static void FixAvailableBadge(GameObject acGo,
 
         private static void SetBadgeText(Transform tab, int count, string label)
         {
+            if (tab == null) return;
+
+            Component fallbackComponent = null;
+            System.Reflection.PropertyInfo fallbackProperty = null;
+            string fallbackText = null;
+
             foreach (Component c in tab.GetComponentsInChildren<Component>(true))
             {
                 if (c == null) continue;
@@ -1319,28 +1819,49 @@ private static void FixAvailableBadge(GameObject acGo,
                 try { s = p.GetValue(c, null) as string; } catch { continue; }
                 if (string.IsNullOrEmpty(s)) continue;
 
-                string newText = null;
-                if (s.Contains("[") && s.Contains("]"))
+                // Prefer the visible tab label itself.  Some KSP tab objects have
+                // child text fields that contain bracketed values for unrelated UI
+                // elements; updating the first bracketed text can leave the tab's
+                // displayed count unchanged.
+                if (s.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    // e.g. "Retired[2]" → "Retired[3]"
-                    int bracket = s.IndexOf('[');
-                    newText = s.Substring(0, bracket + 1) + count + "]";
-                }
-                else if (s.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    // e.g. "Available" → "Available[2]"
-                    newText = s + "[" + count + "]";
-                }
-
-                if (newText != null)
-                {
-                    try
+                    string newText;
+                    if (s.Contains("[") && s.Contains("]"))
                     {
-                        p.SetValue(c, newText, null);
+                        int bracket = s.IndexOf('[');
+                        newText = s.Substring(0, bracket + 1) + count + "]";
                     }
-                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:1268", "Suppressed exception in AstronautComplexACPatch.cs:1268", ex); }
+                    else
+                    {
+                        newText = s + "[" + count + "]";
+                    }
+
+                    try { p.SetValue(c, newText, null); }
+                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.SetBadgeText.label", "Suppressed exception while setting tab badge text", ex); }
                     return;
                 }
+
+                if (fallbackComponent == null && s.Contains("[") && s.Contains("]"))
+                {
+                    fallbackComponent = c;
+                    fallbackProperty = p;
+                    fallbackText = s;
+                }
+            }
+
+            if (fallbackComponent != null && fallbackProperty != null)
+            {
+                try
+                {
+                    // Do not preserve the fallback label prefix.  In KSP 1.12 the
+                    // reflected text component under a tab can be stale or cloned
+                    // from another tab (most visibly Available).  Preserving that
+                    // prefix makes Assigned inherit Available's badge text.  Force
+                    // the requested tab label while keeping the corrected count.
+                    string newText = label + "[" + count + "]";
+                    fallbackProperty.SetValue(fallbackComponent, newText, null);
+                }
+                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.SetBadgeText.fallback", "Suppressed exception while setting fallback tab badge text", ex); }
             }
         }
 
@@ -1360,6 +1881,77 @@ private static void FixAvailableBadge(GameObject acGo,
             return n;
         }
 
+        private static int CountAssignedCrew()
+        {
+            try
+            {
+                var names = new HashSet<string>(StringComparer.Ordinal);
+
+                // Refresh DeepFreeze before testing roster members.  The assigned
+                // badge treats frozen Kerbals as assigned/unavailable, and using a
+                // stale cache can make the badge drift from the visible Assigned list.
+                try { RosterRotation.DeepFreeze.EACDeepFreezeBridge.Update(force: true); } catch { }
+
+                foreach (var pcm in EnumerateAllRosterKerbals())
+                {
+                    if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                    if (!IsStockAstronautCrew(pcm)) continue;
+
+                    RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
+                    if (rec != null && (rec.Retired || (rec.DeathUT > 0 && !rec.DeepFreezeActive)))
+                        continue;
+
+                    bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                    if (frozen || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
+                        names.Add(pcm.name);
+                }
+
+                // Frozen Kerbals can be absent from roster.Crew and can be stored
+                // as Unowned/Dead in the full roster.  The DeepFreeze cache is the
+                // authoritative list for the synthetic Assigned rows, so count it
+                // directly for the Assigned tab badge too.
+                foreach (var frozenInfo in RosterRotation.DeepFreeze.EACDeepFreezeBridge.FrozenKerbals.Values)
+                {
+                    if (frozenInfo == null || string.IsNullOrEmpty(frozenInfo.Name)) continue;
+                    if (!IsStockAstronautCrewNameForAcCount(frozenInfo.Name)) continue;
+                    if (RosterRotationState.Records.TryGetValue(frozenInfo.Name, out var rec) &&
+                        rec != null && rec.Retired)
+                        continue;
+                    names.Add(frozenInfo.Name);
+                }
+
+                foreach (var kvp in RosterRotationState.Records)
+                {
+                    if (kvp.Value != null && kvp.Value.DeepFreezeActive &&
+                        !kvp.Value.Retired && kvp.Value.DeathUT <= 0 &&
+                        IsStockAstronautCrewNameForAcCount(kvp.Key))
+                        names.Add(kvp.Key);
+                }
+
+                return names.Count;
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("acpatch.countassigned.fail", "[EAC] ACPatch: CountAssignedCrew failed; returning 0.", ex);
+                return 0;
+            }
+        }
+
+        private static void FixAssignedBadge(GameObject acGo)
+        {
+            try
+            {
+                if (acGo == null) return;
+                Transform tab = FindDeepChild(acGo.transform, "Tab Assigned");
+                if (tab == null) return;
+                SetBadgeText(tab, CountAssignedCrew(), "Assigned");
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("[RosterRotation] ACPatch: FixAssignedBadge failed: " + ex.Message);
+            }
+        }
+
         private static int CountLostCrew()
         {
             try
@@ -1373,7 +1965,11 @@ private static void FixAvailableBadge(GameObject acGo,
                     ProtoCrewMember pcm;
                     try { pcm = roster[i]; } catch { continue; }
                     if (pcm == null) continue;
-                    if (pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
+                    if (!IsStockAstronautCrew(pcm)) continue;
+
+                    RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
+                    bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
+                    if (frozen) continue;
 
                     if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                         pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
@@ -1382,13 +1978,13 @@ private static void FixAvailableBadge(GameObject acGo,
                         continue;
                     }
 
-                    if (RosterRotationState.Records.TryGetValue(pcm.name, out var rec) && rec != null && rec.DeathUT > 0)
+                    if (rec != null && rec.DeathUT > 0)
                         names.Add(pcm.name);
                 }
 
                 foreach (var kvp in RosterRotationState.Records)
                 {
-                    if (kvp.Value != null && kvp.Value.DeathUT > 0)
+                    if (kvp.Value != null && kvp.Value.DeathUT > 0 && !kvp.Value.DeepFreezeActive)
                         names.Add(kvp.Key);
                 }
 
@@ -1463,7 +2059,7 @@ private static void FixAvailableBadge(GameObject acGo,
                 foreach (var pcm in roster.Crew)
                 {
                     if (pcm == null) continue;
-                    if (pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
+                    if (!IsStockAstronautCrew(pcm)) continue;
                     if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead) continue;
                     if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
 

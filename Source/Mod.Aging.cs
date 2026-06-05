@@ -93,6 +93,10 @@ namespace RosterRotation
             {
                 if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
                 if (!RosterRotationState.Records.TryGetValue(k.name, out var rec)) continue;
+
+                if (ReconcileDeepFreezeState(k, rec, nowUT)) anyDirty = true;
+                if (rec.DeepFreezeActive || IsDeepFreezeFrozen(k)) continue;
+
                 if (rec.LastAgedYears < 0) continue;
                 if (rec.DeathUT > 0 && !rec.Retired) continue;
 
@@ -269,6 +273,7 @@ namespace RosterRotation
             double nowUT, int currentAge, double effectiveRetireUT, double yearSec, double daySec)
         {
             if (k == null || rec == null) return false;
+            if (rec.DeepFreezeActive || IsDeepFreezeFrozen(k)) return false;
             if (k.rosterStatus != ProtoCrewMember.RosterStatus.Assigned) return false;
             if (rec.DeathUT > 0) return false;
 

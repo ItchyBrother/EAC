@@ -33,7 +33,9 @@ namespace RosterRotation
         Birthday   = 1,
         Training   = 2,
         Retirement = 3,
-        Death      = 4
+        Death      = 4,
+        Veteran    = 5,
+        Badass     = 6
     }
 
     internal static class MissionTimeTracker
@@ -43,6 +45,29 @@ namespace RosterRotation
             if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) return false;
 
             var rec = RosterRotationState.GetOrCreate(k.name);
+
+            if (DeepFreeze.EACDeepFreezeBridge.IsFrozen(k) || rec.DeepFreezeActive)
+            {
+                bool anyDirty = false;
+
+                // DeepFreeze can flip the Kerbal through a stock death-like /
+                // unassigned state before the DeepFreeze transition handler runs.
+                // Preserve the awake assigned segment before clearing stock
+                // mission clocks, otherwise freeze-after-long-mission recoveries
+                // look like zero-duration missions.
+                if (CaptureCurrentMissionSegment(rec, nowUT, "DeepFreeze frozen sync"))
+                    anyDirty = true;
+
+                if (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0)
+                {
+                    rec.MissionStartUT = 0;
+                    rec.LastMissionDeathCheckUT = 0;
+                    anyDirty = true;
+                }
+
+                return anyDirty;
+            }
+
             bool onMission = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
 
             if (onMission)
@@ -56,10 +81,10 @@ namespace RosterRotation
                 return false;
             }
 
-            if (resetWhenNotAssigned && (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0))
+            if (resetWhenNotAssigned &&
+                (rec.MissionStartUT > 0 || rec.LastMissionDeathCheckUT > 0 || rec.MissionAccumulatedUT > 0))
             {
-                rec.MissionStartUT = 0;
-                rec.LastMissionDeathCheckUT = 0;
+                ClearMissionTracking(rec);
                 return true;
             }
 
@@ -80,7 +105,352 @@ namespace RosterRotation
 
             return anyDirty;
         }
+
+        internal static bool CaptureCurrentMissionSegment(RosterRotationState.KerbalRecord rec, double nowUT, string reason = null)
+        {
+            if (rec == null) return false;
+            if (rec.MissionStartUT <= 0 || rec.MissionStartUT > nowUT) return false;
+
+            double segmentSeconds = Math.Max(0, nowUT - rec.MissionStartUT);
+            if (segmentSeconds <= 0) return false;
+
+            rec.MissionAccumulatedUT += segmentSeconds;
+            RRLog.Verbose("[EAC] Captured awake mission segment"
+                + (string.IsNullOrEmpty(reason) ? "" : " (" + reason + ")")
+                + ": segmentSeconds=" + segmentSeconds.ToString("0.###")
+                + ", accumulatedSeconds=" + rec.MissionAccumulatedUT.ToString("0.###"));
+            return true;
+        }
+
+        internal static double GetMissionSeconds(RosterRotationState.KerbalRecord rec, double nowUT)
+        {
+            if (rec == null) return 0;
+
+            double seconds = Math.Max(0, rec.MissionAccumulatedUT);
+            if (rec.MissionStartUT > 0 && rec.MissionStartUT <= nowUT)
+                seconds += Math.Max(0, nowUT - rec.MissionStartUT);
+
+            return Math.Max(0, seconds);
+        }
+
+        internal static void ClearMissionTracking(RosterRotationState.KerbalRecord rec)
+        {
+            if (rec == null) return;
+            rec.MissionStartUT = 0;
+            rec.MissionAccumulatedUT = 0;
+            rec.LastMissionDeathCheckUT = 0;
+        }
     }
+
+    internal static class EACRecoveryCoordinator
+    {
+        private static readonly Dictionary<Guid, double> ProcessedRecoveryVessels = new Dictionary<Guid, double>();
+        private const double ProcessedRecoveryRetentionSeconds = 21600.0;
+
+        private sealed class ProtoVesselRecoveryAccessors
+        {
+            internal FieldInfo VesselIdField;
+            internal PropertyInfo VesselIdProperty;
+            internal MethodInfo GetVesselCrewMethod;
+        }
+
+        private sealed class ProtoPartCrewAccessors
+        {
+            internal FieldInfo ProtoModuleCrewField;
+            internal PropertyInfo ProtoModuleCrewProperty;
+        }
+
+        private static readonly Dictionary<Type, ProtoVesselRecoveryAccessors> ProtoVesselRecoveryAccessorCache =
+            new Dictionary<Type, ProtoVesselRecoveryAccessors>();
+
+        private static readonly Dictionary<Type, ProtoPartCrewAccessors> ProtoPartCrewAccessorCache =
+            new Dictionary<Type, ProtoPartCrewAccessors>();
+
+        private static ProtoVesselRecoveryAccessors GetProtoVesselRecoveryAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            ProtoVesselRecoveryAccessors accessors;
+            if (ProtoVesselRecoveryAccessorCache.TryGetValue(type, out accessors))
+                return accessors;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            accessors = new ProtoVesselRecoveryAccessors
+            {
+                VesselIdField = type.GetField("vesselID", flags) ?? type.GetField("id", flags),
+                VesselIdProperty = type.GetProperty("vesselID", flags) ?? type.GetProperty("id", flags),
+                GetVesselCrewMethod = type.GetMethod("GetVesselCrew", flags, null, Type.EmptyTypes, null)
+            };
+            ProtoVesselRecoveryAccessorCache[type] = accessors;
+            return accessors;
+        }
+
+        private static ProtoPartCrewAccessors GetProtoPartCrewAccessors(Type type)
+        {
+            if (type == null) return null;
+
+            ProtoPartCrewAccessors accessors;
+            if (ProtoPartCrewAccessorCache.TryGetValue(type, out accessors))
+                return accessors;
+
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            accessors = new ProtoPartCrewAccessors
+            {
+                ProtoModuleCrewField = type.GetField("protoModuleCrew", flags),
+                ProtoModuleCrewProperty = type.GetProperty("protoModuleCrew", flags)
+            };
+            ProtoPartCrewAccessorCache[type] = accessors;
+            return accessors;
+        }
+
+        internal static void MarkRecoveryProcessed(Guid vesselId, double nowUT, string source)
+        {
+            if (vesselId == Guid.Empty) return;
+            PruneProcessed(nowUT);
+            ProcessedRecoveryVessels[vesselId] = nowUT;
+            RRLog.Verbose("[EAC] Recovery processing marked complete for vessel=" + vesselId
+                + (string.IsNullOrEmpty(source) ? "" : ", source=" + source));
+        }
+
+        internal static bool HasRecoveryAlreadyBeenProcessed(Guid vesselId, double nowUT)
+        {
+            if (vesselId == Guid.Empty) return false;
+            PruneProcessed(nowUT);
+            return ProcessedRecoveryVessels.ContainsKey(vesselId);
+        }
+
+        internal static void ProcessRecoveredKerbalBasics(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, Vessel vessel, double nowUT)
+        {
+            if (pcm == null || rec == null) return;
+
+            rec.Flights++;
+            rec.LastFlightUT = nowUT;
+            RosterRotationKSCUI.TryApplyVeteranTraitGrowthOnRecovery(pcm, rec, vessel, nowUT);
+            EACVeteranService.EvaluateKerbal(pcm, rec, "vessel recovery", requestSave: false);
+
+            bool killedInFlight = pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
+                               || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing
+                               || rec.DeathUT > 0;
+            if (killedInFlight)
+            {
+                rec.RetirementScheduled = false;
+            }
+            else if (rec.RetirementScheduled && !rec.Retired)
+            {
+                rec.RetirementScheduled    = false;
+                rec.Retired                = true;
+                rec.RetiredUT              = nowUT;
+                rec.ExperienceAtRetire     = (int)pcm.experienceLevel;
+                RosterRotationState.NoteCertifiedLevel(rec, (int)pcm.experienceLevel);
+                rec.RetirementWarned       = false;
+                if (string.IsNullOrEmpty(rec.OriginalTrait)) rec.OriginalTrait = pcm.trait;
+                rec.OriginalType = pcm.type;
+                pcm.inactive        = true;
+                pcm.inactiveTimeEnd = nowUT + RosterRotationState.YearSeconds * 1000.0;
+                RosterRotationState.InvalidateRetiredCache();
+                RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
+
+                RosterRotationState.PostNotification(
+                    EACNotificationType.Retirement, "Retired — " + pcm.name,
+                    pcm.name + " has retired following mission recovery. (" + RosterRotationState.FormatGameDate(nowUT) + ")",
+                    MessageSystemButton.MessageButtonColor.ORANGE,
+                    MessageSystemButton.ButtonIcons.MESSAGE);
+            }
+        }
+
+        internal static void ProcessProtoVesselRecovery(ProtoVessel protoVessel, bool quick, string source)
+        {
+            double now = Planetarium.GetUniversalTime();
+
+            if (RosterRotationKSCUI.RestoreCertifiedLevelsFromEacRecords("vessel recovered"))
+                SaveScheduler.RequestSave("restore certified levels after recovery");
+
+            if (protoVessel == null) return;
+
+            Guid vesselId;
+            bool hasVesselId = TryGetProtoVesselId(protoVessel, out vesselId);
+            if (hasVesselId && HasRecoveryAlreadyBeenProcessed(vesselId, now))
+            {
+                RRLog.Verbose("[EAC] Skipping proto recovery fallback for already-processed vessel=" + SafeProtoVesselName(protoVessel)
+                    + ", vesselId=" + vesselId);
+                return;
+            }
+
+            List<ProtoCrewMember> crew = GetProtoVesselCrew(protoVessel);
+            if (crew == null || crew.Count == 0)
+            {
+                RRLog.Verbose("[EAC] Proto recovery fallback found no crew for vessel=" + SafeProtoVesselName(protoVessel)
+                    + (string.IsNullOrEmpty(source) ? "" : ", source=" + source));
+                if (hasVesselId) MarkRecoveryProcessed(vesselId, now, source + " no crew");
+                return;
+            }
+
+            RRLog.Verbose("[EAC] Proto recovery fallback processing vessel=" + SafeProtoVesselName(protoVessel)
+                + ", crew=" + crew.Count
+                + (string.IsNullOrEmpty(source) ? "" : ", source=" + source));
+
+            for (int i = 0; i < crew.Count; i++)
+            {
+                ProtoCrewMember pcm = crew[i];
+                if (pcm == null) continue;
+                RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
+                ProcessRecoveredKerbalBasics(pcm, rec, null, now);
+            }
+
+            RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(crew, SafeProtoVesselName(protoVessel), now);
+
+            for (int i = 0; i < crew.Count; i++)
+            {
+                ProtoCrewMember pcm = crew[i];
+                if (pcm == null) continue;
+                RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
+                MissionTimeTracker.ClearMissionTracking(rec);
+                RosterRotationKSCUI.RestoreCertifiedLevelIfNeeded(pcm, rec, "proto vessel recovery");
+            }
+
+            if (hasVesselId) MarkRecoveryProcessed(vesselId, now, source);
+            SaveScheduler.RequestSave("proto vessel recovery processing");
+        }
+
+        private static void PruneProcessed(double nowUT)
+        {
+            if (ProcessedRecoveryVessels.Count == 0) return;
+
+            List<Guid> stale = null;
+            foreach (KeyValuePair<Guid, double> kvp in ProcessedRecoveryVessels)
+            {
+                if (nowUT - kvp.Value <= ProcessedRecoveryRetentionSeconds) continue;
+                if (stale == null) stale = new List<Guid>();
+                stale.Add(kvp.Key);
+            }
+
+            if (stale == null) return;
+            for (int i = 0; i < stale.Count; i++)
+                ProcessedRecoveryVessels.Remove(stale[i]);
+        }
+
+        private static bool TryGetProtoVesselId(ProtoVessel protoVessel, out Guid vesselId)
+        {
+            vesselId = Guid.Empty;
+            if (protoVessel == null) return false;
+
+            try
+            {
+                ProtoVesselRecoveryAccessors accessors = GetProtoVesselRecoveryAccessors(protoVessel.GetType());
+                if (accessors == null) return false;
+
+                object value = accessors.VesselIdField != null ? accessors.VesselIdField.GetValue(protoVessel) : null;
+                if (value is Guid)
+                {
+                    vesselId = (Guid)value;
+                    return vesselId != Guid.Empty;
+                }
+
+                value = accessors.VesselIdProperty != null ? accessors.VesselIdProperty.GetValue(protoVessel, null) : null;
+                if (value is Guid)
+                {
+                    vesselId = (Guid)value;
+                    return vesselId != Guid.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("EACRecoveryCoordinator.TryGetProtoVesselId",
+                    "Suppressed exception while reading ProtoVessel id.", ex);
+            }
+
+            return false;
+        }
+
+        private static List<ProtoCrewMember> GetProtoVesselCrew(ProtoVessel protoVessel)
+        {
+            List<ProtoCrewMember> crew = new List<ProtoCrewMember>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (protoVessel == null) return crew;
+
+            try
+            {
+                ProtoVesselRecoveryAccessors accessors = GetProtoVesselRecoveryAccessors(protoVessel.GetType());
+                if (accessors != null && accessors.GetVesselCrewMethod != null)
+                    AddCrewObjects(accessors.GetVesselCrewMethod.Invoke(protoVessel, null) as IEnumerable, crew, seen);
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("EACRecoveryCoordinator.GetProtoVesselCrew.GetVesselCrew",
+                    "Suppressed exception while invoking ProtoVessel.GetVesselCrew().", ex);
+            }
+
+            if (crew.Count > 0) return crew;
+
+            try
+            {
+                if (protoVessel.protoPartSnapshots != null)
+                {
+                    foreach (ProtoPartSnapshot part in protoVessel.protoPartSnapshots)
+                    {
+                        if (part == null) continue;
+                        ProtoPartCrewAccessors accessors = GetProtoPartCrewAccessors(part.GetType());
+                        if (accessors == null) continue;
+
+                        object raw = accessors.ProtoModuleCrewField != null ? accessors.ProtoModuleCrewField.GetValue(part) : null;
+                        if (raw == null && accessors.ProtoModuleCrewProperty != null)
+                            raw = accessors.ProtoModuleCrewProperty.GetValue(part, null);
+
+                        AddCrewObjects(raw as IEnumerable, crew, seen);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("EACRecoveryCoordinator.GetProtoVesselCrew.protoModuleCrew",
+                    "Suppressed exception while reading ProtoPartSnapshot.protoModuleCrew.", ex);
+            }
+
+            return crew;
+        }
+
+        private static void AddCrewObjects(IEnumerable rawCrew, List<ProtoCrewMember> crew, HashSet<string> seen)
+        {
+            if (rawCrew == null || crew == null || seen == null) return;
+
+            foreach (object entry in rawCrew)
+            {
+                ProtoCrewMember pcm = entry as ProtoCrewMember;
+                if (pcm == null)
+                {
+                    string name = entry as string;
+                    if (!string.IsNullOrEmpty(name))
+                        pcm = FindCrewMemberByName(name);
+                }
+
+                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                if (!seen.Add(pcm.name)) continue;
+                crew.Add(pcm);
+            }
+        }
+
+        private static ProtoCrewMember FindCrewMemberByName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            if (HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null) return null;
+
+            foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
+            {
+                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                if (string.Equals(pcm.name, name, StringComparison.OrdinalIgnoreCase))
+                    return pcm;
+            }
+
+            return null;
+        }
+
+        private static string SafeProtoVesselName(ProtoVessel protoVessel)
+        {
+            if (protoVessel == null) return "<null>";
+            return !string.IsNullOrEmpty(protoVessel.vesselName) ? protoVessel.vesselName : "<unknown>";
+        }
+    }
+
 
     // ── Flight scene tracker ───────────────────────────────────────────────────
     [KSPAddon(KSPAddon.Startup.Flight, false)]
@@ -113,38 +483,7 @@ namespace RosterRotation
             {
                 if (pcm == null) continue;
                 var r = RosterRotationState.GetOrCreate(pcm.name);
-                r.Flights++;
-                r.LastFlightUT = now;
-                RosterRotationKSCUI.TryApplyVeteranTraitGrowthOnRecovery(pcm, r, v, now);
-
-                bool killedInFlight = pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead
-                                   || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing
-                                   || r.DeathUT > 0;
-                if (killedInFlight)
-                {
-                    r.RetirementScheduled = false;
-                }
-                else if (r.RetirementScheduled && !r.Retired)
-                {
-                    r.RetirementScheduled    = false;
-                    r.Retired                = true;
-                    r.RetiredUT              = now;
-                    r.ExperienceAtRetire     = (int)pcm.experienceLevel;
-                    RosterRotationState.NoteCertifiedLevel(r, (int)pcm.experienceLevel);
-                    r.RetirementWarned       = false;
-                    if (string.IsNullOrEmpty(r.OriginalTrait)) r.OriginalTrait = pcm.trait;
-                    r.OriginalType = pcm.type;
-                    pcm.inactive        = true;
-                    pcm.inactiveTimeEnd = now + RosterRotationState.YearSeconds * 1000.0;
-                    RosterRotationState.InvalidateRetiredCache();
-                    RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
-
-                    RosterRotationState.PostNotification(
-                        EACNotificationType.Retirement, $"Retired — {pcm.name}",
-                        $"{pcm.name} has retired following mission recovery. ({RosterRotationState.FormatGameDate(now)})",
-                        MessageSystemButton.MessageButtonColor.ORANGE,
-                        MessageSystemButton.ButtonIcons.MESSAGE);
-                }
+                EACRecoveryCoordinator.ProcessRecoveredKerbalBasics(pcm, r, v, now);
             }
 
             CrashSeverityState.HandleRecovery(v, now);
@@ -153,10 +492,11 @@ namespace RosterRotation
             {
                 if (pcm == null) continue;
                 var r = RosterRotationState.GetOrCreate(pcm.name);
-                r.MissionStartUT = 0;
-                r.LastMissionDeathCheckUT = 0;
+                MissionTimeTracker.ClearMissionTracking(r);
                 RosterRotationKSCUI.RestoreCertifiedLevelIfNeeded(pcm, r, "recovery requested");
             }
+
+            EACRecoveryCoordinator.MarkRecoveryProcessed(v.id, now, "flight recovery request");
         }
 
         private void OnVesselRecovered(ProtoVessel protoVessel, bool quick)
@@ -210,31 +550,70 @@ namespace RosterRotation
                         || newStatus == ProtoCrewMember.RosterStatus.Missing;
             if (!isDeath || rec.DeathUT > 0) return;
 
-            RosterRotationKSCUI.MarkKerbalDeathRecord(pcm, rec, now, false, "flight status change " + oldStatus + " -> " + newStatus);
-            int kiaAge = RosterRotationState.GetKerbalAge(rec, now);
-
-            if (RosterRotationState.DeathNotificationsEnabled)
+            // DeepFreeze temporarily drives Kerbals through stock death-like
+            // roster states while moving them into cryosleep.  Do not record
+            // that transient state as an EAC K.I.A.; the DeepFreeze layer will
+            // either accept it as cryosleep or, if it proves to be a real death,
+            // record it after a short verification window.
+            if (RosterRotationKSCUI.TryDeferDeepFreezeStatusDeathCandidate(
+                    pcm, rec, oldStatus, newStatus, now,
+                    "flight status change " + oldStatus + " -> " + newStatus))
             {
-                string kiaAge2 = kiaAge >= 0 ? "Age " + kiaAge + ", " : "";
-                string kiaDate = RosterRotationState.FormatGameDate(now);
-                RosterRotationState.PostNotification(
-                    EACNotificationType.Death, "K.I.A. — " + pcm.name,
-                    pcm.name + " was killed in action. " + kiaAge2 + kiaDate + ".",
-                    MessageSystemButton.MessageButtonColor.RED,
-                    MessageSystemButton.ButtonIcons.ALERT, 12f);
+                return;
             }
-            SaveScheduler.RequestSave("kerbal death state");
+
+            RosterRotationKSCUI.RecordStatusDeathAndNotify(pcm, rec, now, false,
+                "flight status change " + oldStatus + " -> " + newStatus);
         }
     }
+
+    [KSPAddon(KSPAddon.Startup.EveryScene, false)]
+    public sealed class EACRecoveryEventBridge : MonoBehaviour
+    {
+        private void Start()
+        {
+            GameEvents.onVesselRecovered.Add(new EventData<ProtoVessel, bool>.OnEvent(OnVesselRecovered));
+        }
+
+        private void OnDestroy()
+        {
+            GameEvents.onVesselRecovered.Remove(new EventData<ProtoVessel, bool>.OnEvent(OnVesselRecovered));
+        }
+
+        private void OnVesselRecovered(ProtoVessel protoVessel, bool quick)
+        {
+            // Recovery from the Space Center / Tracking Station / map can fire only
+            // KSP's ProtoVessel recovery event.  EAC's original recovery leave path
+            // lived on the Flight-scene OnVesselRecoveryRequested event, so remote
+            // recoveries could return the crew to Available without applying EAC
+            // recovery rest.  This bridge gives every scene a common fallback and
+            // de-duplicates against the Flight-scene path.
+            EACRecoveryCoordinator.ProcessProtoVesselRecovery(protoVessel, quick, "onVesselRecovered bridge scene=" + HighLogic.LoadedScene);
+        }
+    }
+
 
     // ── KSC UI (partial) ────────────────────────────────────────────────────────
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.3.0";
+        private const string ModVersion  = "1.4.1";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
+        internal static RosterRotationKSCUI Instance { get; private set; }
+
+        internal static void RequestUiRefresh(string reason = null)
+        {
+            RosterRotationKSCUI ui = Instance;
+            if (ui != null)
+            {
+                ui.InvalidateUICaches();
+                ui._pendingForceRefresh = true;
+            }
+
+            ACPatches.ForceRefresh();
+        }
 
         // ── Core UI state ──────────────────────────────────────────────────────
         private Texture2D _iconTex;
@@ -300,6 +679,7 @@ namespace RosterRotation
         // ── Lifecycle ──────────────────────────────────────────────────────────
         private void Start()
         {
+            Instance = this;
             _iconTex = GameDatabase.Instance.GetTexture("EAC/Icons/icon", false);
             GameEvents.onGUIApplicationLauncherReady.Add(OnAppLauncherReady);
             GameEvents.onGUIApplicationLauncherDestroyed.Add(OnAppLauncherDestroyed);
@@ -346,6 +726,7 @@ namespace RosterRotation
             StartCoroutine(RestoreCertifiedLevelsAfterDelay(0.5f, "space-center startup delayed"));
             StartCoroutine(RestoreCertifiedLevelsAfterDelay(2.0f, "space-center startup delayed"));
             EnforceRecordedDeaths("space-center startup");
+            RecoveryLeaveService.SyncEacRecoveryLeavesForRoster(Planetarium.GetUniversalTime(), "space-center startup");
             ResolveUnavailableGraduationExams();
             if (RosterRotationState.AgingEnabled)
                 InitializeExistingKerbalAges();
@@ -360,8 +741,7 @@ namespace RosterRotation
 
             rec.DiedOnMission = diedOnMission;
             rec.PendingMissionDeath = false;
-            rec.MissionStartUT = 0;
-            rec.LastMissionDeathCheckUT = 0;
+            MissionTimeTracker.ClearMissionTracking(rec);
             ClearActiveDutyStateAfterDeath(rec);
             RetiredKerbalCleanupService.ResetAutoCleanupRequest(pcm.name);
 
@@ -371,10 +751,35 @@ namespace RosterRotation
                 + ", reason=" + (string.IsNullOrEmpty(reason) ? "<none>" : reason));
         }
 
+        internal static void RecordStatusDeathAndNotify(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT, bool diedOnMission, string reason)
+        {
+            if (pcm == null || rec == null) return;
+
+            MarkKerbalDeathRecord(pcm, rec, nowUT, diedOnMission, reason);
+            int kiaAge = RosterRotationState.GetKerbalAge(rec, rec.DeathUT > 0 ? rec.DeathUT : nowUT);
+
+            if (RosterRotationState.DeathNotificationsEnabled)
+            {
+                string kiaAge2 = kiaAge >= 0 ? "Age " + kiaAge + ", " : "";
+                string kiaDate = RosterRotationState.FormatGameDate(rec.DeathUT > 0 ? rec.DeathUT : nowUT);
+                RosterRotationState.PostNotification(
+                    EACNotificationType.Death, "K.I.A. — " + pcm.name,
+                    pcm.name + " was killed in action. " + kiaAge2 + kiaDate + ".",
+                    MessageSystemButton.MessageButtonColor.RED,
+                    MessageSystemButton.ButtonIcons.ALERT, 12f);
+            }
+
+            SaveScheduler.RequestSave("kerbal death state");
+        }
+
         internal static bool ForceRecordedDeathIfNeeded(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double nowUT, string reason)
         {
             if (pcm == null || rec == null) return false;
             if (rec.DeathUT <= 0) return false;
+
+            if (TryClearFalseDeepFreezeDeathRecord(pcm, rec, nowUT, reason))
+                return true;
+
             if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                 pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
             {
@@ -384,8 +789,7 @@ namespace RosterRotation
 
             ProtoCrewMember.RosterStatus oldStatus = pcm.rosterStatus;
             ClearActiveDutyStateAfterDeath(rec);
-            rec.MissionStartUT = 0;
-            rec.LastMissionDeathCheckUT = 0;
+            MissionTimeTracker.ClearMissionTracking(rec);
             rec.PendingMissionDeath = false;
             rec.RetirementScheduled = false;
 
@@ -571,14 +975,7 @@ namespace RosterRotation
         {
             try
             {
-                foreach (var ui in UnityEngine.Object.FindObjectsOfType<RosterRotationKSCUI>())
-                {
-                    if (ui == null) continue;
-                    ui.InvalidateUICaches();
-                    ui._pendingForceRefresh = true;
-                }
-
-                ACPatches.ForceRefresh();
+                RosterRotationKSCUI.RequestUiRefresh(reason);
             }
             catch (Exception ex)
             {
@@ -588,6 +985,9 @@ namespace RosterRotation
 
         private void OnDestroy()
         {
+            if (ReferenceEquals(Instance, this))
+                Instance = null;
+
             GameEvents.onGUIApplicationLauncherReady.Remove(OnAppLauncherReady);
             GameEvents.onGUIApplicationLauncherDestroyed.Remove(OnAppLauncherDestroyed);
             GameEvents.onKerbalTypeChange.Remove(OnKerbalTypeChange);
@@ -617,12 +1017,13 @@ namespace RosterRotation
             CheckTrainingCompletion();
 
             double nowUT = Planetarium.GetUniversalTime();
+            bool recoveryRestoreDirty = RecoveryLeaveService.SyncEacRecoveryLeavesForRoster(nowUT, "space-center periodic check");
             bool missionTrackingDirty = MissionTimeTracker.SyncRoster(nowUT);
             bool deathRestoreDirty = EnforceRecordedDeaths("space-center periodic check");
             if (RosterRotationState.AgingEnabled)
                 CheckAgingAndRetirement();
-            else if (missionTrackingDirty && !deathRestoreDirty)
-                SaveScheduler.RequestSave("mission tracking sync");
+            else if ((missionTrackingDirty || recoveryRestoreDirty) && !deathRestoreDirty)
+                SaveScheduler.RequestSave(recoveryRestoreDirty ? "recovery leave sync" : "mission tracking sync");
         }
 
         private void OnKerbalTypeChange(ProtoCrewMember pcm,
@@ -659,6 +1060,8 @@ namespace RosterRotation
             if (RosterRotationState.AgingEnabled && rec.LastAgedYears < 0)
                 AssignAgeOnHire(pcm, rec, nowUT);
 
+            EACVeteranService.EvaluateKerbal(pcm, rec, "new hire", requestSave: false);
+
             InvalidateUICaches();
             _pendingForceRefresh = true;
         }
@@ -671,6 +1074,7 @@ namespace RosterRotation
             bool anyCleaned = CleanupStaleTrainingRecords(roster);
             bool anyExamResolved = ResolveUnavailableGraduationExams();
             bool anyDone = false;
+            bool anyStateRehydrated = false;
 
             foreach (var k in roster.Crew)
             {
@@ -686,8 +1090,13 @@ namespace RosterRotation
                     continue;
                 }
                 if (rec.Training == TrainingType.None) continue;
+                if (IsDeepFreezeFrozen(k) || rec.DeepFreezeActive) continue;
 
-                bool done = !k.inactive || (k.inactiveTimeEnd > 0 && now >= k.inactiveTimeEnd);
+                if (EACKerbalState.RehydrateTrainingInactiveFlagIfNeeded(k, rec, now, "training completion check"))
+                    anyStateRehydrated = true;
+
+                double trainingEndUT = EACKerbalState.GetTrainingEndUT(k, rec);
+                bool done = trainingEndUT > 0 ? now >= trainingEndUT : !k.inactive;
                 if (!done) continue;
 
                 if (rec.Training == TrainingType.ExperienceUpgrade)
@@ -730,10 +1139,10 @@ namespace RosterRotation
                 anyDone = true;
             }
 
-            if (anyDone || anyCleaned || anyExamResolved)
+            if (anyDone || anyCleaned || anyExamResolved || anyStateRehydrated)
             {
                 InvalidateUICaches();
-                SaveScheduler.RequestSave(anyDone ? "training completion" : anyCleaned ? "cleanup stale training records" : "final exams resolved by legacy training path");
+                SaveScheduler.RequestSave(anyDone ? "training completion" : anyCleaned ? "cleanup stale training records" : anyExamResolved ? "final exams resolved by legacy training path" : "rehydrate EAC training lock");
             }
         }
 

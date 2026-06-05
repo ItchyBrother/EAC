@@ -173,10 +173,14 @@ namespace RosterRotation
         private void HideWindowInternal()
         {
             _show = false;
+            // Do not keep polling persistent.sfs after the Hall window is closed.
+            // ShowWindowInternal re-arms the timer when the user opens it again.
+            _nextRefreshRt = float.MaxValue;
         }
 
         private void Update()
         {
+            if (!_show) return;
             if (Time.realtimeSinceStartup >= _nextRefreshRt)
             {
                 _nextRefreshRt = Time.realtimeSinceStartup + CachePollSeconds;
@@ -1220,6 +1224,8 @@ namespace RosterRotation
             var rosterMap = BuildRosterMap(saveRoot);
             var liveMap = BuildLiveCrewMap();
 
+            try { RosterRotation.DeepFreeze.EACDeepFreezeBridge.Update(); } catch { }
+
             BuildMilestones(saveRoot);
             BuildMemorials(recordMap, rosterMap, liveMap);
 
@@ -1372,6 +1378,13 @@ namespace RosterRotation
                 recordMap.TryGetValue(name, out eac);
                 rosterMap.TryGetValue(name, out roster);
                 liveMap.TryGetValue(name, out live);
+
+                // DeepFreeze stores frozen Kerbals in the stock roster as
+                // Unowned/Dead while cryosleep is active.  That is an implementation
+                // detail, not a real memorial event, so suppress them from the Hall
+                // until they either thaw or EAC records an actual death.
+                if (IsCurrentlyDeepFrozenForHall(name))
+                    continue;
 
                 if (!IsMemorialCandidate(eac, roster, live))
                     continue;
@@ -1792,6 +1805,30 @@ namespace RosterRotation
         {
             List<string> names = ReadCrewNames(node);
             return names.Count == 0 ? null : string.Join(", ", names.ToArray());
+        }
+
+        private static bool IsCurrentlyDeepFrozenForHall(string kerbalName)
+        {
+            if (string.IsNullOrEmpty(kerbalName)) return false;
+
+            try
+            {
+                if (RosterRotation.DeepFreeze.EACDeepFreezeBridge.IsFrozen(kerbalName))
+                    return true;
+            }
+            catch { }
+
+            try
+            {
+                RosterRotationState.KerbalRecord rec;
+                if (RosterRotationState.Records != null &&
+                    RosterRotationState.Records.TryGetValue(kerbalName, out rec) &&
+                    rec != null && rec.DeepFreezeActive)
+                    return true;
+            }
+            catch { }
+
+            return false;
         }
 
         private static bool IsMemorialCandidate(EacRecordSnapshot eac, ProtoCrewSnapshot roster, ProtoCrewSnapshot live)

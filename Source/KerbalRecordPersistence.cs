@@ -21,9 +21,11 @@ namespace RosterRotation
         public bool BirthdayNotificationsEnabled = true;
         public bool TrainingNotificationsEnabled = true;
         public bool RetirementNotificationsEnabled = true;
-        public int RetirementAgeMin = 48;
-        public int RetirementAgeMax = 55;
-        public int RetiredDeathAgeMin = 55;
+        public bool VeteranNotificationsEnabled = true;
+        public bool BadassNotificationsEnabled = true;
+        public int RetirementAgeMin = 37;
+        public int RetirementAgeMax = 47;
+        public int RetiredDeathAgeMin = 50;
         public bool AutoCleanupUnreferencedKerbals = false;
         public bool VerboseLogging = false;
         public bool VerboseAgeLogging = false;
@@ -33,6 +35,35 @@ namespace RosterRotation
         public string GraduationExamHistory = "";
         public bool PortraitCaptureEnabled = true;
         public bool MissionDeathEnabled = false;
+        public bool EACVeteranStatusEnabled = true;
+        public int EACVeteranFlightsRequired = 5;
+        public double EACVeteranHoursRequired = 12.0;
+        public bool EACVeteranRequireMilestone = false;
+        public bool EACStripDefaultVeterans = true;
+        public bool EACStripOtherUnearnedVeterans = false;
+        public bool EACAllowPilotVeterans = true;
+        public bool EACAllowEngineerVeterans = true;
+        public bool EACAllowScientistVeterans = true;
+        public bool EACApplySuits = true;
+        public int EACDefaultSuit = 0;
+        public int EACVeteranSuit = 2;
+        public bool EACBadassProgressionEnabled = false;
+        public bool EACBadassRequireVeteran = true;
+        public bool EACBadassRequireMilestone = true;
+        public int EACBadassChancePercent = 10;
+        public bool EACNewGameCrewSetupEnabled = true;
+        public bool EACNewGameCrewSetupCompleted = false;
+        public bool EACReplaceStartingCrewDefault = false;
+        public int EACStartingCrewCount = 4;
+        public bool EACStartingCrewAllowMales = true;
+        public bool EACStartingCrewAllowFemales = true;
+        public bool EACStartingCrewAllowPilots = true;
+        public bool EACStartingCrewAllowEngineers = true;
+        public bool EACStartingCrewAllowScientists = true;
+        public bool CrewRotationAdvisorEnabled = true;
+        public double DeepFreezeThawDeathBaseChance = 0.005;
+        public double DeepFreezeThawDeathBonusPerYear = 0.001;
+        public double DeepFreezeThawDeathMaxChance = 0.05;
     }
 
     internal static class KerbalRecordPersistence
@@ -57,6 +88,8 @@ namespace RosterRotation
                 BirthdayNotificationsEnabled = RosterRotationState.BirthdayNotificationsEnabled,
                 TrainingNotificationsEnabled = RosterRotationState.TrainingNotificationsEnabled,
                 RetirementNotificationsEnabled = RosterRotationState.RetirementNotificationsEnabled,
+                VeteranNotificationsEnabled = RosterRotationState.VeteranNotificationsEnabled,
+                BadassNotificationsEnabled = RosterRotationState.BadassNotificationsEnabled,
                 RetirementAgeMin = RosterRotationState.RetirementAgeMin,
                 RetirementAgeMax = RosterRotationState.RetirementAgeMax,
                 RetiredDeathAgeMin = RosterRotationState.RetiredDeathAgeMin,
@@ -68,7 +101,36 @@ namespace RosterRotation
                 FinalExamContractsEnabled = RosterRotationState.FinalExamContractsEnabled,
                 GraduationExamHistory = RosterRotationState.GraduationExamHistory,
                 PortraitCaptureEnabled = RosterRotationState.PortraitCaptureEnabled,
-                MissionDeathEnabled = RosterRotationState.MissionDeathEnabled
+                MissionDeathEnabled = RosterRotationState.MissionDeathEnabled,
+                EACVeteranStatusEnabled = RosterRotationState.EACVeteranStatusEnabled,
+                EACVeteranFlightsRequired = RosterRotationState.EACVeteranFlightsRequired,
+                EACVeteranHoursRequired = RosterRotationState.EACVeteranHoursRequired,
+                EACVeteranRequireMilestone = RosterRotationState.EACVeteranRequireMilestone,
+                EACStripDefaultVeterans = RosterRotationState.EACStripDefaultVeterans,
+                EACStripOtherUnearnedVeterans = RosterRotationState.EACStripOtherUnearnedVeterans,
+                EACAllowPilotVeterans = RosterRotationState.EACAllowPilotVeterans,
+                EACAllowEngineerVeterans = RosterRotationState.EACAllowEngineerVeterans,
+                EACAllowScientistVeterans = RosterRotationState.EACAllowScientistVeterans,
+                EACApplySuits = RosterRotationState.EACApplySuits,
+                EACDefaultSuit = RosterRotationState.EACDefaultSuit,
+                EACVeteranSuit = RosterRotationState.EACVeteranSuit,
+                EACBadassProgressionEnabled = RosterRotationState.EACBadassProgressionEnabled,
+                EACBadassRequireVeteran = RosterRotationState.EACBadassRequireVeteran,
+                EACBadassRequireMilestone = RosterRotationState.EACBadassRequireMilestone,
+                EACBadassChancePercent = RosterRotationState.EACBadassChancePercent,
+                EACNewGameCrewSetupEnabled = RosterRotationState.EACNewGameCrewSetupEnabled,
+                EACNewGameCrewSetupCompleted = RosterRotationState.EACNewGameCrewSetupCompleted,
+                EACReplaceStartingCrewDefault = RosterRotationState.EACReplaceStartingCrewDefault,
+                EACStartingCrewCount = RosterRotationState.EACStartingCrewCount,
+                EACStartingCrewAllowMales = RosterRotationState.EACStartingCrewAllowMales,
+                EACStartingCrewAllowFemales = RosterRotationState.EACStartingCrewAllowFemales,
+                EACStartingCrewAllowPilots = RosterRotationState.EACStartingCrewAllowPilots,
+                EACStartingCrewAllowEngineers = RosterRotationState.EACStartingCrewAllowEngineers,
+                EACStartingCrewAllowScientists = RosterRotationState.EACStartingCrewAllowScientists,
+                CrewRotationAdvisorEnabled = RosterRotationState.CrewRotationAdvisorEnabled,
+                DeepFreezeThawDeathBaseChance = RosterRotationState.DeepFreezeThawDeathBaseChance,
+                DeepFreezeThawDeathBonusPerYear = RosterRotationState.DeepFreezeThawDeathBonusPerYear,
+                DeepFreezeThawDeathMaxChance = RosterRotationState.DeepFreezeThawDeathMaxChance
             };
         }
 
@@ -96,9 +158,11 @@ namespace RosterRotation
             settings.BirthdayNotificationsEnabled = PB(settingsNode.GetValue("birthdayNotificationsEnabled"), true);
             settings.TrainingNotificationsEnabled = PB(settingsNode.GetValue("trainingNotificationsEnabled"), true);
             settings.RetirementNotificationsEnabled = PB(settingsNode.GetValue("retirementNotificationsEnabled"), true);
-            settings.RetirementAgeMin = PI(settingsNode.GetValue("retirementAgeMin"), 48);
-            settings.RetirementAgeMax = PI(settingsNode.GetValue("retirementAgeMax"), 55);
-            settings.RetiredDeathAgeMin = PI(settingsNode.GetValue("retiredDeathAgeMin"), 55);
+            settings.VeteranNotificationsEnabled = PB(settingsNode.GetValue("veteranNotificationsEnabled"), true);
+            settings.BadassNotificationsEnabled = PB(settingsNode.GetValue("badassNotificationsEnabled"), true);
+            settings.RetirementAgeMin = PI(settingsNode.GetValue("retirementAgeMin"), 37);
+            settings.RetirementAgeMax = PI(settingsNode.GetValue("retirementAgeMax"), 47);
+            settings.RetiredDeathAgeMin = PI(settingsNode.GetValue("retiredDeathAgeMin"), 50);
             settings.AutoCleanupUnreferencedKerbals = PB(settingsNode.GetValue("autoCleanupUnreferencedKerbals"), false);
             settings.VerboseLogging = PB(settingsNode.GetValue("verboseLogging"), false);
             settings.VerboseAgeLogging = PB(settingsNode.GetValue("verboseAgeLogging"), false);
@@ -108,6 +172,35 @@ namespace RosterRotation
             settings.GraduationExamHistory = settingsNode.GetValue("graduationExamHistory") ?? "";
             settings.PortraitCaptureEnabled = PB(settingsNode.GetValue("portraitCaptureEnabled"), true);
             settings.MissionDeathEnabled = PB(settingsNode.GetValue("missionDeathEnabled"), false);
+            settings.EACVeteranStatusEnabled = PB(settingsNode.GetValue("eacVeteranStatusEnabled"), true);
+            settings.EACVeteranFlightsRequired = PI(settingsNode.GetValue("eacVeteranFlightsRequired"), 5);
+            settings.EACVeteranHoursRequired = PD(settingsNode.GetValue("eacVeteranHoursRequired"), 12.0);
+            settings.EACVeteranRequireMilestone = PB(settingsNode.GetValue("eacVeteranRequireMilestone"), false);
+            settings.EACStripDefaultVeterans = PB(settingsNode.GetValue("eacStripDefaultVeterans"), true);
+            settings.EACStripOtherUnearnedVeterans = PB(settingsNode.GetValue("eacStripOtherUnearnedVeterans"), false);
+            settings.EACAllowPilotVeterans = PB(settingsNode.GetValue("eacAllowPilotVeterans"), true);
+            settings.EACAllowEngineerVeterans = PB(settingsNode.GetValue("eacAllowEngineerVeterans"), true);
+            settings.EACAllowScientistVeterans = PB(settingsNode.GetValue("eacAllowScientistVeterans"), true);
+            settings.EACApplySuits = PB(settingsNode.GetValue("eacApplySuits"), true);
+            settings.EACDefaultSuit = PI(settingsNode.GetValue("eacDefaultSuit"), 0);
+            settings.EACVeteranSuit = PI(settingsNode.GetValue("eacVeteranSuit"), 2);
+            settings.EACBadassProgressionEnabled = PB(settingsNode.GetValue("eacBadassProgressionEnabled"), false);
+            settings.EACBadassRequireVeteran = PB(settingsNode.GetValue("eacBadassRequireVeteran"), true);
+            settings.EACBadassRequireMilestone = PB(settingsNode.GetValue("eacBadassRequireMilestone"), true);
+            settings.EACBadassChancePercent = PI(settingsNode.GetValue("eacBadassChancePercent"), 10);
+            settings.EACNewGameCrewSetupEnabled = PB(settingsNode.GetValue("eacNewGameCrewSetupEnabled"), true);
+            settings.EACNewGameCrewSetupCompleted = PB(settingsNode.GetValue("eacNewGameCrewSetupCompleted"), false);
+            settings.EACReplaceStartingCrewDefault = PB(settingsNode.GetValue("eacReplaceStartingCrewDefault"), false);
+            settings.EACStartingCrewCount = PI(settingsNode.GetValue("eacStartingCrewCount"), 4);
+            settings.EACStartingCrewAllowMales = PB(settingsNode.GetValue("eacStartingCrewAllowMales"), true);
+            settings.EACStartingCrewAllowFemales = PB(settingsNode.GetValue("eacStartingCrewAllowFemales"), true);
+            settings.EACStartingCrewAllowPilots = PB(settingsNode.GetValue("eacStartingCrewAllowPilots"), true);
+            settings.EACStartingCrewAllowEngineers = PB(settingsNode.GetValue("eacStartingCrewAllowEngineers"), true);
+            settings.EACStartingCrewAllowScientists = PB(settingsNode.GetValue("eacStartingCrewAllowScientists"), true);
+            settings.CrewRotationAdvisorEnabled = PB(settingsNode.GetValue("crewRotationAdvisorEnabled"), true);
+            settings.DeepFreezeThawDeathBaseChance = PD(settingsNode.GetValue("deepFreezeThawDeathBaseChance"), 0.005);
+            settings.DeepFreezeThawDeathBonusPerYear = PD(settingsNode.GetValue("deepFreezeThawDeathBonusPerYear"), 0.001);
+            settings.DeepFreezeThawDeathMaxChance = PD(settingsNode.GetValue("deepFreezeThawDeathMaxChance"), 0.05);
             return settings;
         }
 
@@ -131,6 +224,8 @@ namespace RosterRotation
             RosterRotationState.BirthdayNotificationsEnabled = settings.BirthdayNotificationsEnabled;
             RosterRotationState.TrainingNotificationsEnabled = settings.TrainingNotificationsEnabled;
             RosterRotationState.RetirementNotificationsEnabled = settings.RetirementNotificationsEnabled;
+            RosterRotationState.VeteranNotificationsEnabled = settings.VeteranNotificationsEnabled;
+            RosterRotationState.BadassNotificationsEnabled = settings.BadassNotificationsEnabled;
             RosterRotationState.RetirementAgeMin = settings.RetirementAgeMin;
             RosterRotationState.RetirementAgeMax = settings.RetirementAgeMax;
             RosterRotationState.RetiredDeathAgeMin = settings.RetiredDeathAgeMin;
@@ -146,6 +241,35 @@ namespace RosterRotation
             RosterRotationState.GraduationExamHistory = settings.GraduationExamHistory ?? "";
             RosterRotationState.PortraitCaptureEnabled = settings.PortraitCaptureEnabled;
             RosterRotationState.MissionDeathEnabled = settings.MissionDeathEnabled;
+            RosterRotationState.EACVeteranStatusEnabled = settings.EACVeteranStatusEnabled;
+            RosterRotationState.EACVeteranFlightsRequired = settings.EACVeteranFlightsRequired;
+            RosterRotationState.EACVeteranHoursRequired = settings.EACVeteranHoursRequired;
+            RosterRotationState.EACVeteranRequireMilestone = settings.EACVeteranRequireMilestone;
+            RosterRotationState.EACStripDefaultVeterans = settings.EACStripDefaultVeterans;
+            RosterRotationState.EACStripOtherUnearnedVeterans = settings.EACStripOtherUnearnedVeterans;
+            RosterRotationState.EACAllowPilotVeterans = settings.EACAllowPilotVeterans;
+            RosterRotationState.EACAllowEngineerVeterans = settings.EACAllowEngineerVeterans;
+            RosterRotationState.EACAllowScientistVeterans = settings.EACAllowScientistVeterans;
+            RosterRotationState.EACApplySuits = settings.EACApplySuits;
+            RosterRotationState.EACDefaultSuit = settings.EACDefaultSuit;
+            RosterRotationState.EACVeteranSuit = settings.EACVeteranSuit;
+            RosterRotationState.EACBadassProgressionEnabled = settings.EACBadassProgressionEnabled;
+            RosterRotationState.EACBadassRequireVeteran = settings.EACBadassRequireVeteran;
+            RosterRotationState.EACBadassRequireMilestone = settings.EACBadassRequireMilestone;
+            RosterRotationState.EACBadassChancePercent = settings.EACBadassChancePercent;
+            RosterRotationState.EACNewGameCrewSetupEnabled = settings.EACNewGameCrewSetupEnabled;
+            RosterRotationState.EACNewGameCrewSetupCompleted = settings.EACNewGameCrewSetupCompleted;
+            RosterRotationState.EACReplaceStartingCrewDefault = settings.EACReplaceStartingCrewDefault;
+            RosterRotationState.EACStartingCrewCount = settings.EACStartingCrewCount;
+            RosterRotationState.EACStartingCrewAllowMales = settings.EACStartingCrewAllowMales;
+            RosterRotationState.EACStartingCrewAllowFemales = settings.EACStartingCrewAllowFemales;
+            RosterRotationState.EACStartingCrewAllowPilots = settings.EACStartingCrewAllowPilots;
+            RosterRotationState.EACStartingCrewAllowEngineers = settings.EACStartingCrewAllowEngineers;
+            RosterRotationState.EACStartingCrewAllowScientists = settings.EACStartingCrewAllowScientists;
+            RosterRotationState.CrewRotationAdvisorEnabled = settings.CrewRotationAdvisorEnabled;
+            RosterRotationState.DeepFreezeThawDeathBaseChance = settings.DeepFreezeThawDeathBaseChance;
+            RosterRotationState.DeepFreezeThawDeathBonusPerYear = settings.DeepFreezeThawDeathBonusPerYear;
+            RosterRotationState.DeepFreezeThawDeathMaxChance = settings.DeepFreezeThawDeathMaxChance;
             RosterRotationState.DebugForceMissionDeath = false;
         }
 
@@ -170,6 +294,8 @@ namespace RosterRotation
             node.AddValue("birthdayNotificationsEnabled", settings.BirthdayNotificationsEnabled.ToString(ci));
             node.AddValue("trainingNotificationsEnabled", settings.TrainingNotificationsEnabled.ToString(ci));
             node.AddValue("retirementNotificationsEnabled", settings.RetirementNotificationsEnabled.ToString(ci));
+            node.AddValue("veteranNotificationsEnabled", settings.VeteranNotificationsEnabled.ToString(ci));
+            node.AddValue("badassNotificationsEnabled", settings.BadassNotificationsEnabled.ToString(ci));
             node.AddValue("retirementAgeMin", settings.RetirementAgeMin.ToString(ci));
             node.AddValue("retirementAgeMax", settings.RetirementAgeMax.ToString(ci));
             node.AddValue("retiredDeathAgeMin", settings.RetiredDeathAgeMin.ToString(ci));
@@ -182,6 +308,35 @@ namespace RosterRotation
             if (!string.IsNullOrEmpty(settings.GraduationExamHistory)) node.AddValue("graduationExamHistory", settings.GraduationExamHistory);
             node.AddValue("portraitCaptureEnabled", settings.PortraitCaptureEnabled.ToString(ci));
             node.AddValue("missionDeathEnabled", settings.MissionDeathEnabled.ToString(ci));
+            node.AddValue("eacVeteranStatusEnabled", settings.EACVeteranStatusEnabled.ToString(ci));
+            node.AddValue("eacVeteranFlightsRequired", settings.EACVeteranFlightsRequired.ToString(ci));
+            node.AddValue("eacVeteranHoursRequired", settings.EACVeteranHoursRequired.ToString("R", ci));
+            node.AddValue("eacVeteranRequireMilestone", settings.EACVeteranRequireMilestone.ToString(ci));
+            node.AddValue("eacStripDefaultVeterans", settings.EACStripDefaultVeterans.ToString(ci));
+            node.AddValue("eacStripOtherUnearnedVeterans", settings.EACStripOtherUnearnedVeterans.ToString(ci));
+            node.AddValue("eacAllowPilotVeterans", settings.EACAllowPilotVeterans.ToString(ci));
+            node.AddValue("eacAllowEngineerVeterans", settings.EACAllowEngineerVeterans.ToString(ci));
+            node.AddValue("eacAllowScientistVeterans", settings.EACAllowScientistVeterans.ToString(ci));
+            node.AddValue("eacApplySuits", settings.EACApplySuits.ToString(ci));
+            node.AddValue("eacDefaultSuit", settings.EACDefaultSuit.ToString(ci));
+            node.AddValue("eacVeteranSuit", settings.EACVeteranSuit.ToString(ci));
+            node.AddValue("eacBadassProgressionEnabled", settings.EACBadassProgressionEnabled.ToString(ci));
+            node.AddValue("eacBadassRequireVeteran", settings.EACBadassRequireVeteran.ToString(ci));
+            node.AddValue("eacBadassRequireMilestone", settings.EACBadassRequireMilestone.ToString(ci));
+            node.AddValue("eacBadassChancePercent", settings.EACBadassChancePercent.ToString(ci));
+            node.AddValue("eacNewGameCrewSetupEnabled", settings.EACNewGameCrewSetupEnabled.ToString(ci));
+            node.AddValue("eacNewGameCrewSetupCompleted", settings.EACNewGameCrewSetupCompleted.ToString(ci));
+            node.AddValue("eacReplaceStartingCrewDefault", settings.EACReplaceStartingCrewDefault.ToString(ci));
+            node.AddValue("eacStartingCrewCount", settings.EACStartingCrewCount.ToString(ci));
+            node.AddValue("eacStartingCrewAllowMales", settings.EACStartingCrewAllowMales.ToString(ci));
+            node.AddValue("eacStartingCrewAllowFemales", settings.EACStartingCrewAllowFemales.ToString(ci));
+            node.AddValue("eacStartingCrewAllowPilots", settings.EACStartingCrewAllowPilots.ToString(ci));
+            node.AddValue("eacStartingCrewAllowEngineers", settings.EACStartingCrewAllowEngineers.ToString(ci));
+            node.AddValue("eacStartingCrewAllowScientists", settings.EACStartingCrewAllowScientists.ToString(ci));
+            node.AddValue("crewRotationAdvisorEnabled", settings.CrewRotationAdvisorEnabled.ToString(ci));
+            node.AddValue("deepFreezeThawDeathBaseChance", settings.DeepFreezeThawDeathBaseChance.ToString("R", ci));
+            node.AddValue("deepFreezeThawDeathBonusPerYear", settings.DeepFreezeThawDeathBonusPerYear.ToString("R", ci));
+            node.AddValue("deepFreezeThawDeathMaxChance", settings.DeepFreezeThawDeathMaxChance.ToString("R", ci));
         }
 
         public static bool TryReadRecord(ConfigNode recordNode, out string name, out RosterRotationState.KerbalRecord record)
@@ -202,6 +357,7 @@ namespace RosterRotation
                 RetiredUT = PD(recordNode.GetValue("retiredUT"), 0),
                 ExperienceAtRetire = PI(recordNode.GetValue("experienceAtRetire"), -1),
                 MissionStartUT = PD(recordNode.GetValue("missionStartUT"), 0),
+                MissionAccumulatedUT = PD(recordNode.GetValue("missionAccumulatedUT"), 0),
                 Training = (TrainingType)PI(recordNode.GetValue("trainingType"), 0),
                 TrainingTargetLevel = PI(recordNode.GetValue("trainingTargetLevel"), 0),
                 GrantedLevel = PI(recordNode.GetValue("grantedLevel"), -1),
@@ -226,6 +382,12 @@ namespace RosterRotation
                 PendingMissionDeath = PB(recordNode.GetValue("pendingMissionDeath"), false),
                 TrainingEndUT = PD(recordNode.GetValue("trainingEndUT"), 0),
                 LastAgedYears = PI(recordNode.GetValue("lastAgedYears"), -1),
+                DeepFreezeActive = PB(recordNode.GetValue("deepFreezeActive"), false),
+                DeepFreezeStartUT = PD(recordNode.GetValue("deepFreezeStartUT"), 0),
+                DeepFreezeAccumulatedUT = PD(recordNode.GetValue("deepFreezeAccumulatedUT"), 0),
+                DeepFreezeLastKnownVesselName = recordNode.GetValue("deepFreezeLastKnownVesselName") ?? "",
+                EACBadassRollKey = recordNode.GetValue("eacBadassRollKey") ?? "",
+                EACBadassAwarded = PB(recordNode.GetValue("eacBadassAwarded"), false),
             };
 
             RosterRotationState.EnsureKerbalIdentity(record);
@@ -250,6 +412,7 @@ namespace RosterRotation
             node.AddValue("retiredUT", record.RetiredUT.ToString("R", ci));
             if (record.ExperienceAtRetire >= 0) node.AddValue("experienceAtRetire", record.ExperienceAtRetire.ToString(ci));
             node.AddValue("missionStartUT", record.MissionStartUT.ToString("R", ci));
+            if (record.MissionAccumulatedUT > 0) node.AddValue("missionAccumulatedUT", record.MissionAccumulatedUT.ToString("R", ci));
             node.AddValue("trainingType", ((int)record.Training).ToString(ci));
             node.AddValue("trainingTargetLevel", record.TrainingTargetLevel.ToString(ci));
             if (record.GrantedLevel >= 0) node.AddValue("grantedLevel", record.GrantedLevel.ToString(ci));
@@ -275,8 +438,14 @@ namespace RosterRotation
                 if (record.LastMissionDeathCheckUT > 0) node.AddValue("lastMissionDeathCheckUT", record.LastMissionDeathCheckUT.ToString("R", ci));
                 if (record.DiedOnMission) node.AddValue("diedOnMission", record.DiedOnMission.ToString(ci));
                 if (record.PendingMissionDeath) node.AddValue("pendingMissionDeath", record.PendingMissionDeath.ToString(ci));
+                if (record.DeepFreezeActive) node.AddValue("deepFreezeActive", record.DeepFreezeActive.ToString(ci));
+                if (record.DeepFreezeStartUT > 0) node.AddValue("deepFreezeStartUT", record.DeepFreezeStartUT.ToString("R", ci));
+                if (record.DeepFreezeAccumulatedUT > 0) node.AddValue("deepFreezeAccumulatedUT", record.DeepFreezeAccumulatedUT.ToString("R", ci));
+                if (!string.IsNullOrEmpty(record.DeepFreezeLastKnownVesselName)) node.AddValue("deepFreezeLastKnownVesselName", record.DeepFreezeLastKnownVesselName);
                 node.AddValue("lastAgedYears", record.LastAgedYears.ToString(ci));
             }
+            if (!string.IsNullOrEmpty(record.EACBadassRollKey)) node.AddValue("eacBadassRollKey", record.EACBadassRollKey);
+            if (record.EACBadassAwarded) node.AddValue("eacBadassAwarded", record.EACBadassAwarded.ToString(ci));
         }
 
         private static int PI(string s, int fb)

@@ -45,6 +45,10 @@
     <Compile Include="Mod.Drawing.cs" />
     <Compile Include="Mod.FlightTracker.cs" />
     <Compile Include="Mod.Roster.cs" />
+    <Compile Include="DeepFreeze\EACDeepFreezeKerbalInfo.cs" />
+    <Compile Include="DeepFreeze\EACDeepFreezeBridge.cs" />
+    <Compile Include="DeepFreeze\EACDeepFreezeLifecycle.cs" />
+    <Compile Include="DeepFreeze\EACDeepFreezeMonitor.cs" />
     <Compile Include="Mod.TraitGrowth.cs" />
     <Compile Include="Mod.GraduationExams.cs" />
     <Compile Include="Mod.cs" />
@@ -72,6 +76,20 @@
     <Compile Include="EACPortraitCaptureWatcher.cs" />
     <Compile Include="EACPortraitRenderer.cs" />
     <Compile Include="KspAssemblyCache.cs" />
+    <Compile Include="EACExternalModDetector.cs" />
+    <Compile Include="EACAdvancedSettingsWindow.cs" />
+    <Compile Include="EACKerbalMemberAccess.cs" />
+    <Compile Include="EACKerbalState.cs" />
+    <Compile Include="EACVeteranEligibility.cs" />
+    <Compile Include="EACSuitService.cs" />
+    <Compile Include="EACBadassProgressionService.cs" />
+    <Compile Include="EACStartingCrewService.cs" />
+    <Compile Include="EACStartingCrewSetupController.cs" />
+    <Compile Include="EACVeteranService.cs" />
+    <Compile Include="CrewSuggestion.cs" />
+    <Compile Include="EACCrewRotationRecommendationService.cs" />
+    <Compile Include="EACCrewAssignmentDialogLocator.cs" />
+    <Compile Include="EACCrewRotationAdvisor.cs" />
   </ItemGroup>
 
   <ItemGroup>

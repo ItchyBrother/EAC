@@ -11,6 +11,9 @@ namespace RosterRotation
         {
             DontDestroyOnLoad(gameObject);
             gameObject.hideFlags = HideFlags.HideAndDontSave;
+            // The runner only needs per-frame Update while a deferred save is pending.
+            // Leave it disabled the rest of the time so EAC adds no idle Update cost.
+            enabled = false;
         }
 
         private void Update()
@@ -65,6 +68,9 @@ namespace RosterRotation
             _syncStateFromGameParams |= syncStateFromGameParams;
             if (!string.IsNullOrEmpty(reason))
                 _pendingReasons.Add(reason);
+
+            if (_runner != null)
+                _runner.enabled = true;
         }
 
         public static void RequestImmediateSave(string reason, bool syncStateFromGameParams = false)
@@ -92,6 +98,12 @@ namespace RosterRotation
             FlushPending();
         }
 
+        private static void DisableRunnerIfIdle()
+        {
+            if (!_savePending && _runner != null)
+                _runner.enabled = false;
+        }
+
         public static void FlushPending(string immediateReasonOverride = null)
         {
             string reason = !string.IsNullOrEmpty(immediateReasonOverride)
@@ -106,7 +118,14 @@ namespace RosterRotation
             _syncStateFromGameParams = false;
             _pendingReasons.Clear();
 
-            TrySave(reason, syncState);
+            try
+            {
+                TrySave(reason, syncState);
+            }
+            finally
+            {
+                DisableRunnerIfIdle();
+            }
         }
 
         private static void TrySave(string reason, bool syncStateFromGameParams)

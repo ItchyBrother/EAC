@@ -14,6 +14,12 @@ namespace RosterRotation
 
     internal static class RecoveryLeaveService
     {
+        // A very short test hop can otherwise compute only a few seconds of
+        // recovery leave, which expires before the Astronaut Complex can show it.
+        // Keep any positive EAC-managed recovery visible for at least one in-game
+        // hour, while still respecting the configured maximum recovery cap.
+        private const double MinimumVisibleRecoverySeconds = 60d * 60d;
+
         private static readonly Dictionary<string, PendingCrewRandRExtension> PendingCrewRandRExtensions =
             new Dictionary<string, PendingCrewRandRExtension>(StringComparer.OrdinalIgnoreCase);
 
@@ -171,23 +177,93 @@ namespace RosterRotation
             }
         }
 
+        internal static double GetEacRecoveryUntilUT(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double now)
+        {
+            if (CrewRandRAdapter.IsInstalled()) return 0;
+            if (rec == null || rec.RestUntilUT <= now) return 0;
+
+            double until = rec.RestUntilUT;
+            if (pcm != null && pcm.inactive && pcm.inactiveTimeEnd > now)
+                until = Math.Max(until, pcm.inactiveTimeEnd);
+            return until > now ? until : 0;
+        }
+
+        internal static bool IsEacRecoveryActive(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, double now)
+        {
+            return GetEacRecoveryUntilUT(pcm, rec, now) > now;
+        }
+
+        internal static bool SyncEacRecoveryLeavesForRoster(double now, string reason)
+        {
+            if (CrewRandRAdapter.IsInstalled()) return false;
+            if (HighLogic.CurrentGame == null || HighLogic.CurrentGame.CrewRoster == null) return false;
+
+            bool changed = false;
+            foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
+            {
+                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
+                if (pcm.type == ProtoCrewMember.KerbalType.Applicant) continue;
+                if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Assigned) continue;
+                if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
+
+                RosterRotationState.KerbalRecord rec;
+                if (!RosterRotationState.Records.TryGetValue(pcm.name, out rec) || rec == null) continue;
+                if (rec.Retired || rec.RestUntilUT <= now) continue;
+
+                // KSP can rebuild recovered crew as Available during the recovery/scene
+                // transition and drop pcm.inactive.  EAC's saved RestUntilUT is the
+                // authoritative recovery leave state, so rehydrate the stock fields
+                // whenever we see an active EAC-managed recovery record.
+                bool kerbalChanged = false;
+                if (!pcm.inactive)
+                {
+                    pcm.inactive = true;
+                    kerbalChanged = true;
+                }
+                if (pcm.inactiveTimeEnd < rec.RestUntilUT)
+                {
+                    pcm.inactiveTimeEnd = rec.RestUntilUT;
+                    kerbalChanged = true;
+                }
+
+                if (kerbalChanged)
+                {
+                    changed = true;
+                    RRLog.Verbose("[EAC] Rehydrated EAC recovery leave for " + pcm.name
+                        + ": until=" + rec.RestUntilUT.ToString("0.###")
+                        + (string.IsNullOrEmpty(reason) ? "" : ", reason=" + reason));
+                }
+            }
+
+            if (changed)
+                SaveScheduler.RequestSave("rehydrate EAC recovery leave");
+
+            return changed;
+        }
+
         internal static void ApplyDefaultRecoveryRestIfNeeded(Vessel vessel, double now)
         {
             if (vessel == null) return;
+            List<ProtoCrewMember> crew = vessel.GetVesselCrew();
+            ApplyDefaultRecoveryRestIfNeeded(crew, SafeVesselName(vessel), now);
+        }
+
+        internal static bool ApplyDefaultRecoveryRestIfNeeded(IEnumerable<ProtoCrewMember> crew, string vesselName, double now)
+        {
             if (CrewRandRAdapter.IsInstalled())
             {
-                RRLog.Verbose("[EAC] CrewRandR present; skipping EAC base recovery leave for vessel=" + SafeVesselName(vessel));
-                return;
+                RRLog.Verbose("[EAC] CrewRandR present; skipping EAC base recovery leave for vessel=" + SafeVesselName(vesselName));
+                return false;
             }
 
-            List<ProtoCrewMember> crew = vessel.GetVesselCrew();
-            if (crew == null || crew.Count == 0) return;
+            if (crew == null) return false;
 
+            bool sawCrew = false;
             bool appliedAny = false;
-            for (int i = 0; i < crew.Count; i++)
+            foreach (ProtoCrewMember pcm in crew)
             {
-                ProtoCrewMember pcm = crew[i];
                 if (pcm == null) continue;
+                sawCrew = true;
                 if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
 
                 RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
@@ -201,7 +277,8 @@ namespace RosterRotation
                         + ": missionDays=" + missionDays.ToString("0.###")
                         + ", percent=" + RosterRotationState.RecoveryLeavePercent.ToString("0.###")
                         + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
-                        + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###"));
+                        + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###")
+                        + ", missionAccumulatedSeconds=" + rec.MissionAccumulatedUT.ToString("0.###"));
                     continue;
                 }
 
@@ -220,18 +297,20 @@ namespace RosterRotation
                     + ", baseRecoveryDays=" + baseRecoveryDays.ToString("0.###")
                     + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
                     + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###")
+                    + ", missionAccumulatedSeconds=" + rec.MissionAccumulatedUT.ToString("0.###")
                     + ", inactiveTimeEnd=" + pcm.inactiveTimeEnd.ToString("0.###")
                     + ", rec.RestUntilUT=" + rec.RestUntilUT.ToString("0.###"));
             }
 
             if (!appliedAny)
             {
-                RRLog.Verbose("[EAC] Base recovery leave not applied for vessel=" + SafeVesselName(vessel)
-                    + ": no crew had a positive personal mission duration.");
-                return;
+                RRLog.Verbose("[EAC] Base recovery leave not applied for vessel=" + SafeVesselName(vesselName)
+                    + (sawCrew ? ": no crew had a positive personal mission duration." : ": no recovered crew found."));
+                return false;
             }
 
             SaveScheduler.RequestSave("base recovery leave");
+            return true;
         }
 
         internal static CrashApplySource ApplyCrashRecoveryTime(
@@ -307,6 +386,7 @@ namespace RosterRotation
                 + ", extraDays=" + outcome.ExtraDays.ToString("0.###")
                 + ", maxDays=" + Math.Max(0, RosterRotationState.RestDays).ToString("0.###")
                 + ", missionStartUT=" + rec.MissionStartUT.ToString("0.###")
+                + ", missionAccumulatedSeconds=" + rec.MissionAccumulatedUT.ToString("0.###")
                 + ", until=" + eacUntil.ToString("0.###"));
 
             return CrashApplySource.EAC;
@@ -322,7 +402,17 @@ namespace RosterRotation
 
             double computedDays = missionDays * (percent / 100.0);
             double maxDays = Math.Max(0, RosterRotationState.RestDays);
+            if (maxDays <= 0) return 0;
+
             computedDays = Math.Min(computedDays, maxDays);
+
+            if (computedDays > 0)
+            {
+                double daySeconds = RosterRotationState.DaySeconds;
+                double minimumDays = daySeconds > 0 ? MinimumVisibleRecoverySeconds / daySeconds : 0;
+                minimumDays = Math.Min(minimumDays, maxDays);
+                computedDays = Math.Max(computedDays, minimumDays);
+            }
 
             return Math.Max(0, computedDays);
         }
@@ -332,9 +422,7 @@ namespace RosterRotation
             if (pcm == null || rec == null) return 0;
             double daySeconds = RosterRotationState.DaySeconds;
             if (daySeconds <= 0) return 0;
-            if (rec.MissionStartUT <= 0 || rec.MissionStartUT > now) return 0;
-
-            double missionSeconds = Math.Max(0, now - rec.MissionStartUT);
+            double missionSeconds = MissionTimeTracker.GetMissionSeconds(rec, now);
             if (missionSeconds <= 0) return 0;
             return missionSeconds / daySeconds;
         }
@@ -357,6 +445,11 @@ namespace RosterRotation
         {
             if (vessel == null) return "<null>";
             return !string.IsNullOrEmpty(vessel.vesselName) ? vessel.vesselName : vessel.id.ToString();
+        }
+
+        private static string SafeVesselName(string vesselName)
+        {
+            return !string.IsNullOrEmpty(vesselName) ? vesselName : "<unknown>";
         }
 
         private static string SafeVesselNameText(CrashTrackedVessel tracked)

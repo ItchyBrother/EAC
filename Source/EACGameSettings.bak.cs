@@ -183,14 +183,11 @@ namespace RosterRotation
                     EACStateBridge.SetBool("TrainingNotificationsEnabled", true);
                     EACStateBridge.SetBool("RetirementNotificationsEnabled", true);
                     EACStateBridge.SetBool("DeathNotificationsEnabled", true);
-                    EACStateBridge.SetBool("VeteranNotificationsEnabled", true);
-                    EACStateBridge.SetBool("BadassNotificationsEnabled", true);
                 }
 
                 EACStateBridge.SetBool("PortraitCaptureEnabled", gen.PortraitCaptureEnabled);
                 EACStateBridge.SetBool("CrashPenaltyEnabled", gen.CrashPenaltyEnabled);
                 EACStateBridge.SetBool("MissionDeathEnabled", gen.MissionDeathEnabled);
-                EACStateBridge.SetBool("CrewRotationAdvisorEnabled", gen.CrewRotationAdvisorEnabled);
 
                 EACStateBridge.SetBool("VerboseLogging", gen.VerboseUILogs);
                 EACStateBridge.SetBool("VerboseAgeLogging", gen.VerboseAgingLogs);
@@ -247,10 +244,6 @@ namespace RosterRotation
                 gen.PortraitCaptureEnabled = EACStateBridge.GetBool("PortraitCaptureEnabled", gen.PortraitCaptureEnabled);
                 gen.CrashPenaltyEnabled = EACStateBridge.GetBool("CrashPenaltyEnabled", gen.CrashPenaltyEnabled);
                 gen.MissionDeathEnabled = EACStateBridge.GetBool("MissionDeathEnabled", gen.MissionDeathEnabled);
-                gen.CrewRotationAdvisorEnabled = EACStateBridge.GetBool("CrewRotationAdvisorEnabled", gen.CrewRotationAdvisorEnabled);
-                gen.CrewRotationAdvisorStatus = EACExternalModDetector.IsCrewRandRInstalled()
-                    ? "Crew R&R detected: EAC suggested crew rotation is disabled."
-                    : "Crew R&R not detected: EAC can show suggested next crew in the editor.";
                 gen.VerboseUILogs    = EACStateBridge.GetBool("VerboseLogging", gen.VerboseUILogs);
                 gen.VerboseAgingLogs = EACStateBridge.GetBool("VerboseAgeLogging", gen.VerboseAgingLogs);
 
@@ -320,19 +313,6 @@ namespace RosterRotation
 
         [GameParameters.CustomStringParameterUI(
             "",
-            title = "Crew rotation",
-            lines = 2,
-            autoPersistance = false)]
-        public string CrewRotationAdvisorStatus = "";
-
-        [GameParameters.CustomParameterUI(
-            "Suggested next crew",
-            toolTip = "Show EAC's suggested next crew window when the stock editor crew assignment dialog is opened. Disabled when Crew R&R is installed.",
-            autoPersistance = false)]
-        public bool CrewRotationAdvisorEnabled = true;
-
-        [GameParameters.CustomStringParameterUI(
-            "",
             title = "Debug",
             lines = 1,
             autoPersistance = false)]
@@ -369,16 +349,11 @@ namespace RosterRotation
 
         public override bool Interactible(MemberInfo member, GameParameters parameters)
         {
-            if (member != null &&
+            if (member != null && 
                 (member.Name == nameof(AdvancedSettingsSpacer) ||
-                 member.Name == nameof(AdvancedSettingsHint) ||
-                 member.Name == nameof(CrewRotationAdvisorStatus) ||
-                 member.Name == nameof(DebugHeading)))
+                member.Name == nameof(AdvancedSettingsHint) || 
+                member.Name == nameof(DebugHeading)))
                 return false;
-
-            if (member != null && member.Name == nameof(CrewRotationAdvisorEnabled))
-                return !EACExternalModDetector.IsCrewRandRInstalled();
-
             return true;
         }
 
@@ -390,10 +365,6 @@ namespace RosterRotation
             PortraitCaptureEnabled = EACStateBridge.GetBool("PortraitCaptureEnabled", true);
             CrashPenaltyEnabled = EACStateBridge.GetBool("CrashPenaltyEnabled", true);
             MissionDeathEnabled = EACStateBridge.GetBool("MissionDeathEnabled", false);
-            CrewRotationAdvisorEnabled = EACStateBridge.GetBool("CrewRotationAdvisorEnabled", true);
-            CrewRotationAdvisorStatus = EACExternalModDetector.IsCrewRandRInstalled()
-                ? "Crew R&R detected: EAC suggested crew rotation is disabled."
-                : "Crew R&R not detected: EAC can show suggested next crew in the editor.";
             VerboseUILogs      = EACStateBridge.GetBool("VerboseLogging", false);
             VerboseAgingLogs   = EACStateBridge.GetBool("VerboseAgeLogging", false);
         }
@@ -413,14 +384,11 @@ namespace RosterRotation
                 EACStateBridge.SetBool("TrainingNotificationsEnabled", true);
                 EACStateBridge.SetBool("RetirementNotificationsEnabled", true);
                 EACStateBridge.SetBool("DeathNotificationsEnabled", true);
-                EACStateBridge.SetBool("VeteranNotificationsEnabled", true);
-                EACStateBridge.SetBool("BadassNotificationsEnabled", true);
             }
 
             EACStateBridge.SetBool("PortraitCaptureEnabled", PortraitCaptureEnabled);
             EACStateBridge.SetBool("CrashPenaltyEnabled", CrashPenaltyEnabled);
             EACStateBridge.SetBool("MissionDeathEnabled", MissionDeathEnabled);
-            EACStateBridge.SetBool("CrewRotationAdvisorEnabled", CrewRotationAdvisorEnabled);
             EACStateBridge.SetBool("VerboseLogging", VerboseUILogs);
             EACStateBridge.SetBool("VerboseAgeLogging", VerboseAgingLogs);
 

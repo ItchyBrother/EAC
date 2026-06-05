@@ -21,6 +21,27 @@ namespace RosterRotation
             };
 
         private static bool _postSaveSweepQueued;
+        private static bool _oneShotCleanupRequested;
+
+        public static void RequestOneShotCleanup(string reason)
+        {
+            _oneShotCleanupRequested = true;
+            RRLog.Verbose("[RetiredCleanup] One-shot cleanup requested" + (string.IsNullOrEmpty(reason) ? "." : " by " + reason + "."));
+            RRLog.AuditPurge("[RetiredCleanup] One-shot cleanup requested" + (string.IsNullOrEmpty(reason) ? "." : " by " + reason + "."));
+        }
+
+        private static bool CleanupRequested
+        {
+            get { return RosterRotationState.AutoCleanupUnreferencedKerbals || _oneShotCleanupRequested; }
+        }
+
+        private static void MarkOneShotCleanupComplete(string phase)
+        {
+            if (!_oneShotCleanupRequested) return;
+            _oneShotCleanupRequested = false;
+            RRLog.Verbose("[RetiredCleanup] One-shot cleanup completed during " + phase + "; request reset.");
+            RRLog.AuditPurge("[RetiredCleanup] One-shot cleanup completed during " + phase + "; request reset.");
+        }
 
         private void Awake()
         {
@@ -82,12 +103,12 @@ namespace RosterRotation
 
         private void OnGameStateSave(ConfigNode root)
         {
-            bool autoCleanupEnabled = RosterRotationState.AutoCleanupUnreferencedKerbals;
+            bool cleanupRequested = CleanupRequested;
             bool pendingMissionDeaths = HasPendingMissionDeaths();
 
-            if (!autoCleanupEnabled && !pendingMissionDeaths)
+            if (!cleanupRequested && !pendingMissionDeaths)
             {
-                RRLog.Verbose("[RetiredCleanup] Skipping save: auto-cleanup disabled and no pending mission-death patch work.");
+                RRLog.Verbose("[RetiredCleanup] Skipping save: cleanup not requested and no pending mission-death patch work.");
                 return;
             }
 
@@ -95,8 +116,11 @@ namespace RosterRotation
             {
                 if (pendingMissionDeaths)
                     TryApplyPendingMissionDeaths(root, "save");
-                if (autoCleanupEnabled)
+                if (cleanupRequested)
+                {
                     TryPruneKerbals(root, "save");
+                    MarkOneShotCleanupComplete("save");
+                }
                 return;
             }
 
@@ -115,9 +139,9 @@ namespace RosterRotation
                     RRLog.Warn($"[RetiredCleanup] Skipping {phase}: root config node is null.");
                     return;
                 }
-                if (!RosterRotationState.AutoCleanupUnreferencedKerbals)
+                if (!CleanupRequested)
                 {
-                    RRLog.Verbose($"[RetiredCleanup] Skipping {phase}: auto-cleanup disabled.");
+                    RRLog.Verbose($"[RetiredCleanup] Skipping {phase}: cleanup not requested.");
                     return;
                 }
 
@@ -250,12 +274,14 @@ namespace RosterRotation
             }
 
             bool wroteChanges = false;
+            bool cleanupRequested = CleanupRequested;
             if (HasPendingMissionDeaths())
                 wroteChanges |= TryApplyPendingMissionDeaths(diskRoot, "post-save-file");
-            if (RosterRotationState.AutoCleanupUnreferencedKerbals)
+            if (cleanupRequested)
             {
                 TryPruneKerbals(diskRoot, "post-save-file");
                 wroteChanges = true;
+                MarkOneShotCleanupComplete("post-save-file");
             }
 
             if (wroteChanges)

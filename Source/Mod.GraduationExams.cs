@@ -982,9 +982,9 @@ namespace RosterRotation
         {
             try
             {
-                foreach (var ui in UnityEngine.Object.FindObjectsOfType<RosterRotationKSCUI>())
+                RosterRotationKSCUI ui = RosterRotationKSCUI.Instance;
+                if (ui != null)
                 {
-                    if (ui == null) continue;
                     ui.InvalidateUICaches();
 
                     // KSP/CC can update the ProtoCrewMember level and then rebuild the

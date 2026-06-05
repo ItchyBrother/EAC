@@ -1632,7 +1632,16 @@ namespace RosterRotation
                 + ", new=" + newStatus);
 
             if (newStatus == ProtoCrewMember.RosterStatus.Dead || newStatus == ProtoCrewMember.RosterStatus.Missing)
+            {
+                if (RosterRotationKSCUI.ShouldIgnoreDeathLikeStatusForDeepFreeze(pcm))
+                {
+                    RRLog.Verbose("[EAC] Crash severity ignored DeepFreeze transient death-like status for "
+                        + (pcm != null ? pcm.name : "<null>"));
+                    return;
+                }
+
                 CrashSeverityState.MarkCrewDeath(pcm);
+            }
         }
     }
 

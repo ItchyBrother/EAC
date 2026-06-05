@@ -38,6 +38,10 @@ namespace RosterRotation
             public double LastFlightUT;
             public double RestUntilUT;
             public double MissionStartUT;
+            // Accumulated awake/assigned mission time for the current mission.
+            // Used when DeepFreeze splits a mission into awake segments; frozen
+            // time is intentionally excluded from recovery calculations.
+            public double MissionAccumulatedUT;
             public bool   Retired;
             public double RetiredUT;
             public int    ExperienceAtRetire;
@@ -72,7 +76,51 @@ namespace RosterRotation
             public bool   PendingMissionDeath   = false;
             public double TrainingEndUT          = 0;
             public int    LastAgedYears          = -1;
+
+            // DeepFreeze compatibility.  These fields are EAC-side bookkeeping only;
+            // DeepFreeze remains the authority for who is currently frozen.
+            public bool   DeepFreezeActive              = false;
+            public double DeepFreezeStartUT             = 0;
+            public double DeepFreezeAccumulatedUT       = 0;
+            public string DeepFreezeLastKnownVesselName = "";
+
+            // EAC-native veteran/badass bookkeeping.  Veteran status itself is stored
+            // on the ProtoCrewMember; these fields prevent repeated Badass rolls.
+            public string EACBadassRollKey = "";
+            public bool   EACBadassAwarded = false;
         }
+
+        // EAC-native veteran/suit/startup-crew config.  These features are ignored
+        // when Earn Your Stripes is installed so EYS remains authoritative.
+        public static bool EACVeteranStatusEnabled = true;
+        public static int  EACVeteranFlightsRequired = 5;
+        public static double EACVeteranHoursRequired = 12.0;
+        public static bool EACVeteranRequireMilestone = false;
+        public static bool EACStripDefaultVeterans = true;
+        public static bool EACStripOtherUnearnedVeterans = false;
+        public static bool EACAllowPilotVeterans = true;
+        public static bool EACAllowEngineerVeterans = true;
+        public static bool EACAllowScientistVeterans = true;
+        public static bool EACApplySuits = true;
+        public static int  EACDefaultSuit = 0;
+        public static int  EACVeteranSuit = 2;
+        public static bool EACBadassProgressionEnabled = false;
+        public static bool EACBadassRequireVeteran = true;
+        public static bool EACBadassRequireMilestone = true;
+        public static int  EACBadassChancePercent = 10;
+        public static bool EACNewGameCrewSetupEnabled = true;
+        public static bool EACNewGameCrewSetupCompleted = false;
+        public static bool EACReplaceStartingCrewDefault = false;
+        public static int  EACStartingCrewCount = 4;
+        public static bool EACStartingCrewAllowMales = true;
+        public static bool EACStartingCrewAllowFemales = true;
+        public static bool EACStartingCrewAllowPilots = true;
+        public static bool EACStartingCrewAllowEngineers = true;
+        public static bool EACStartingCrewAllowScientists = true;
+
+        // Editor crew-assignment advisor.  This is suggestion-only and never
+        // assigns, blocks, or refuses crew.
+        public static bool CrewRotationAdvisorEnabled = true;
 
         // Aging config
         public static bool AgingEnabled              = true;
@@ -82,9 +130,11 @@ namespace RosterRotation
         public static bool BirthdayNotificationsEnabled   = true;
         public static bool TrainingNotificationsEnabled   = true;
         public static bool RetirementNotificationsEnabled = true;
-        public static int  RetirementAgeMin          = 48;
-        public static int  RetirementAgeMax          = 55;
-        public static int  RetiredDeathAgeMin        = 55;
+        public static bool VeteranNotificationsEnabled    = true;
+        public static bool BadassNotificationsEnabled     = true;
+        public static int  RetirementAgeMin          = 37;
+        public static int  RetirementAgeMax          = 47;
+        public static int  RetiredDeathAgeMin        = 50;
         public static bool AutoCleanupUnreferencedKerbals = false;
         public static bool VerboseLogging    = false;
         public static bool VerboseAgeLogging = false;
@@ -94,6 +144,13 @@ namespace RosterRotation
         public static bool PortraitCaptureEnabled = true;
         public static bool CrashPenaltyEnabled = true;
         public static bool MissionDeathEnabled = false;
+
+        // DeepFreeze thaw risk follows DeepFreeze's own fatal difficulty option.
+        // These values are intentionally small and can be overridden from save config.
+        public static double DeepFreezeThawDeathBaseChance     = 0.005; // 0.5% on thaw
+        public static double DeepFreezeThawDeathBonusPerYear   = 0.001; // +0.1% per Kerbin/Earth year frozen
+        public static double DeepFreezeThawDeathMaxChance      = 0.05;  // hard cap: 5%
+
         public static bool DebugForceMissionDeath = false; // Debug-only mission death override
 
         // Field aliases for EACStateBridge reflection access
@@ -174,7 +231,33 @@ namespace RosterRotation
         public static int GetKerbalAge(KerbalRecord rec, double nowUT)
         {
             if (rec == null) return -1;
-            return CareerRules.CalculateKerbalAge(rec.BirthUT, nowUT, YearSeconds);
+
+            // DeepFreeze biological-time accounting:
+            //   Age = elapsed conscious time since BirthUT.
+            // BirthUT may be negative for Kerbals who were already adults when
+            // EAC first saw them, so do not mutate BirthUT to compensate for
+            // cryosleep.  Instead, subtract completed and active DeepFreeze time
+            // from the effective clock used for age calculations.
+            double effectiveNowUT = GetBiologicalNowUT(rec, nowUT);
+            return CareerRules.CalculateKerbalAge(rec.BirthUT, effectiveNowUT, YearSeconds);
+        }
+
+        public static double GetBiologicalNowUT(KerbalRecord rec, double nowUT)
+        {
+            if (rec == null) return nowUT;
+
+            double suspendedUT = Math.Max(0d, rec.DeepFreezeAccumulatedUT);
+
+            if (rec.DeepFreezeActive && rec.DeepFreezeStartUT > 0d && nowUT > rec.DeepFreezeStartUT)
+                suspendedUT += nowUT - rec.DeepFreezeStartUT;
+
+            // Defensive clamp: never subtract more biological time than has
+            // elapsed since the Kerbal's effective birth date.
+            double maxSuspendedUT = Math.Max(0d, nowUT - rec.BirthUT);
+            if (suspendedUT > maxSuspendedUT)
+                suspendedUT = maxSuspendedUT;
+
+            return nowUT - suspendedUT;
         }
 
         public static string FormatGameDate(double ut)
@@ -246,6 +329,7 @@ namespace RosterRotation
                    || rec.LastFlightUT > 0
                    || rec.RestUntilUT > 0
                    || rec.MissionStartUT > 0
+                   || rec.MissionAccumulatedUT > 0
                    || rec.Training != TrainingType.None
                    || rec.GraduationExamPending
                    || rec.GraduationExamActive
@@ -311,6 +395,8 @@ namespace RosterRotation
                 case EACNotificationType.Training:   return TrainingNotificationsEnabled;
                 case EACNotificationType.Retirement: return RetirementNotificationsEnabled;
                 case EACNotificationType.Death:      return DeathNotificationsEnabled;
+                case EACNotificationType.Veteran:    return VeteranNotificationsEnabled;
+                case EACNotificationType.Badass:     return BadassNotificationsEnabled;
                 default: return true;
             }
         }

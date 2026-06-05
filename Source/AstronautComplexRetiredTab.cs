@@ -53,14 +53,15 @@ namespace RosterRotation
         {
             HighlightOurTab(false);
             if (RetiredScrollList != null) RetiredScrollList.gameObject.SetActive(false);
-            if (VesselScrollRect != null)
-                for (int i = 0; i < VesselScrollRect.childCount; i++)
-                {
-                    Transform ch = VesselScrollRect.GetChild(i);
-                    if (ch == null || ch == RetiredScrollList) continue;
-                    if (ch.name.StartsWith("scrollList_", StringComparison.OrdinalIgnoreCase))
-                        ch.gameObject.SetActive(true);
-                }
+
+            // Do not turn every native scroll list back on. That caused Available
+            // rows to remain visible underneath Lost. Instead, re-enable only the
+            // native list that corresponds to the clicked tab. If EAC cannot map
+            // the index confidently, ACPatches falls back to the old safe behavior
+            // of re-enabling native lists rather than leaving the AC empty.
+            if (index >= 0)
+                ACPatches.ShowOnlyNativeScrollList(index, VesselScrollRect);
+
             OnNativeTabActivated?.Invoke();
         }
 
@@ -671,7 +672,7 @@ namespace RosterRotation
         {
             if (_vesselScrollRect == null) return;
             Transform existing = _vesselScrollRect.Find("scrollList_retired");
-            if (existing != null) { _scrollListRetired = existing; return; }
+            if (existing != null) { _scrollListRetired = existing; ACPatches.RetiredListTransform = existing; return; }
 
             Transform template = null;
             for (int i = 0; i < _vesselScrollRect.childCount; i++)
@@ -694,6 +695,7 @@ namespace RosterRotation
 
             clone.SetActive(false);
             _scrollListRetired = clone.transform;
+            ACPatches.RetiredListTransform = _scrollListRetired;
 
             if (_retiredProxy != null)
             {

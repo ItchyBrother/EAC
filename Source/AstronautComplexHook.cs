@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Collections;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -115,6 +116,8 @@ namespace RosterRotation
         private static Type _acType;
         private static bool _typeSearched;
         private bool _pendingOpenCheck;
+        private Coroutine _sanitizeRoutine;
+        private float _nextOwnershipFilterTime;
 
         private void Awake() => _instance = this;
 
@@ -153,8 +156,43 @@ namespace RosterRotation
             return false;
         }
 
+        private void StartDeferredAvailableSanitize()
+        {
+            try
+            {
+                if (_sanitizeRoutine != null)
+                    StopCoroutine(_sanitizeRoutine);
+                _sanitizeRoutine = StartCoroutine(DeferredAvailableSanitize());
+            }
+            catch (global::System.Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("AstronautComplexHook.Sanitize.Start", "[EAC] AstronautComplexHook: failed to start Available sanitize coroutine.", ex);
+            }
+        }
+
+        private IEnumerator DeferredAvailableSanitize()
+        {
+            // Let stock AC and other UI decorators finish their initial rebuilds,
+            // then repeatedly re-hide Assigned rows that were re-enabled in Available.
+            yield return null;
+
+            for (int i = 0; i < 8; i++)
+            {
+                ACPatches.SanitizeAvailableListAfterOpen("open-pass " + i);
+                yield return new WaitForSeconds(i < 3 ? 0.10f : 0.25f);
+            }
+
+            _sanitizeRoutine = null;
+        }
+
         private void Update()
         {
+            if (AstronautComplexWatcher.IsOpen && Time.realtimeSinceStartup >= _nextOwnershipFilterTime)
+            {
+                _nextOwnershipFilterTime = Time.realtimeSinceStartup + 0.25f;
+                ACPatches.EnforceCurrentNativeCrewTabOwnership("watchdog");
+            }
+
             if (!_pendingOpenCheck) return;
             _pendingOpenCheck = false;
 
@@ -163,6 +201,11 @@ namespace RosterRotation
             {
                 AstronautComplexWatcher.IsOpen = found;
                 ACOpenCache.Invalidate();
+                if (found)
+                {
+                    _nextOwnershipFilterTime = 0f;
+                    StartDeferredAvailableSanitize();
+                }
                 //RRLog.Verbose($"[RosterRotation] AstronautComplexWatcher: IsOpen={found}");
             }
         }

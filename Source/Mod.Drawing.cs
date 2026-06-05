@@ -13,6 +13,16 @@ namespace RosterRotation
         // ── OnGUI entry point ──────────────────────────────────────────────────
         private void OnGUI()
         {
+            bool acOpen = ACOpenCache.IsOpen;
+            if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
+            _prevACOpen = acOpen;
+            if (!acOpen) RetiredTabSelected = false;
+
+            // Unity calls OnGUI multiple times per frame even when nothing is being drawn.
+            // Avoid touching GUI skins/styles on the idle Space Center screen.
+            if (!_show && (!acOpen || _acOverlay == AcOverlay.None))
+                return;
+
             GUISkin previousSkin = GUI.skin;
             GUISkin kspSkin      = KspGuiSkin.Current;
             if (kspSkin != null) GUI.skin = kspSkin;
@@ -28,11 +38,6 @@ namespace RosterRotation
 
                 if (_show)
                     _window = GUILayout.Window(GetInstanceID(), _window, DrawWindow, WindowTitle, _windowStyle);
-
-                bool acOpen = ACOpenCache.IsOpen;
-                if (!acOpen && _prevACOpen) _acOverlay = AcOverlay.None;
-                _prevACOpen = acOpen;
-                if (!acOpen) RetiredTabSelected = false;
 
                 if (acOpen && _acOverlay != AcOverlay.None)
                 {
@@ -81,7 +86,13 @@ namespace RosterRotation
             else DrawRosterTab(roster, now);
 
             GUILayout.Space(8);
-            if (GUILayout.Button("Close")) _show = false;
+            DrawHRule();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Advanced Settings", GUILayout.Width(150)))
+                EACAdvancedSettingsWindow.ToggleWindow();
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Close", GUILayout.Width(90))) _show = false;
+            GUILayout.EndHorizontal();
             GUILayout.EndVertical();
             GUI.DragWindow();
         }
@@ -192,7 +203,7 @@ namespace RosterRotation
                 }
                 else if (!row.Retired)
                 {
-                    bool inTraining = k.inactive;
+                    bool inTraining = EACKerbalState.IsTrainingActive(k, r, now);
                     bool onMission  = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
                     bool maxLevel   = k.experienceLevel >= 3f;
                     bool hasExam    = HasGraduationExam(r);
@@ -310,13 +321,15 @@ namespace RosterRotation
             bool anyT = false;
             foreach (var k in roster.Crew)
             {
-                if (k == null || !k.inactive || k.inactiveTimeEnd <= now) continue;
+                if (k == null) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
                 if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
+                double trainingEndUT = EACKerbalState.GetTrainingEndUT(k, r);
+                if (trainingEndUT <= now) continue;
 
                 string lbl = TrainingLabel(r.Training, r.TrainingTargetLevel);
-                double rem = Math.Max(0, k.inactiveTimeEnd - now);
+                double rem = Math.Max(0, trainingEndUT - now);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(k.name,                                  GUILayout.Width(150));
                 GUILayout.Label($"L{(int)k.experienceLevel}",            GUILayout.Width(35));
@@ -497,11 +510,13 @@ namespace RosterRotation
 
             foreach (var k in roster.Crew)
             {
-                if (k == null || !k.inactive || k.inactiveTimeEnd <= now) continue;
+                if (k == null) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 RosterRotationState.Records.TryGetValue(k.name, out var r);
                 if (r == null || r.Training == TrainingType.None || r.DeathUT > 0) continue;
-                double rem = Math.Max(0, k.inactiveTimeEnd - now);
+                double trainingEndUT = EACKerbalState.GetTrainingEndUT(k, r);
+                if (trainingEndUT <= now) continue;
+                double rem = Math.Max(0, trainingEndUT - now);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label($"⏳ {k.name}",                           GUILayout.Width(180));
                 GUILayout.Label(k.trait,                                  GUILayout.Width(90));
@@ -567,7 +582,7 @@ namespace RosterRotation
                 var  k          = row.Kerbal;
                 var  r          = row.Record;
                 bool onMission  = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
-                bool inTraining = r?.Training != TrainingType.None && k.inactive;
+                bool inTraining = r != null && EACKerbalState.IsTrainingActive(k, r, now);
 
                 GUILayout.BeginHorizontal();
                 GUILayout.Label(k.name,            GUILayout.Width(200));

@@ -128,11 +128,26 @@ namespace RosterRotation
 
             try
             {
-                var loaded = AssemblyLoader.loadedAssemblies
-                    .FirstOrDefault(a => a?.name != null &&
-                                         a.name.IndexOf("crewrandr", StringComparison.OrdinalIgnoreCase) >= 0);
+                _asm = null;
+                foreach (var loaded in AssemblyLoader.loadedAssemblies)
+                {
+                    if (loaded == null) continue;
+                    string loaderName = loaded.name ?? "";
+                    string assemblyName = "";
+                    try
+                    {
+                        if (loaded.assembly != null && loaded.assembly.GetName() != null)
+                            assemblyName = loaded.assembly.GetName().Name ?? "";
+                    }
+                    catch { assemblyName = ""; }
 
-                _asm = loaded?.assembly;
+                    if (LooksLikeCrewRandRName(loaderName) || LooksLikeCrewRandRName(assemblyName))
+                    {
+                        _asm = loaded.assembly;
+                        break;
+                    }
+                }
+
                 if (_asm == null) return;
 
                 foreach (var t in SafeGetTypes(_asm))
@@ -151,6 +166,14 @@ namespace RosterRotation
                 RRLog.Error($"[RosterRotation] CrewRandRAdapter init failed: {ex}");
                 _asm = null;
             }
+        }
+
+
+        private static bool LooksLikeCrewRandRName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            return name.IndexOf("CrewRandR", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("CrewQueueTwo", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static ExtTypeAccessors GetAccessors(Type extType)

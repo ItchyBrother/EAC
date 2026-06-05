@@ -78,12 +78,17 @@ namespace RosterRotation
         private static List<FieldInfo> _cachedCrewArrayFields;      // fields typed ProtoCrewMember[]
         private static List<FieldInfo> _cachedCrewEnumerableFields; // other IEnumerable<ProtoCrewMember> fields
 
-        public static void Postfix(object __instance)
+        public static void Postfix(object __instance, MethodBase __originalMethod)
         {
             try
             {
                 if (__instance == null) return;
                 if (HighLogic.LoadedScene != GameScenes.EDITOR) return;
+
+                if (__originalMethod != null && string.Equals(__originalMethod.Name, "Show", StringComparison.OrdinalIgnoreCase))
+                    EACCrewRotationAdvisor.RequestShow(__instance);
+                else if (__originalMethod != null)
+                    EACCrewRotationAdvisor.NotifyCrewDialogRefreshed(__instance, __originalMethod.Name);
 
                 // Build the field cache the first time we have a live dialog instance.
                 if (_cachedCrewListFields == null)
@@ -185,8 +190,18 @@ namespace RosterRotation
             if (k == null) return false;
             if (k.type == ProtoCrewMember.KerbalType.Applicant) return false;
 
-            if (RosterRotationState.Records.TryGetValue(k.name, out var rec) && rec != null && rec.Retired)
-                return true;
+            RosterRotationState.KerbalRecord rec;
+            if (RosterRotationState.Records.TryGetValue(k.name, out rec) && rec != null)
+            {
+                if (rec.Retired)
+                    return true;
+
+                if (RecoveryLeaveService.IsEacRecoveryActive(k, rec, nowUT))
+                    return true;
+
+                if (rec.Training != TrainingType.None)
+                    return true;
+            }
 
             if (k.inactive && k.inactiveTimeEnd > nowUT)
                 return true;

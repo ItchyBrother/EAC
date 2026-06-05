@@ -33,6 +33,25 @@ namespace RosterRotation
         private static FieldInfo    _cachedProtoVesselNameField;
         private static PropertyInfo _cachedProtoVesselNameProp;
 
+        // KSP's stock Astronaut Complex manages actual astronaut crew only.
+        // Contract passengers (Tourist) and Unowned kerbals can still exist in the
+        // roster and can be returned by roster.Kerbals(), but they should not appear
+        // in EAC's astronaut-management tabs or count against AC-style totals.
+        private static bool IsAstronautComplexManagedCrew(ProtoCrewMember k,
+            RosterRotationState.KerbalRecord rec = null)
+        {
+            if (k == null) return false;
+            if (k.type == ProtoCrewMember.KerbalType.Crew) return true;
+
+            // Preserve visibility for older EAC retired records that may have been
+            // hidden by temporarily changing the Kerbal type away from Crew.
+            if (rec != null && rec.Retired &&
+                (rec.OriginalType == ProtoCrewMember.KerbalType.Crew || rec.OriginalType == 0))
+                return true;
+
+            return false;
+        }
+
         // ── Cache accessors ────────────────────────────────────────────────────
 
         private List<RosterRowData> GetRosterRowsCached(KerbalRoster roster, double now)
@@ -79,9 +98,11 @@ namespace RosterRotation
             foreach (var k in roster.Crew)
             {
                 if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
+                RosterRotationState.Records.TryGetValue(k.name, out var r);
+                if (!IsAstronautComplexManagedCrew(k, r)) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                     k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
-                RosterRotationState.Records.TryGetValue(k.name, out var r);
+                if (IsDeepFreezeFrozen(k) || (r != null && r.DeepFreezeActive)) continue;
                 if (r?.Retired == true || r?.DeathUT > 0) continue;
 
                 var row = new RosterRowData
@@ -109,26 +130,32 @@ namespace RosterRotation
             foreach (var k in roster.Kerbals())
             {
                 if (k == null) continue;
+                RosterRotationState.Records.TryGetValue(k.name, out var r);
+
                 bool applicant = k.type == ProtoCrewMember.KerbalType.Applicant;
                 if (tab == Tab.Applicants) { if (!applicant) continue; }
-                else if (applicant) continue;
-
-                RosterRotationState.Records.TryGetValue(k.name, out var r);
+                else
+                {
+                    if (applicant) continue;
+                    if (!IsAstronautComplexManagedCrew(k, r)) continue;
+                }
                 bool retired    = r != null && r.Retired;
                 bool hasFlown   = r != null && r.LastFlightUT > 0;
                 bool onVacation = CrewRandRAdapter.IsOnVacationByName(k.name, now);
-                bool onMission  = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned;
+                bool frozen     = IsDeepFreezeFrozen(k) || (r != null && r.DeepFreezeActive);
+                bool onMission  = k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned || frozen;
                 bool inTraining = r != null && r.Training != TrainingType.None && k.inactive && k.inactiveTimeEnd > now;
-                bool isLost     = k.rosterStatus == ProtoCrewMember.RosterStatus.Dead
-                               || k.rosterStatus == ProtoCrewMember.RosterStatus.Missing
-                               || (r != null && r.DeathUT > 0);
+                bool isLost     = !frozen &&
+                                  (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead
+                               ||  k.rosterStatus == ProtoCrewMember.RosterStatus.Missing
+                               || (r != null && r.DeathUT > 0));
 
                 switch (tab)
                 {
-                    case Tab.Active:   if (isLost || retired || onVacation || onMission || inTraining) continue; break;
+                    case Tab.Active:   if (isLost || retired || frozen || onVacation || onMission || inTraining) continue; break;
                     case Tab.Assigned: if (isLost || retired || !onMission) continue; break;
-                    case Tab.RandR:    if (isLost || retired || !onVacation) continue; break;
-                    case Tab.Retired:  if (!retired || isLost) continue; break;
+                    case Tab.RandR:    if (isLost || retired || frozen || !onVacation) continue; break;
+                    case Tab.Retired:  if (!retired || isLost || frozen) continue; break;
                     case Tab.Lost:     if (!isLost) continue; break;
                 }
 
@@ -168,13 +195,16 @@ namespace RosterRotation
             foreach (var k in roster.Crew)
             {
                 if (k == null || k.type == ProtoCrewMember.KerbalType.Applicant) continue;
+                RosterRotationState.Records.TryGetValue(k.name, out var r);
+                if (!IsAstronautComplexManagedCrew(k, r)) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned) continue;
+                if (IsDeepFreezeFrozen(k) || (r != null && r.DeepFreezeActive)) continue;
                 if (k.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
                     k.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
                 if (k.experienceLevel >= 3f) continue;
 
-                RosterRotationState.Records.TryGetValue(k.name, out var r);
                 if (r != null && (r.Retired || r.DeathUT > 0)) continue;
+                if (r != null && RecoveryLeaveService.IsEacRecoveryActive(k, r, now)) continue;
                 if (HasGraduationExam(r)) continue;
 
                 if (r != null && r.Training != TrainingType.None)
@@ -213,14 +243,30 @@ namespace RosterRotation
             }
 
             bool anyCleaned = false;
-            foreach (var kvp in RosterRotationState.Records.ToArray())
+            List<string> staleTrainingKeys = null;
+
+            foreach (var kvp in RosterRotationState.Records)
             {
                 var rec = kvp.Value;
                 if (rec == null || rec.Training == TrainingType.None) continue;
 
                 if (!validTrainingCrewNames.Contains(kvp.Key))
                 {
-                    RRLog.Verbose($"[EAC] CleanupStaleTrainingRecords: removing leftover training data for non-active Kerbal: {kvp.Key}");
+                    if (staleTrainingKeys == null) staleTrainingKeys = new List<string>();
+                    staleTrainingKeys.Add(kvp.Key);
+                }
+            }
+
+            if (staleTrainingKeys != null)
+            {
+                for (int i = 0; i < staleTrainingKeys.Count; i++)
+                {
+                    string key = staleTrainingKeys[i];
+                    RosterRotationState.KerbalRecord rec;
+                    if (!RosterRotationState.Records.TryGetValue(key, out rec)) continue;
+                    if (rec == null || rec.Training == TrainingType.None) continue;
+
+                    RRLog.Verbose($"[EAC] CleanupStaleTrainingRecords: removing leftover training data for non-active Kerbal: {key}");
                     ClearTrainingState(rec);
                     anyCleaned = true;
                 }
@@ -275,6 +321,14 @@ namespace RosterRotation
                 if (r.DiedOnMission) return $"Died on mission {ageStr}{dateStr}";
                 return retDeath ? $"Died {ageStr}{dateStr}" : $"K.I.A. {ageStr}{dateStr}";
             }
+            if (IsDeepFreezeFrozen(k) || (r != null && r.DeepFreezeActive))
+            {
+                if (TryGetDeepFreezeVesselName(k.name, out var frozenVessel))
+                    return "FROZEN: " + frozenVessel;
+                if (r != null && !string.IsNullOrEmpty(r.DeepFreezeLastKnownVesselName))
+                    return "FROZEN: " + r.DeepFreezeLastKnownVesselName;
+                return "FROZEN";
+            }
             if (retired)
             {
                 int eff = RosterRotationState.GetRetiredEffectiveStars(k, r, now);
@@ -284,10 +338,21 @@ namespace RosterRotation
                 return $"Final exam active → L{r.GraduationExamTargetLevel}";
             if (r != null && r.GraduationExamPending)
                 return $"Final exam ready → L{r.GraduationExamTargetLevel}";
-            if (r != null && r.Training != TrainingType.None && k.inactive && k.inactiveTimeEnd > now)
+            if (r != null)
             {
-                double rem = k.inactiveTimeEnd - now;
-                return $"In {TrainingLabel(r.Training, r.TrainingTargetLevel)}  {RosterRotationState.FormatCountdown(rem)}";
+                double recoveryUntil = RecoveryLeaveService.GetEacRecoveryUntilUT(k, r, now);
+                if (recoveryUntil > now)
+                    return $"In recovery ({RosterRotationState.FormatCountdown(recoveryUntil - now)})";
+            }
+            if (r != null && r.Training != TrainingType.None)
+            {
+                double trainingEndUT = EACKerbalState.GetTrainingEndUT(k, r);
+                if (trainingEndUT > now)
+                {
+                    double rem = trainingEndUT - now;
+                    return $"In {TrainingLabel(r.Training, r.TrainingTargetLevel)}  {RosterRotationState.FormatCountdown(rem)}";
+                }
+                return $"In {TrainingLabel(r.Training, r.TrainingTargetLevel)}";
             }
             if (k.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
             {
