@@ -128,26 +128,7 @@ namespace RosterRotation
 
             try
             {
-                _asm = null;
-                foreach (var loaded in AssemblyLoader.loadedAssemblies)
-                {
-                    if (loaded == null) continue;
-                    string loaderName = loaded.name ?? "";
-                    string assemblyName = "";
-                    try
-                    {
-                        if (loaded.assembly != null && loaded.assembly.GetName() != null)
-                            assemblyName = loaded.assembly.GetName().Name ?? "";
-                    }
-                    catch { assemblyName = ""; }
-
-                    if (LooksLikeCrewRandRName(loaderName) || LooksLikeCrewRandRName(assemblyName))
-                    {
-                        _asm = loaded.assembly;
-                        break;
-                    }
-                }
-
+                _asm = EACOptionalModRegistry.FindAssembly("CrewRandR", "CrewQueueTwo");
                 if (_asm == null) return;
 
                 foreach (var t in SafeGetTypes(_asm))

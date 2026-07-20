@@ -10,40 +10,85 @@ namespace RosterRotation
     {
         private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
+        // Reflection member discovery is performed from several frequently refreshed UI paths.
+        // Cache both hits and misses so each ordered (Type, candidate names) lookup walks the
+        // inheritance hierarchy at most once for the lifetime of the process.
+        private static readonly object MemberCacheLock = new object();
+        private static readonly Dictionary<MemberLookupKey, FieldInfo> FieldCache =
+            new Dictionary<MemberLookupKey, FieldInfo>();
+        private static readonly Dictionary<MemberLookupKey, PropertyInfo> PropertyCache =
+            new Dictionary<MemberLookupKey, PropertyInfo>();
+
         public static FieldInfo FindField(Type type, params string[] names)
         {
+            MemberLookupKey key = new MemberLookupKey(type, BuildNamesKey(names));
+
+            lock (MemberCacheLock)
+            {
+                if (FieldCache.TryGetValue(key, out FieldInfo cached))
+                    return cached;
+            }
+
+            FieldInfo result = null;
             foreach (Type current in EnumerateTypeHierarchy(type))
             {
+                if (names == null)
+                    break;
+
                 foreach (string name in names)
                 {
                     if (string.IsNullOrEmpty(name))
                         continue;
 
-                    FieldInfo field = current.GetField(name, InstanceFlags);
-                    if (field != null)
-                        return field;
+                    result = current.GetField(name, InstanceFlags);
+                    if (result != null)
+                        break;
                 }
+
+                if (result != null)
+                    break;
             }
 
-            return null;
+            lock (MemberCacheLock)
+                FieldCache[key] = result;
+
+            return result;
         }
 
         public static PropertyInfo FindProperty(Type type, params string[] names)
         {
+            MemberLookupKey key = new MemberLookupKey(type, BuildNamesKey(names));
+
+            lock (MemberCacheLock)
+            {
+                if (PropertyCache.TryGetValue(key, out PropertyInfo cached))
+                    return cached;
+            }
+
+            PropertyInfo result = null;
             foreach (Type current in EnumerateTypeHierarchy(type))
             {
+                if (names == null)
+                    break;
+
                 foreach (string name in names)
                 {
                     if (string.IsNullOrEmpty(name))
                         continue;
 
-                    PropertyInfo property = current.GetProperty(name, InstanceFlags);
-                    if (property != null)
-                        return property;
+                    result = current.GetProperty(name, InstanceFlags);
+                    if (result != null)
+                        break;
                 }
+
+                if (result != null)
+                    break;
             }
 
-            return null;
+            lock (MemberCacheLock)
+                PropertyCache[key] = result;
+
+            return result;
         }
 
         public static object GetMemberObject(object obj, Type type, params string[] names)
@@ -254,6 +299,59 @@ namespace RosterRotation
         {
             object ignored;
             return TryInvoke(method, target, args, context, out ignored);
+        }
+
+
+        private static string BuildNamesKey(string[] names)
+        {
+            if (names == null || names.Length == 0)
+                return string.Empty;
+
+            // Length-prefix each value so candidate sequences cannot collide when names
+            // contain punctuation or delimiter characters. Candidate order is significant.
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            for (int i = 0; i < names.Length; i++)
+            {
+                string name = names[i] ?? string.Empty;
+                builder.Append(name.Length);
+                builder.Append(':');
+                builder.Append(name);
+                builder.Append(';');
+            }
+
+            return builder.ToString();
+        }
+
+        private struct MemberLookupKey : IEquatable<MemberLookupKey>
+        {
+            private readonly Type _type;
+            private readonly string _namesKey;
+
+            public MemberLookupKey(Type type, string namesKey)
+            {
+                _type = type;
+                _namesKey = namesKey ?? string.Empty;
+            }
+
+            public bool Equals(MemberLookupKey other)
+            {
+                return ReferenceEquals(_type, other._type) &&
+                       string.Equals(_namesKey, other._namesKey, StringComparison.Ordinal);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is MemberLookupKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = _type == null ? 0 : _type.GetHashCode();
+                    return (hash * 397) ^ StringComparer.Ordinal.GetHashCode(_namesKey);
+                }
+            }
         }
 
         private static string FormatContext(string context)

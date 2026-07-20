@@ -232,7 +232,7 @@ namespace RosterRotation
                 $"{k.name} has {reason} and entered retirement{frAgeS}. ({RosterRotationState.FormatGameDate(nowUT)})",
                 MessageSystemButton.MessageButtonColor.ORANGE, MessageSystemButton.ButtonIcons.MESSAGE);
             InvalidateUICaches();
-            _pendingForceRefresh = true;
+            _pendingRetirementUiRefreshKerbal = k;
         }
 
         private bool CheckRetiredDeath(ProtoCrewMember k, RosterRotationState.KerbalRecord rec,

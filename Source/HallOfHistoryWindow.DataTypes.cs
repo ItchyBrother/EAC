@@ -16,7 +16,9 @@ namespace RosterRotation
         private class HallOfHistoryCache
         {
             public readonly List<MemorialEntry> Memorials = new List<MemorialEntry>();
+            public readonly Dictionary<string, MemorialEntry> MemorialByName = new Dictionary<string, MemorialEntry>(StringComparer.OrdinalIgnoreCase);
             public List<MilestoneEntry> Milestones = new List<MilestoneEntry>();
+            public readonly Dictionary<string, int> MilestoneDayCounts = new Dictionary<string, int>(StringComparer.Ordinal);
             public string LastLoadError;
             public string LastPath;
             public DateTime LastWriteUtc;
@@ -25,7 +27,9 @@ namespace RosterRotation
             public void Clear()
             {
                 Memorials.Clear();
+                MemorialByName.Clear();
                 Milestones.Clear();
+                MilestoneDayCounts.Clear();
                 LastLoadError = null;
                 DataSummary = string.Empty;
             }
@@ -62,6 +66,9 @@ namespace RosterRotation
             public string FlagUrl;
             public string Citation;
             public string Notes;
+            public string RoleServiceLine;
+            public string MetricsLine;
+            public string SummaryLine;
         }
 
         private class MilestoneEntry

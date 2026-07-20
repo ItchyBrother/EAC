@@ -1,4 +1,5 @@
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\EAC.user.props" Condition="Exists('..\EAC.user.props')" />
   <PropertyGroup>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <OutputType>Library</OutputType>
@@ -9,9 +10,11 @@
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
 
-    <KspRoot>J:\SteamLibrary\steamapps\common\Code - Kerbal Space Program\Kerbal Space Program</KspRoot>
-    <KspManaged>$(KspRoot)\KSP_x64_Data\Managed</KspManaged>
-    <KspModDir>$(KspRoot)\GameData\EAC</KspModDir>
+    <!-- KspRoot may be supplied by EAC.user.props, the KSP_ROOT environment
+         variable, or /p:KspRoot=... on the MSBuild command line. -->
+    <KspRoot Condition=" '$(KspRoot)' == '' and '$(KSP_ROOT)' != '' ">$(KSP_ROOT)</KspRoot>
+    <KspManaged Condition=" '$(KspRoot)' != '' ">$(KspRoot)\KSP_x64_Data\Managed</KspManaged>
+    <KspModDir Condition=" '$(KspRoot)' != '' ">$(KspRoot)\GameData\EAC</KspModDir>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -30,7 +33,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\Properties\AssemblyInfo.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="EACGraduationAwardBehaviour.cs" />
     <Compile Include="EACLoadScenarioBehaviour.cs" />
   </ItemGroup>
@@ -61,6 +64,16 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Optional Contract Configurator package content. These globs are harmless
+       when a source folder is absent, and keep companion deployment out of EAC.csproj. -->
+  <ItemGroup>
+    <CompanionContent Include="..\GameData\EAC\Agencies\**\*" />
+    <CompanionContent Include="..\GameData\EAC\Contracts\**\*" />
+    <CompanionContent Include="..\GameData\EAC\Craft\**\*" />
+    <CompanionContent Include="..\GameData\EAC\PluginData\**\*" />
+    <CompanionContent Include="..\GameData\EAC\Scenarios\**\*" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\EAC.csproj">
       <Project>{2A72ECEF-2E04-64AC-8991-FE947F2C27BA}</Project>
@@ -73,12 +86,26 @@
     <Copy SourceFiles="$(TargetPath)"
           DestinationFiles="$(KspModDir)\Plugins\$(AssemblyName).dll"
           OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(CompanionContent)"
+          DestinationFiles="@(CompanionContent->'$(KspModDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          OverwriteReadOnlyFiles="true"
+          Condition="'@(CompanionContent)' != ''" />
   </Target>
 
   <PropertyGroup>
     <PlatformTarget>x64</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
+
+  <Target Name="ValidateKspRoot" BeforeTargets="ResolveReferences;CopyToGameData">
+    <Error Condition=" '$(KspRoot)' == '' "
+           Text="KspRoot is not configured. Run the VS Code task 'configure KSP root', copy EAC.user.props.example to EAC.user.props, set the KSP_ROOT environment variable, or pass /p:KspRoot=... to MSBuild." />
+    <Error Condition=" '$(KspRoot)' != '' and !Exists('$(KspManaged)\Assembly-CSharp.dll') "
+           Text="KspRoot '$(KspRoot)' is not a valid KSP installation: KSP_x64_Data\Managed\Assembly-CSharp.dll was not found." />
+    <Error Condition=" '$(KspRoot)' != '' and !Exists('$(KspRoot)\GameData') "
+           Text="KspRoot '$(KspRoot)' is not a valid KSP installation: the GameData directory was not found." />
+  </Target>
 
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 

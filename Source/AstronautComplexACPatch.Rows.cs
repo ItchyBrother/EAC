@@ -28,8 +28,7 @@ namespace RosterRotation
             if (_textPropertyCache.TryGetValue(type, out prop))
                 return prop;
 
-            prop = type.GetProperty("text",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            prop = ReflectionUtils.FindProperty(type, "text");
             if (prop != null && prop.PropertyType != typeof(string)) prop = null;
             _textPropertyCache[type] = prop;
             return prop;
@@ -529,8 +528,7 @@ namespace RosterRotation
                 if (TryGetText(c, out rowText))
                     textVal = " text='" + rowText + "'";
                 // Check for onClick
-                bool hasClick = c.GetType().GetProperty("onClick",
-                    BindingFlags.Instance | BindingFlags.Public) != null;
+                bool hasClick = ReflectionUtils.FindProperty(c.GetType(), "onClick") != null;
                 sb.AppendLine("  GO='" + goName + "' comp=" + typeName
                     + textVal + (hasClick ? " [HAS onClick]" : ""));
             }
@@ -828,8 +826,8 @@ namespace RosterRotation
                     if (sc == null || sc.GetType().Name != "Slider") continue;
                     try
                     {
-                        var maxProp = sc.GetType().GetProperty("maxValue", BindingFlags.Instance | BindingFlags.Public);
-                        var valProp = sc.GetType().GetProperty("value",    BindingFlags.Instance | BindingFlags.Public);
+                        var maxProp = ReflectionUtils.FindProperty(sc.GetType(), "maxValue");
+                        var valProp = ReflectionUtils.FindProperty(sc.GetType(), "value");
                         if (valProp == null) break;
                         float maxVal = 5f;
                         if (maxProp != null) try { maxVal = (float)maxProp.GetValue(sc, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:558", "Suppressed exception in AstronautComplexACPatch.Rows.cs:558", ex); }
@@ -852,7 +850,7 @@ namespace RosterRotation
                         foreach (Component ic in fill.GetComponents<Component>())
                         {
                             if (ic == null || ic.GetType().Name != "Image") continue;
-                            var fillAmtProp = ic.GetType().GetProperty("fillAmount", BindingFlags.Instance | BindingFlags.Public);
+                            var fillAmtProp = ReflectionUtils.FindProperty(ic.GetType(), "fillAmount");
                             if (fillAmtProp != null)
                                 try { fillAmtProp.SetValue(ic, stars / 5f, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:580", "Suppressed exception in AstronautComplexACPatch.Rows.cs:580", ex); }
                             ForceImageVisible(ic);
@@ -871,14 +869,13 @@ namespace RosterRotation
                 ActivateUpTo(starsT, row.transform);
 
                 // Enable the component itself
-                var enabledP = usiComp.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+                var enabledP = ReflectionUtils.FindProperty(usiComp.GetType(), "enabled");
                 if (enabledP != null) try { enabledP.SetValue(usiComp, true, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:598", "Suppressed exception in AstronautComplexACPatch.Rows.cs:598", ex); }
 
                 // Dump revealed: image = Image field (the target Image), states = ImageState[6]
                 // ImageState[N] corresponds to N stars. Get the Image from the 'image' field,
                 // then set its sprite from states[stars].sprite (or similar field).
-                var imageF = usiComp.GetType().GetField("image",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var imageF = ReflectionUtils.FindField(usiComp.GetType(), "image");
                 Component imgComp = imageF?.GetValue(usiComp) as Component;
                 // Fallback: find Image on same GO
                 if (imgComp == null)
@@ -887,8 +884,7 @@ namespace RosterRotation
 
                 if (imgComp != null) ForceImageVisible(imgComp);
 
-                var statesF = usiComp.GetType().GetField("states",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                var statesF = ReflectionUtils.FindField(usiComp.GetType(), "states");
                 System.Array arr = null;
                 if (statesF != null) try { arr = statesF.GetValue(usiComp) as System.Array; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:616", "Suppressed exception in AstronautComplexACPatch.Rows.cs:616", ex); }
                 if (arr != null && arr.Length > 0 && imgComp != null)
@@ -899,13 +895,11 @@ namespace RosterRotation
                     {
                         foreach (string sfn in new[] { "sprite", "image", "texture", "tex" })
                         {
-                            var sf = imageState.GetType().GetField(sfn,
-                                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            var sf = ReflectionUtils.FindField(imageState.GetType(), sfn);
                             if (sf == null) continue;
                             var spriteVal = sf.GetValue(imageState);
                             if (spriteVal == null) continue;
-                            var spriteProp = imgComp.GetType().GetProperty("sprite",
-                                BindingFlags.Instance | BindingFlags.Public);
+                            var spriteProp = ReflectionUtils.FindProperty(imgComp.GetType(), "sprite");
                             if (spriteProp != null)
                                 try { spriteProp.SetValue(imgComp, spriteVal, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:633", "Suppressed exception in AstronautComplexACPatch.Rows.cs:633", ex); }
                             break;
@@ -919,9 +913,8 @@ namespace RosterRotation
                     null, new Type[] { typeof(int) }, null);
                 if (setStateM != null) try { setStateM.Invoke(usiComp, new object[] { stars }); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:643", "Suppressed exception in AstronautComplexACPatch.Rows.cs:643", ex); }
 
-                // Critically: set currentStateIndex so future OnEnable refreshes to the right sprite.
-                var csiF2 = usiComp.GetType().GetField("currentStateIndex",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                // Critically: set currentStateIndex so future activation/rebuild refreshes to the right sprite.
+                var csiF2 = ReflectionUtils.FindField(usiComp.GetType(), "currentStateIndex");
                 if (csiF2 != null) try { csiF2.SetValue(usiComp, stars); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:648", "Suppressed exception in AstronautComplexACPatch.Rows.cs:648", ex); }
             }
 
@@ -932,9 +925,9 @@ namespace RosterRotation
         private static void ForceImageVisible(Component imgComp)
         {
             if (imgComp == null) return;
-            var enabledProp = imgComp.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+            var enabledProp = ReflectionUtils.FindProperty(imgComp.GetType(), "enabled");
             if (enabledProp != null) try { enabledProp.SetValue(imgComp, true, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:659", "Suppressed exception in AstronautComplexACPatch.Rows.cs:659", ex); }
-            var colorProp = imgComp.GetType().GetProperty("color", BindingFlags.Instance | BindingFlags.Public);
+            var colorProp = ReflectionUtils.FindProperty(imgComp.GetType(), "color");
             if (colorProp != null)
                 try
                 {
@@ -981,8 +974,7 @@ namespace RosterRotation
                     foreach (var c in t.GetComponents<Component>())
                     {
                         if (c == null || c.GetType().Name != "UIStateImage") continue;
-                        var statesF = c.GetType().GetField("states",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var statesF = ReflectionUtils.FindField(c.GetType(), "states");
                         System.Array arr = null;
                         if (statesF != null)
                             try { arr = statesF.GetValue(c) as System.Array; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:711", "Suppressed exception in AstronautComplexACPatch.Rows.cs:711", ex); }
@@ -1021,6 +1013,144 @@ namespace RosterRotation
             return uiStateImage != null && starsT != null;
         }
 
+        private static bool GetRecallAvailability(
+            int effStars,
+            out string currentTooltip,
+            out string recallTooltip)
+        {
+            double recallCost = 0d;
+            try { recallCost = RosterRotationKSCUI.GetRecallFundsCost(); }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce("ac.recall.tooltip.cost", "Unable to read recall cost", ex);
+            }
+
+            recallTooltip = recallCost > 0d
+                ? "Recall — " + recallCost.ToString("N0") + " funds"
+                : "Recall";
+
+            if (effStars <= 0)
+            {
+                currentTooltip = "Cannot Recall — no experience stars remaining";
+                return false;
+            }
+
+            int maxCrew = GetCachedMaxCrew();
+            if (maxCrew < int.MaxValue)
+            {
+                int activeCrew = CountActiveNonRetiredCrew();
+                if (activeCrew >= 0 && activeCrew >= maxCrew)
+                {
+                    currentTooltip = "Cannot Recall — crew roster is full ("
+                        + activeCrew + "/" + maxCrew + ")";
+                    return false;
+                }
+            }
+
+            if (recallCost > 0d)
+            {
+                double funds = 0d;
+                try { funds = Funding.Instance?.Funds ?? 0d; }
+                catch (Exception ex)
+                {
+                    RRLog.VerboseExceptionOnce("ac.recall.tooltip.funds", "Unable to read current funds", ex);
+                }
+
+                if (funds < recallCost)
+                {
+                    currentTooltip = "Cannot Recall — insufficient funds (need "
+                        + recallCost.ToString("N0") + ")";
+                    return false;
+                }
+            }
+
+            currentTooltip = recallTooltip;
+            return true;
+        }
+
+        private static void RebindCrewListItemTooltip(GameObject row, ProtoCrewMember kerbal)
+        {
+            if (row == null || kerbal == null) return;
+
+            try
+            {
+                foreach (Component c in row.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null || c.GetType().Name != "CrewListItem") continue;
+
+                    MethodInfo setCrewRef = c.GetType().GetMethod(
+                        "SetCrewRef",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(ProtoCrewMember) },
+                        null);
+                    setCrewRef?.Invoke(c, new object[] { kerbal });
+
+                    MethodInfo setTooltip = c.GetType().GetMethod(
+                        "SetTooltip",
+                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                        null,
+                        new[] { typeof(ProtoCrewMember) },
+                        null);
+                    setTooltip?.Invoke(c, new object[] { kerbal });
+
+                    // Restore the stock CrewAC hover switch. The Recall hover guard changes
+                    // this only while the pointer is over the nested Recall button.
+                    PropertyInfo mouseoverEnabled = ReflectionUtils.FindProperty(
+                        c.GetType(), "MouseoverEnabled");
+                    if (mouseoverEnabled != null && mouseoverEnabled.CanWrite)
+                        mouseoverEnabled.SetValue(c, true, null);
+                    else
+                    {
+                        FieldInfo mouseoverField =
+                            ReflectionUtils.FindField(c.GetType(), "mouseoverEnabled")
+                            ?? ReflectionUtils.FindField(c.GetType(), "mouseOverEnabled")
+                            ?? ReflectionUtils.FindField(c.GetType(), "m_MouseoverEnabled");
+                        if (mouseoverField != null)
+                            mouseoverField.SetValue(c, true);
+                    }
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce(
+                    "ac.retired.crewtooltip.rebind." + kerbal.name,
+                    "Unable to rebind retired-row crew tooltip for " + kerbal.name,
+                    ex);
+            }
+        }
+
+
+        private static void CancelRecallTooltipBeforeRowRemoval(GameObject row)
+        {
+            if (row == null) return;
+
+            try
+            {
+                foreach (Component component in row.GetComponentsInChildren<Component>(true))
+                {
+                    if (component == null
+                        || component.GetType().Name != "UIStateButtonTooltip")
+                        continue;
+
+                    // TooltipController.OnDisable owns cancellation/despawn. The row is about
+                    // to be removed while the pointer may still be over its Recall button.
+                    Behaviour behaviour = component as Behaviour;
+                    if (behaviour != null && behaviour.enabled)
+                        behaviour.enabled = false;
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce(
+                    "ac.recall.tooltip.cancel",
+                    "Unable to cancel Recall tooltip before removing its row",
+                    ex);
+            }
+        }
+
         // Finds the dismiss "Button" GO (named exactly "Button"), switches UIStateButton state,
         // sets UIStateButtonTooltip text, and replaces onClick with Recall.
         private static void WireRecallButton(GameObject row, ProtoCrewMember kerbal, int effStars)
@@ -1034,11 +1164,17 @@ namespace RosterRotation
                     if (ch.name == "Button") { btnT = ch; break; }
                 if (btnT == null) { RRLog.WarnOnce("ac.recall.button.missing." + kerbal.name, "[RosterRotation] WireRecallButton — 'Button' GO not found for " + kerbal.name); return; }
 
-                bool canRecall = effStars > 0;
+                string activeTooltip;
+                string recallTooltip;
+                bool canRecall = GetRecallAvailability(
+                    effStars,
+                    out activeTooltip,
+                    out recallTooltip);
 
                 // The Button GO may be inactive (isActiveAndEnabled=False seen in dump).
                 // Force it active — it holds UIStateButton, UIStateButtonTooltip, and Button.
                 btnT.gameObject.SetActive(true);
+                InstallRetiredRecallHoverGuard(row.transform, btnT);
 
                 // --- Button visual: read sprite directly from UIStateButton.states[] ---
                 // SetState() fails on clones because its Button/Image backing fields don't survive
@@ -1057,18 +1193,17 @@ namespace RosterRotation
                 {
                     int targetStateIdx = canRecall ? 1 : 0;
 
-                    // Update currentStateIndex so UIStateButtonTooltip reads the correct tooltipStates entry.
-                    // We stopped calling SetState() because its backing fields are null on clones,
-                    // but the tooltip needs currentStateIndex to be correct.
-                    var csiF = uisb.GetType().GetField("currentStateIndex",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    // Keep both stock state selectors synchronized so UIStateButtonTooltip can
+                    // resolve the matching entry by index or name. SetState() is avoided because
+                    // the clone's UIStateButton backing Button/Image references are not reliable.
+                    var csiF = ReflectionUtils.FindField(uisb.GetType(), "currentStateIndex");
                     if (csiF != null) try { csiF.SetValue(uisb, targetStateIdx); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:788", "Suppressed exception in AstronautComplexACPatch.Rows.cs:788", ex); }
-                    var ssF = uisb.GetType().GetField("stateSet",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var csF = ReflectionUtils.FindField(uisb.GetType(), "currentState");
+                    if (csF != null) try { csF.SetValue(uisb, canRecall ? "V" : "X"); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:state.name", "Unable to set retired recall button state name", ex); }
+                    var ssF = ReflectionUtils.FindField(uisb.GetType(), "stateSet");
                     if (ssF != null) try { ssF.SetValue(uisb, true); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:791", "Suppressed exception in AstronautComplexACPatch.Rows.cs:791", ex); }
 
-                    var statesF = uisb.GetType().GetField("states",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var statesF = ReflectionUtils.FindField(uisb.GetType(), "states");
                     if (statesF != null)
                     {
                         var statesArr = statesF.GetValue(uisb) as System.Array;
@@ -1081,15 +1216,13 @@ namespace RosterRotation
                             foreach (string sfn in new[] { "normal", "sprite", "normalSprite", "selectedSprite", "image", "icon" })
                             {
                                 if (bstate == null) break;
-                                var sf = bstate.GetType().GetField(sfn,
-                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                var sf = ReflectionUtils.FindField(bstate.GetType(), sfn);
                                 if (sf == null) continue;
                                 var val = sf.GetValue(bstate);
                                 if (val == null) continue;
                                 // Only set if it's actually a sprite type
                                 if (val.GetType().Name != "Sprite") continue;
-                                var spriteProp = btnImgComp.GetType().GetProperty("sprite",
-                                    BindingFlags.Instance | BindingFlags.Public);
+                                var spriteProp = ReflectionUtils.FindProperty(btnImgComp.GetType(), "sprite");
                                 if (spriteProp != null)
                                 {
                                     try
@@ -1106,13 +1239,11 @@ namespace RosterRotation
                             foreach (string cfn in new[] { "color", "normalColor", "tintColor" })
                             {
                                 if (bstate == null) break;
-                                var cf = bstate.GetType().GetField(cfn,
-                                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                var cf = ReflectionUtils.FindField(bstate.GetType(), cfn);
                                 if (cf == null) continue;
                                 var val = cf.GetValue(bstate);
                                 if (val == null || !(val is Color)) continue;
-                                var colorProp = btnImgComp.GetType().GetProperty("color",
-                                    BindingFlags.Instance | BindingFlags.Public);
+                                var colorProp = ReflectionUtils.FindProperty(btnImgComp.GetType(), "color");
                                 if (colorProp != null)
                                     try { colorProp.SetValue(btnImgComp, val, null); }
                                     catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:841", "Suppressed exception in AstronautComplexACPatch.Rows.cs:841", ex); }
@@ -1136,8 +1267,7 @@ namespace RosterRotation
                         if (c != null && c.GetType().Name == "Button") { btnForColors = c; break; }
                     if (btnForColors != null)
                     {
-                        var colorsProp = btnForColors.GetType().GetProperty("colors",
-                            BindingFlags.Instance | BindingFlags.Public);
+                        var colorsProp = ReflectionUtils.FindProperty(btnForColors.GetType(), "colors");
                         if (colorsProp != null)
                         {
                             try
@@ -1152,10 +1282,8 @@ namespace RosterRotation
                                         SetColorField(t, cb, cn, Color.white);
                                     SetColorField(t, cb, "disabledColor", new Color(0.78f, 0.78f, 0.78f, 0.5f));
                                     // colorMultiplier = 1 so tint is not amplified
-                                    var cmF = t.GetField("m_ColorMultiplier",
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (cmF == null) cmF = t.GetField("colorMultiplier",
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                    var cmF = ReflectionUtils.FindField(t, "m_ColorMultiplier");
+                                    if (cmF == null) cmF = ReflectionUtils.FindField(t, "colorMultiplier");
                                     if (cmF != null) try { cmF.SetValue(cb, 1f); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:882", "Suppressed exception in AstronautComplexACPatch.Rows.cs:882", ex); }
                                     colorsProp.SetValue(btnForColors, cb, null);
                                 }
@@ -1172,30 +1300,46 @@ namespace RosterRotation
 
                 if (tooltip != null)
                 {
-                    // Force enabled — cycle false→true to trigger OnEnable/re-registration
-                    var tooltipEnabledP = tooltip.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                    if (tooltipEnabledP != null) try { tooltipEnabledP.SetValue(tooltip, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:900", "Suppressed exception in AstronautComplexACPatch.Rows.cs:900", ex); }
-                    if (tooltipEnabledP != null) try { tooltipEnabledP.SetValue(tooltip, true, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:901", "Suppressed exception in AstronautComplexACPatch.Rows.cs:901", ex); }
+                    // TooltipController initializes in Awake and receives pointer enter/exit
+                    // directly. It has no OnEnable registration lifecycle, so do not cycle the
+                    // component; cycling only invokes OnDisable and can cancel a pending tooltip.
+                    var tooltipEnabledP = ReflectionUtils.FindProperty(tooltip.GetType(), "enabled");
+                    if (tooltipEnabledP != null)
+                    {
+                        try
+                        {
+                            if (!(bool)tooltipEnabledP.GetValue(tooltip, null))
+                                tooltipEnabledP.SetValue(tooltip, true, null);
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:tooltip.enable", "Unable to enable retired recall tooltip", ex); }
+                    }
 
                     // RequireInteractable=True (from dump) blocks tooltip when selectableBase is null.
                     // Set it false so the tooltip fires on hover unconditionally.
-                    var riF = tooltip.GetType().GetField("RequireInteractable",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (riF == null) riF = tooltip.GetType().GetField("requireInteractable",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var riF = ReflectionUtils.FindField(tooltip.GetType(), "RequireInteractable");
+                    if (riF == null) riF = ReflectionUtils.FindField(tooltip.GetType(), "requireInteractable");
                     if (riF != null) try { riF.SetValue(tooltip, false); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:909", "Suppressed exception in AstronautComplexACPatch.Rows.cs:909", ex); }
 
                     // Wire stateButton so tooltip reads currentStateIndex for text selection
                     if (uisb != null)
                     {
-                        var sbF = tooltip.GetType().GetField("stateButton",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var sbF = ReflectionUtils.FindField(tooltip.GetType(), "stateButton");
                         if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:916", "Suppressed exception in AstronautComplexACPatch.Rows.cs:916", ex); }
                     }
 
+                    // Keep the stock interactable path valid as well as allowing the tooltip
+                    // when the state button's cloned Selectable reference was not initialized.
+                    Component selectable = null;
+                    foreach (Component c in btnT.GetComponents<Component>())
+                        if (c != null && c.GetType().Name == "Button") { selectable = c; break; }
+                    if (selectable != null)
+                    {
+                        var selF = ReflectionUtils.FindField(tooltip.GetType(), "selectableBase");
+                        if (selF != null) try { selF.SetValue(tooltip, selectable); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:tooltip.selectable", "Unable to wire retired recall selectable", ex); }
+                    }
+
                     // Wire tooltipPrefab — check for both null AND destroyed Unity objects
-                    var prefabF = tooltip.GetType().GetField("tooltipPrefab",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var prefabF = ReflectionUtils.FindField(tooltip.GetType(), "tooltipPrefab");
                     if (prefabF != null)
                     {
                         var pfVal = prefabF.GetValue(tooltip);
@@ -1212,27 +1356,23 @@ namespace RosterRotation
                         }
                     }
 
-                    // Set tooltipStates text: index 0 = "Cannot Recall", index 1 = "Recall Kerbal (cost)"
-                    var tsF = tooltip.GetType().GetField("tooltipStates",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    // Set state-specific text: index 0 carries the current unavailable reason;
+                    // index 1 carries the current recall cost.
+                    var tsF = ReflectionUtils.FindField(tooltip.GetType(), "tooltipStates");
                     if (tsF != null)
                     {
                         var arr = tsF.GetValue(tooltip) as System.Array;
                         if (arr != null)
                         {
-                            double rCost = 0;
-                            try { rCost = RosterRotationKSCUI.GetRecallFundsCost(); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:947", "Suppressed exception in AstronautComplexACPatch.Rows.cs:947", ex); }
-                            string costStr = rCost > 0 ? $" ({rCost:N0})" : "";
                             for (int si = 0; si < arr.Length; si++)
                             {
                                 var entry = arr.GetValue(si);
                                 if (entry == null) continue;
-                                string tipText = si == 0 ? "Cannot Recall" : ("Recall Kerbal" + costStr);
+                                string tipText = si == 0 ? activeTooltip : recallTooltip;
                                 bool tipSet = false;
                                 foreach (string fn in new[] { "tooltipText", "text", "tip", "message", "content", "label" })
                                 {
-                                    var tf = entry.GetType().GetField(fn,
-                                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                                    var tf = ReflectionUtils.FindField(entry.GetType(), fn);
                                     if (tf != null && tf.FieldType == typeof(string))
                                     {
                                         try { tf.SetValue(entry, tipText); tipSet = true; break; }
@@ -1253,7 +1393,7 @@ namespace RosterRotation
                     if (c != null && c.GetType().Name == "Button") { btn = c; break; }
                 if (btn != null)
                 {
-                    var onClickP = btn.GetType().GetProperty("onClick", BindingFlags.Instance | BindingFlags.Public);
+                    var onClickP = ReflectionUtils.FindProperty(btn.GetType(), "onClick");
                     if (onClickP != null)
                     {
                         try
@@ -1262,25 +1402,16 @@ namespace RosterRotation
                             onClick?.GetType().GetMethod("RemoveAllListeners")?.Invoke(onClick, null);
                             var addListener = onClick?.GetType().GetMethod("AddListener",
                                 new Type[] { typeof(UnityEngine.Events.UnityAction) });
-                            if (canRecall)
-                            {
-                                UnityEngine.Events.UnityAction action = () => RecallKerbalFromRetiredTab(kerbal);
-                                addListener?.Invoke(onClick, new object[] { action });
-                            }
-                            else
-                            {
-                                string kName = kerbal.name;
-                                UnityEngine.Events.UnityAction action = () =>
-                                    ScreenMessages.PostScreenMessage(
-                                        kName + " has lost all experience in retirement and cannot be recalled.",
-                                        4f, ScreenMessageStyle.UPPER_CENTER);
-                                addListener?.Invoke(onClick, new object[] { action });
-                            }
+                            // Keep one live action for every state. RecallKerbalFromRetiredTab
+                            // re-checks stars, roster capacity, and funds at click time and posts
+                            // the matching reason, so the click result cannot drift from game state.
+                            UnityEngine.Events.UnityAction action = () => RecallKerbalFromRetiredTab(kerbal);
+                            addListener?.Invoke(onClick, new object[] { action });
                         }
                         catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1003", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1003", ex); }
                     }
                     // Always interactable — clicking gives feedback even for zero-star kerbals
-                    var interactP = btn.GetType().GetProperty("interactable", BindingFlags.Instance | BindingFlags.Public);
+                    var interactP = ReflectionUtils.FindProperty(btn.GetType(), "interactable");
                     if (interactP != null) try { interactP.SetValue(btn, true, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1007", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1007", ex); }
                 }
 
@@ -1304,8 +1435,7 @@ namespace RosterRotation
                 foreach (Component sc in node.GetComponents<Component>())
                 {
                     if (sc == null || sc.GetType().Name != "UIStateImage") continue;
-                    var csiF = sc.GetType().GetField("currentStateIndex",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var csiF = ReflectionUtils.FindField(sc.GetType(), "currentStateIndex");
                     if (csiF == null) break;
                     int idx = 0;
                     try { idx = (int)csiF.GetValue(sc); } catch { break; }
@@ -1325,7 +1455,7 @@ namespace RosterRotation
 
         private static void SetColorField(Type t, object obj, string fieldName, Color color)
         {
-            var f = t.GetField(fieldName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            var f = ReflectionUtils.FindField(t, fieldName);
             if (f != null) try { f.SetValue(obj, color); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1052", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1052", ex); }
         }
 
@@ -1428,19 +1558,316 @@ namespace RosterRotation
                 string costMsg = recallCost > 0 ? " (" + recallCost.ToString("N0") + ")" : "";
                 ScreenMessages.PostScreenMessage(kerbal.name + " recalled — 30-day refresher training begins." + costMsg, 4f, ScreenMessageStyle.UPPER_CENTER);
 
-                // Rebuild lists and immediately update status labels so the row shows
-                // "In refresher training Xd Xh Xm" instead of "Available for next mission".
-                ForceRefresh();
-                // ForceRefresh() now calls PatchAvailableListStatusText() internally,
-                // but call it again here to handle the case where AvailListTransform
-                // was populated AFTER the internal call.
-                PatchAvailableListStatusText();
+                // Preserve the live rows and their stock tooltip controllers. The stock
+                // CreateAvailableList path appends another copy of the native rows during an
+                // in-place recall, then replaces every retired clone. Remove only the recalled
+                // clone and reactivate its existing Available row.
+                RefreshAstronautComplexAfterRecall(kerbal);
             }
             catch (Exception ex)
             {
                 RRLog.Error("[RosterRotation] RecallKerbalFromRetiredTab failed: " + ex);
             }
         }
+
+        private static void RefreshAstronautComplexAfterRecall(ProtoCrewMember kerbal)
+        {
+            if (kerbal == null) return;
+
+            try
+            {
+                int removedRetiredRows = 0;
+                if (RetiredListTransform != null)
+                {
+                    var allRosterNames = BuildAllRosterNameSet();
+                    for (int i = RetiredListTransform.childCount - 1; i >= 0; i--)
+                    {
+                        Transform row = RetiredListTransform.GetChild(i);
+                        if (row == null) continue;
+
+                        string rowName = GetKerbalNameFromRowAny(
+                            row.gameObject,
+                            allRosterNames);
+                        if (!string.Equals(
+                            rowName,
+                            kerbal.name,
+                            StringComparison.Ordinal))
+                            continue;
+
+                        CancelRecallTooltipBeforeRowRemoval(row.gameObject);
+                        row.gameObject.SetActive(false);
+                        UnityEngine.Object.DestroyImmediate(row.gameObject);
+                        removedRetiredRows++;
+                    }
+
+                    // The surviving retired rows retain their CrewListItem and tooltip
+                    // instances. Restore their crew references and live hover switches.
+                    var remainingRosterNames = BuildAllRosterNameSet();
+                    for (int i = 0; i < RetiredListTransform.childCount; i++)
+                    {
+                        Transform remainingRow = RetiredListTransform.GetChild(i);
+                        if (remainingRow == null
+                            || !remainingRow.gameObject.activeSelf)
+                            continue;
+
+                        string remainingName = GetKerbalNameFromRowAny(
+                            remainingRow.gameObject,
+                            remainingRosterNames);
+                        ProtoCrewMember remainingKerbal =
+                            FindKerbalByName(remainingName);
+                        if (remainingKerbal != null)
+                            RebindCrewListItemTooltip(
+                                remainingRow.gameObject,
+                                remainingKerbal);
+                    }
+
+                    RepositionRetiredRows(RetiredListTransform);
+                    RewireTooltipsInRetiredList(RetiredListTransform);
+                    ReenableRetiredButtons(RetiredListTransform);
+                }
+
+                int restoredAvailableRows = 0;
+                if (AvailListTransform != null)
+                {
+                    var allRosterNames = BuildAllRosterNameSet();
+                    for (int i = 0; i < AvailListTransform.childCount; i++)
+                    {
+                        Transform row = AvailListTransform.GetChild(i);
+                        if (row == null) continue;
+
+                        string rowName = GetKerbalNameFromRowAny(
+                            row.gameObject,
+                            allRosterNames);
+                        if (!string.Equals(
+                            rowName,
+                            kerbal.name,
+                            StringComparison.Ordinal))
+                            continue;
+
+                        // The parent remains inactive while Retired is selected, so this
+                        // safely prepares the existing native row for the next tab switch.
+                        row.gameObject.SetActive(true);
+                        RebindCrewListItemTooltip(row.gameObject, kerbal);
+                        SetStarsState(
+                            row.gameObject,
+                            (int)kerbal.experienceLevel);
+                        restoredAvailableRows++;
+                        break;
+                    }
+
+                    PatchAvailableListStatusText();
+                }
+
+                var mb = _cachedACInstance as MonoBehaviour;
+                if (mb != null && mb.gameObject != null)
+                {
+                    if (_updateCrewCountsMethod != null)
+                    {
+                        try
+                        {
+                            _updateCrewCountsMethod.Invoke(
+                                _cachedACInstance,
+                                null);
+                        }
+                        catch (Exception ex)
+                        {
+                            RRLog.VerboseExceptionOnce(
+                                "AstronautComplexACPatch.Rows.cs:recall.counts",
+                                "Unable to update Astronaut Complex crew counts after recall",
+                                ex);
+                        }
+                    }
+
+                    var retiredNames =
+                        GetRetiredNames() ?? new List<string>();
+                    FixAvailableBadge(mb.gameObject, retiredNames);
+                    FixRetiredBadge(
+                        mb.gameObject,
+                        retiredNames.Count);
+                }
+
+                if (RRLog.VerboseEnabled)
+                {
+                    RRLog.Verbose(
+                        "[EAC] Recall UI refresh: kerbal=" + kerbal.name
+                        + " removedRetiredRows=" + removedRetiredRows
+                        + " restoredAvailableRows=" + restoredAvailableRows
+                        + " availableRows="
+                        + (AvailListTransform != null
+                            ? AvailListTransform.childCount
+                            : -1)
+                        + " retiredRows="
+                        + (RetiredListTransform != null
+                            ? RetiredListTransform.childCount
+                            : -1));
+                }
+            }
+            catch (Exception ex)
+            {
+                RRLog.Error(
+                    "[RosterRotation] RefreshAstronautComplexAfterRecall failed: "
+                    + ex);
+            }
+        }
+
+
+        /// <summary>
+        /// Refresh the live Astronaut Complex after a Kerbal enters retirement without
+        /// invoking KSP's CreateAvailableList path. The stock path appends another copy
+        /// of every native row during an in-place retirement and clones from that
+        /// transient hierarchy, leaving the new CrewAC tooltip uninitialized until the
+        /// Astronaut Complex is recreated.
+        ///
+        /// This method rebuilds only EAC's synthetic Retired list from the existing,
+        /// stable Available rows. It returns false when the Astronaut Complex is not
+        /// currently initialized so the caller may fall back to the normal refresh.
+        /// </summary>
+        public static bool RefreshAstronautComplexAfterRetirement(
+            ProtoCrewMember retiredKerbal)
+        {
+            if (retiredKerbal == null)
+                return false;
+
+            try
+            {
+                if (_cachedACInstance == null
+                    || AvailListTransform == null
+                    || RetiredListTransform == null)
+                {
+                    return false;
+                }
+
+                bool retiredWasShowing = RetiredTabShowing
+                    || RetiredListTransform.gameObject.activeSelf;
+                int availableRowsBefore = AvailListTransform.childCount;
+
+                // Reuse the EAC postfix directly. Unlike ForceRefresh(), this does not
+                // ask stock KSP to recreate/append the Available list; it only hides
+                // newly retired native rows and rebuilds the synthetic Retired clones.
+                Postfix_CreateAvailableList(_cachedACInstance);
+
+                int reboundCrewTooltips = 0;
+                int reenabledCrewTooltips = 0;
+
+                if (RetiredListTransform != null)
+                {
+                    HashSet<string> allRosterNames = BuildAllRosterNameSet();
+
+                    for (int i = 0; i < RetiredListTransform.childCount; i++)
+                    {
+                        Transform row = RetiredListTransform.GetChild(i);
+                        if (row == null || !row.gameObject.activeSelf)
+                            continue;
+
+                        string rowName = GetKerbalNameFromRowAny(
+                            row.gameObject,
+                            allRosterNames);
+                        ProtoCrewMember rowKerbal = FindKerbalByName(rowName);
+                        if (rowKerbal != null)
+                        {
+                            RebindCrewListItemTooltip(
+                                row.gameObject,
+                                rowKerbal);
+                            reboundCrewTooltips++;
+                        }
+
+                        // A clone can inherit a disabled CrewAC component if its source
+                        // row was transitioning between nested Recall and row hover.
+                        // A newly-created row has no active hover to preserve, so it is
+                        // safe and necessary to normalize the stock tooltip component.
+                        foreach (Component component
+                            in row.GetComponents<Component>())
+                        {
+                            if (component == null
+                                || component.GetType().Name
+                                    != "TooltipController_CrewAC")
+                            {
+                                continue;
+                            }
+
+                            Behaviour behaviour = component as Behaviour;
+                            if (behaviour != null && !behaviour.enabled)
+                            {
+                                behaviour.enabled = true;
+                                reenabledCrewTooltips++;
+                            }
+                        }
+                    }
+
+                    RepositionRetiredRows(RetiredListTransform);
+                    RewireTooltipsInRetiredList(RetiredListTransform);
+                    ReenableRetiredButtons(RetiredListTransform);
+
+                    if (retiredWasShowing)
+                    {
+                        if (AvailListTransform != null)
+                            AvailListTransform.gameObject.SetActive(false);
+                        RetiredListTransform.gameObject.SetActive(true);
+                    }
+                }
+
+                MonoBehaviour acBehaviour = _cachedACInstance as MonoBehaviour;
+                if (acBehaviour != null && acBehaviour.gameObject != null)
+                {
+                    if (_updateCrewCountsMethod != null)
+                    {
+                        try
+                        {
+                            _updateCrewCountsMethod.Invoke(
+                                _cachedACInstance,
+                                null);
+                        }
+                        catch (Exception ex)
+                        {
+                            RRLog.VerboseExceptionOnce(
+                                "AstronautComplexACPatch.Rows.cs:retirement.counts",
+                                "Unable to update Astronaut Complex crew counts after retirement",
+                                ex);
+                        }
+                    }
+
+                    List<string> retiredNames =
+                        GetRetiredNames() ?? new List<string>();
+                    FixAvailableBadge(
+                        acBehaviour.gameObject,
+                        retiredNames);
+                    FixRetiredBadge(
+                        acBehaviour.gameObject,
+                        retiredNames.Count);
+                }
+
+                if (RRLog.VerboseEnabled)
+                {
+                    RRLog.Verbose(
+                        "[EAC] Retirement UI refresh: kerbal="
+                        + retiredKerbal.name
+                        + " availableRowsBefore="
+                        + availableRowsBefore
+                        + " availableRowsAfter="
+                        + (AvailListTransform != null
+                            ? AvailListTransform.childCount
+                            : -1)
+                        + " retiredRows="
+                        + (RetiredListTransform != null
+                            ? RetiredListTransform.childCount
+                            : -1)
+                        + " reboundCrewTooltips="
+                        + reboundCrewTooltips
+                        + " reenabledCrewTooltips="
+                        + reenabledCrewTooltips);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                RRLog.Error(
+                    "[RosterRotation] RefreshAstronautComplexAfterRetirement failed: "
+                    + ex);
+                return false;
+            }
+        }
+
         private static Transform FindAnyCrewRowTemplate(Transform availList)
         {
             Transform[] roots = new Transform[] { availList, RetiredListTransform, ApplicantsListTransform, LostListTransform };
@@ -1568,7 +1995,7 @@ namespace RosterRotation
                 }
 
                 // 3) Stop future updates from snapping the row back to the donor kerbal.
-                try { c.GetType().GetProperty("enabled", bf)?.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1264", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1264", ex); }
+                try { ReflectionUtils.FindProperty(c.GetType(), "enabled")?.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1264", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1264", ex); }
             }
 
             return reboundAny;
@@ -1582,7 +2009,7 @@ namespace RosterRotation
                 if (c == null) continue;
                 string tn = c.GetType().Name;
                 if (!tn.Contains("Tooltip") && tn != "UIStateButtonTooltip") continue;
-                try { c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1278", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1278", ex); }
+                try { ReflectionUtils.FindProperty(c.GetType(), "enabled")?.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Rows.cs:1278", "Suppressed exception in AstronautComplexACPatch.Rows.cs:1278", ex); }
             }
         }
 
@@ -1593,7 +2020,7 @@ namespace RosterRotation
             {
                 if (pcm.experienceTrait != null)
                 {
-                    var titleProp = pcm.experienceTrait.GetType().GetProperty("Title", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var titleProp = ReflectionUtils.FindProperty(pcm.experienceTrait.GetType(), "Title");
                     var title = titleProp != null ? titleProp.GetValue(pcm.experienceTrait, null) as string : null;
                     if (!string.IsNullOrEmpty(title)) return title;
                 }
@@ -1621,8 +2048,8 @@ namespace RosterRotation
                 foreach (Component sc in ch.GetComponents<Component>())
                 {
                     if (sc == null || sc.GetType().Name != "Slider") continue;
-                    var valProp = sc.GetType().GetProperty("value", BindingFlags.Instance | BindingFlags.Public);
-                    var maxProp = sc.GetType().GetProperty("maxValue", BindingFlags.Instance | BindingFlags.Public);
+                    var valProp = ReflectionUtils.FindProperty(sc.GetType(), "value");
+                    var maxProp = ReflectionUtils.FindProperty(sc.GetType(), "maxValue");
                     if (valProp == null) continue;
                     float maxVal = 1f;
                     if (maxProp != null)
@@ -1851,9 +2278,9 @@ namespace RosterRotation
             int hours = Math.Max(0, (int)Math.Floor((seconds % daySec) / 3600.0));
             int minutes = Math.Max(0, (int)Math.Floor((seconds % 3600.0) / 60.0));
 
-            int displayDaysPerYear = RosterRotationState.UseKerbinDays
-                ? (int)KspTimeMath.KerbinDisplayDaysPerYear
-                : (int)KspTimeMath.EarthDisplayDaysPerYear;
+            int displayDaysPerYear = Math.Max(
+                1,
+                (int)Math.Floor(KspTimeMath.GetDisplayDaysPerYear(RosterRotationState.UseKerbinDays)));
 
             if (displayDaysPerYear > 0 && totalDays >= displayDaysPerYear)
             {

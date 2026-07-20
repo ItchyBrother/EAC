@@ -93,16 +93,14 @@ namespace RosterRotation
                         ch.gameObject.SetActive(false);
                 }
             RetiredScrollList.gameObject.SetActive(true);
-            // Immediately destroy UIHoverPanel components that OnEnable just re-initialized.
-            // Must happen before rewire since UIHoverPanel.Update() can hide Button GOs.
+            // Restore the stock row hover route while removing only the recall button from
+            // UIHoverPanel's visibility lists so the button remains visible.
             NeuterUIHoverPanelsOnRows(RetiredScrollList);
             ACPatches.RepositionRetiredRows(RetiredScrollList);
             ACPatches.RewireTooltipsInRetiredList(RetiredScrollList);
             ACPatches.ReenableRetiredButtons(RetiredScrollList);
-            // Deferred rewire: SetActive(true) fires OnEnable on tooltip components,
-            // which resets their registration with KSP's tooltip manager. The immediate
-            // rewire above may fail if the tooltip system hasn't settled yet.
-            // Re-run after one frame to catch any that were reset.
+            // Deferred pass catches rows added or replaced by stock AC layout work after
+            // activation. The rewiring is idempotent and does not create tooltip objects.
             StartCoroutine(DeferredRewire());
         }
 
@@ -111,9 +109,6 @@ namespace RosterRotation
             yield return null;
             if (RetiredScrollList != null && RetiredScrollList.gameObject.activeInHierarchy)
             {
-                // Kill UIHoverPanel components — their OnEnable repopulates hoverObjects
-                // which causes Update() to hide the Button GO every frame, blocking tooltips.
-                // Field-clearing doesn't survive re-activation, so destroy the component entirely.
                 NeuterUIHoverPanelsOnRows(RetiredScrollList);
                 ACPatches.RewireTooltipsInRetiredList(RetiredScrollList);
                 ACPatches.ReenableRetiredButtons(RetiredScrollList);
@@ -128,57 +123,21 @@ namespace RosterRotation
         }
 
         /// <summary>
-        /// Neuters UIHoverPanel on each retired row WITHOUT destroying it.
-        /// UIHoverPanel must stay alive because KSP's tooltip system routes hover events
-        /// through it. We just clear hoverObjects so its Update() stops hiding the Button GO.
-        /// Does NOT destroy EventTriggerForwarder — it's needed for tooltip event delivery.
-        /// This must be re-applied every time the tab is shown because OnEnable repopulates
-        /// the internal state from serialized data.
+        /// Preserves the stock UIHoverPanel and EventTriggerForwarder lifecycle on each row,
+        /// while preventing UIHoverPanel from hiding the recall Button.
         /// </summary>
         private static void NeuterUIHoverPanelsOnRows(Transform list)
         {
             if (list == null) return;
             int neutered = 0;
-            const BindingFlags bf = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             for (int i = 0; i < list.childCount; i++)
             {
                 Transform row = list.GetChild(i);
                 if (row == null || !row.gameObject.activeSelf) continue;
-
-                // Find UIHoverPanel on the row
-                Component uhp = null;
-                foreach (Component c in row.GetComponents<Component>())
-                {
-                    if (c != null && c.GetType().Name == "UIHoverPanel") { uhp = c; break; }
-                }
-                if (uhp == null) continue;
-
-                Type t = uhp.GetType();
-
-                // Clear hoverObjects so Update() stops calling SetActive(false) on Button GO
-                foreach (string fieldName in new[] { "hoverObjects", "_hoverObjects", "HoverObjects" })
-                {
-                    var hoF = t.GetField(fieldName, bf);
-                    if (hoF == null) continue;
-                    var hoVal = hoF.GetValue(uhp);
-                    if (hoVal == null) break;
-                    var clearM = hoVal.GetType().GetMethod("Clear", BindingFlags.Instance | BindingFlags.Public);
-                    if (clearM != null) try { clearM.Invoke(hoVal, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:165", "Suppressed exception in AstronautComplexRetiredTab.cs:165", ex); }
-                    break;
-                }
-
-                // CRITICAL: Disable the UIHoverPanel component entirely.
-                // Clearing hoverObjects isn't enough — OnEnable repopulates them from
-                // serialized data, and Update() runs between our clear passes.
-                // With enabled=false, Unity skips Update/LateUpdate so it can never
-                // hide the Button GO again. Tooltips work independently via
-                // UIStateButtonTooltip which registers directly with TooltipController.
-                var enabledP = t.GetProperty("enabled", bf);
-                if (enabledP != null) try { enabledP.SetValue(uhp, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexRetiredTab.cs:176", "Suppressed exception in AstronautComplexRetiredTab.cs:176", ex); }
-
+                ACPatches.NeuterUIHoverPanel(row.gameObject);
                 neutered++;
 
-                // Force Button GO active in case UIHoverPanel.OnEnable already hid it
+                // Force Button GO active in case a stock hover transition already hid it
                 foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                 {
                     if (ch.name == "Button" && !ch.gameObject.activeSelf)

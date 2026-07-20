@@ -329,20 +329,74 @@ namespace RosterRotation
         private static string _lastMigrationBackupPath;
         private static string _migrationBackupCreatedForSaveKey;
 
+        private bool _gameStateSaveEventSubscribed;
+        private bool _gameStateSaveEventUnavailableLogged;
+
         private void Awake()
         {
             DontDestroyOnLoad(gameObject);
-            GameEvents.onGameStateSave.Add(OnGameStateSave);
+            TrySubscribeToGameStateSave();
         }
 
         private void OnDestroy()
         {
-            GameEvents.onGameStateSave.Remove(OnGameStateSave);
+            if (!_gameStateSaveEventSubscribed) return;
+
+            try
+            {
+                if (GameEvents.onGameStateSave != null)
+                    GameEvents.onGameStateSave.Remove(OnGameStateSave);
+            }
+            catch (Exception ex)
+            {
+                RRLog.Warn("[EAC] Failed to unsubscribe scenario migration cleaner from onGameStateSave: " + ex.Message);
+            }
+            finally
+            {
+                _gameStateSaveEventSubscribed = false;
+            }
         }
 
         private void Update()
         {
+            // Some heavily modded installs initialize or replace this GameEvent after
+            // MainMenu addons are created. Retry harmlessly until it is available.
+            if (!_gameStateSaveEventSubscribed)
+                TrySubscribeToGameStateSave();
+
             TryShowPendingMigrationNotice("main-menu persistent monitor");
+        }
+
+        private void TrySubscribeToGameStateSave()
+        {
+            if (_gameStateSaveEventSubscribed) return;
+
+            try
+            {
+                if (GameEvents.onGameStateSave == null)
+                {
+                    if (!_gameStateSaveEventUnavailableLogged)
+                    {
+                        RRLog.Warn("[EAC] GameEvents.onGameStateSave is not available yet; scenario migration cleaner will retry.");
+                        _gameStateSaveEventUnavailableLogged = true;
+                    }
+                    return;
+                }
+
+                GameEvents.onGameStateSave.Add(OnGameStateSave);
+                _gameStateSaveEventSubscribed = true;
+
+                if (_gameStateSaveEventUnavailableLogged)
+                    RRLog.Info("[EAC] Scenario migration cleaner successfully subscribed to onGameStateSave after a delayed initialization.");
+            }
+            catch (Exception ex)
+            {
+                if (!_gameStateSaveEventUnavailableLogged)
+                {
+                    RRLog.Warn("[EAC] Unable to subscribe scenario migration cleaner to onGameStateSave; will retry: " + ex.Message);
+                    _gameStateSaveEventUnavailableLogged = true;
+                }
+            }
         }
 
         internal static void QueueLegacyMigrationNoticeFromLegacyLoad()

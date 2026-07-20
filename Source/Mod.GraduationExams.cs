@@ -2284,14 +2284,7 @@ namespace RosterRotation
 
             try
             {
-                foreach (var loaded in AssemblyLoader.loadedAssemblies)
-                {
-                    var asm = loaded?.assembly;
-                    if (asm == null) continue;
-                    if (!string.Equals(asm.GetName().Name, "ContractConfigurator", StringComparison.Ordinal)) continue;
-                    _ccAssembly = asm;
-                    break;
-                }
+                _ccAssembly = EACOptionalModRegistry.FindAssembly("ContractConfigurator");
 
                 if (_ccAssembly == null)
                 {
@@ -3176,31 +3169,7 @@ namespace RosterRotation
 
         private static Type FindType(string fullName)
         {
-            if (string.IsNullOrEmpty(fullName)) return null;
-
-            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    Type type = asm.GetType(fullName, false);
-                    if (type != null) return type;
-                }
-                catch { }
-            }
-
-            try
-            {
-                foreach (var loaded in AssemblyLoader.loadedAssemblies)
-                {
-                    var asm = loaded?.assembly;
-                    if (asm == null) continue;
-                    Type type = asm.GetType(fullName, false);
-                    if (type != null) return type;
-                }
-            }
-            catch { }
-
-            return null;
+            return EACOptionalModRegistry.FindType(fullName, "EAC_CCBridge");
         }
 
         private static object GetContractSystemInstance()

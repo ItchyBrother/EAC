@@ -1,22 +1,18 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.CompilerServices;
 
-[assembly: AssemblyTitle("EAC")]
-[assembly: AssemblyDescription("Enhanced Astronaut Complex")]
+[assembly: AssemblyTitle("EAC_CCBridge")]
+[assembly: AssemblyDescription("Enhanced Astronaut Complex integration for Contract Configurator")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("EAC")]
+[assembly: AssemblyProduct("Enhanced Astronaut Complex - Contract Configurator Companion")]
 [assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
 [assembly: ComVisible(false)]
-[assembly: Guid("7f0c632f-0d4e-4f76-b767-b6b9fbbca0de")]
+[assembly: Guid("c2db2dc8-8174-4d56-a61b-4ce578ddda84")]
 
 [assembly: AssemblyVersion("1.5.0")]
 [assembly: AssemblyFileVersion("1.5.0")]
 [assembly: AssemblyInformationalVersion("1.5.0")]
-
-[assembly: InternalsVisibleTo("EAC.Tests")]
-[assembly: InternalsVisibleTo("RosterRotation.Tests")]

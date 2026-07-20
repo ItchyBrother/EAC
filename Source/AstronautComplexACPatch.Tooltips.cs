@@ -2,15 +2,19 @@
 // Extracted tooltip and row-layout helpers for the Astronaut Complex UI.
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace RosterRotation
 {
     internal static partial class ACPatches
     {
         // Called by RetiredTabClickProxy.ShowRetiredList() AFTER SetActive(true).
-        // OnEnable() resets wired fields on UIStateButtonTooltip, so we must re-wire after activation.
+        // This restores cloned references and the stock pointer route. TooltipController has
+        // Awake/OnDisable/OnDestroy lifecycle methods, but no OnEnable registration hook.
         public static void RewireTooltipsInRetiredList(Transform retiredList)
         {
             if (retiredList == null) return;
@@ -28,6 +32,11 @@ namespace RosterRotation
                     if (btnT == null) continue;
                     rowCount++;
 
+                    // Preserve the stock row hover component and pointer events while preventing
+                    // it from hiding the recall button. This also restores the EventTriggerForwarder
+                    // flags used by the stock prefab after a fresh AC rebuild.
+                    NeuterUIHoverPanel(row.gameObject);
+
                     // Get components from Button GO
                     Component uisb = null, btn = null, btnImg = null, tooltip = null;
                     foreach (Component c in btnT.GetComponents<Component>())
@@ -39,15 +48,20 @@ namespace RosterRotation
                         if (c.GetType().Name == "UIStateButtonTooltip") tooltip = c;
                     }
 
-                    // UIStateButtonTooltip stays on Button — EventTriggerForwarder forwards
-                    // PointerEnter from DragObject (raycast target) down to Button.
+                    // Arbitrate the nested row and Recall tooltips. Unity sends pointer-enter
+                    // to the button first and then to each parent in the same frame; the guard
+                    // suspends TooltipController_CrewAC while the pointer is over Recall.
+                    InstallRetiredRecallHoverGuard(row, btnT);
 
-                    // --- Re-apply UIStateButton state (OnEnable resets currentStateIndex to 0) ---
+                    // UIStateButtonTooltip stays on Button. The runtime trace confirms the
+                    // Button graphic is the direct top raycast target across its whole rectangle.
+
+                    // --- Re-apply UIStateButton state after activation/rebuild ---
                     int correctStateIdx = 0;
                     string correctStateName = "X";
                     if (uisb != null && btnImg != null)
                     {
-                        var spriteProp = btnImg.GetType().GetProperty("sprite", BindingFlags.Instance | BindingFlags.Public);
+                        var spriteProp = ReflectionUtils.FindProperty(btnImg.GetType(), "sprite");
                         if (spriteProp != null)
                         {
                             var sprite = spriteProp.GetValue(btnImg, null) as UnityEngine.Object;
@@ -58,16 +72,13 @@ namespace RosterRotation
                             }
                         }
 
-                        var csiF = uisb.GetType().GetField("currentStateIndex",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var csiF = ReflectionUtils.FindField(uisb.GetType(), "currentStateIndex");
                         if (csiF != null) try { csiF.SetValue(uisb, correctStateIdx); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:63", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:63", ex); }
 
-                        var csF = uisb.GetType().GetField("currentState",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var csF = ReflectionUtils.FindField(uisb.GetType(), "currentState");
                         if (csF != null) try { csF.SetValue(uisb, correctStateName); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:67", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:67", ex); }
 
-                        var ssF = uisb.GetType().GetField("stateSet",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var ssF = ReflectionUtils.FindField(uisb.GetType(), "stateSet");
                         if (ssF != null) try { ssF.SetValue(uisb, true); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:71", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:71", ex); }
 
                     }
@@ -78,24 +89,21 @@ namespace RosterRotation
                     // RequireInteractable = false so tooltip fires without a valid selectableBase
                     foreach (string fn in new[] { "RequireInteractable", "requireInteractable" })
                     {
-                        var f = tooltip.GetType().GetField(fn,
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var f = ReflectionUtils.FindField(tooltip.GetType(), fn);
                         if (f != null) try { f.SetValue(tooltip, false); break; } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:83", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:83", ex); }
                     }
 
                     // Wire stateButton so tooltip reads currentStateIndex
                     if (uisb != null)
                     {
-                        var sbF = tooltip.GetType().GetField("stateButton",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var sbF = ReflectionUtils.FindField(tooltip.GetType(), "stateButton");
                         if (sbF != null) try { sbF.SetValue(tooltip, uisb); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:91", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:91", ex); }
                     }
 
                     // Wire tooltipPrefab — ALWAYS re-wire on every rewire pass.
                     // After AC close/reopen, the old prefab reference is a destroyed Unity object:
                     // non-null in C# but dead in Unity. Must use Unity's == null to detect this.
-                    var prefabF = tooltip.GetType().GetField("tooltipPrefab",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var prefabF = ReflectionUtils.FindField(tooltip.GetType(), "tooltipPrefab");
                     if (prefabF != null)
                     {
                         var prefabVal = prefabF.GetValue(tooltip);
@@ -126,22 +134,22 @@ namespace RosterRotation
                     // Wire selectableBase to Button so interactable check passes
                     if (btn != null)
                     {
-                        var selF = tooltip.GetType().GetField("selectableBase",
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var selF = ReflectionUtils.FindField(tooltip.GetType(), "selectableBase");
                         if (selF != null) try { selF.SetValue(tooltip, btn); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:131", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:131", ex); }
                     }
 
-                    // Force OnEnable by cycling enabled false→true. UIStateButtonTooltip
-                    // registers itself with KSP's tooltip manager in OnEnable. When the
-                    // scroll list was SetActive(false) the GO went inactive and OnDisable
-                    // fired, deregistering it. Just setting enabled=true won't re-register
-                    // because the property setter only fires OnEnable if value changes from
-                    // false to true — so we must explicitly cycle it.
-                    var enabledP = tooltip.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+                    // TooltipController does not register in OnEnable. Keep the component enabled,
+                    // but do not cycle it because that calls OnDisable and may despawn/cancel the
+                    // tooltip currently associated with this pointer.
+                    var enabledP = ReflectionUtils.FindProperty(tooltip.GetType(), "enabled");
                     if (enabledP != null)
                     {
-                        try { enabledP.SetValue(tooltip, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:143", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:143", ex); }
-                        try { enabledP.SetValue(tooltip, true, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:144", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:144", ex); }
+                        try
+                        {
+                            if (!(bool)enabledP.GetValue(tooltip, null))
+                                enabledP.SetValue(tooltip, true, null);
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:tooltip.enable", "Unable to enable retired recall tooltip", ex); }
                     }
 
                     // ── Tooltip chain diagnostics (verbose logging) ──
@@ -159,7 +167,7 @@ namespace RosterRotation
                         sb.Append("ttEnabled=").Append(ttEnabled).Append(" ");
 
                         // Prefab alive?
-                        var pfF = tooltip.GetType().GetField("tooltipPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var pfF = ReflectionUtils.FindField(tooltip.GetType(), "tooltipPrefab");
                         if (pfF != null)
                         {
                             var pfVal = pfF.GetValue(tooltip);
@@ -168,7 +176,7 @@ namespace RosterRotation
                         }
 
                         // selectableBase alive?
-                        var selF = tooltip.GetType().GetField("selectableBase", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var selF = ReflectionUtils.FindField(tooltip.GetType(), "selectableBase");
                         if (selF != null)
                         {
                             var selVal = selF.GetValue(tooltip);
@@ -177,7 +185,7 @@ namespace RosterRotation
                         }
 
                         // stateButton alive?
-                        var sbF = tooltip.GetType().GetField("stateButton", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var sbF = ReflectionUtils.FindField(tooltip.GetType(), "stateButton");
                         if (sbF != null)
                         {
                             var sbVal = sbF.GetValue(tooltip);
@@ -186,8 +194,8 @@ namespace RosterRotation
                         }
 
                         // RequireInteractable?
-                        var riF = tooltip.GetType().GetField("RequireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                               ?? tooltip.GetType().GetField("requireInteractable", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var riF = ReflectionUtils.FindField(tooltip.GetType(), "RequireInteractable")
+                               ?? ReflectionUtils.FindField(tooltip.GetType(), "requireInteractable");
                         if (riF != null) try { sb.Append("reqInteract=").Append(riF.GetValue(tooltip)).Append(" "); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:191", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:191", ex); }
 
                         // UIHoverPanel on row?
@@ -197,7 +205,7 @@ namespace RosterRotation
                             if (c != null && c.GetType().Name == "UIHoverPanel")
                             {
                                 uhpFound = true;
-                                var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+                                var ep = ReflectionUtils.FindProperty(c.GetType(), "enabled");
                                 if (ep != null) try { uhpEnabled = (bool)ep.GetValue(c, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:201", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:201", ex); }
                                 break;
                             }
@@ -220,7 +228,7 @@ namespace RosterRotation
                     }
 
                     // Re-apply retired kerbal stars AFTER SetActive(true).
-                    // OnEnable resets UIStateImage.currentStateIndex to 0, so we must set it again
+                    // Activation/rebuild can reset UIStateImage.currentStateIndex to 0, so set it again
                     // after activation using our effective (decayed) star count.
                     try
                     {
@@ -232,6 +240,8 @@ namespace RosterRotation
                             ProtoCrewMember k = FindKerbalByName(kName);
                             int effStars = GetRetiredEffectiveStarsSafe(k, rec, nowUT);
                             SetStarsState(row.gameObject, effStars);
+                            if (k != null)
+                                WireRecallButton(row.gameObject, k, effStars);
                         }
                     }
                     catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:237", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:237", ex); }
@@ -250,7 +260,7 @@ namespace RosterRotation
             try
             {
                 // Do NOT call ForceUpdateCanvases — it triggers UIStateImage/UIHoverPanel
-                // OnEnable/Rebuild callbacks that undo our sprite and enable state settings.
+                // activation/rebuild callbacks that undo our sprite and enable state settings.
                 // VLG and CSF are already disabled so no layout system competes with us.
 
                 // Read rowH from sizeDelta (set during cloning), not rect.height (layout-driven).
@@ -283,7 +293,8 @@ namespace RosterRotation
                     rt.sizeDelta        = new Vector2(0f, rowH);
                     yOffset -= rowH;
                     count++;
-                    // Ensure UIHoverPanel is disabled on every display pass
+                    // Restore the stock hover route on every display pass while keeping the
+                    // recall button permanently visible.
                     NeuterUIHoverPanel(row.gameObject);
                 }
 
@@ -308,9 +319,10 @@ namespace RosterRotation
         // (transparent). The tooltip fires via onPointerEnter delegate when hoverEnabled=true.
         //
         // Fix: swap backgroundNormal = backgroundHover sprite so BOTH enter and exit write
-        // the visible sprite. Keep hoverEnabled=true so onPointerEnter fires for tooltips.
-        // Does NOT destroy EventTriggerForwarder — it is still needed to relay PointerEnter
-        // events from DragObject to Button for tooltip delivery.
+        // the visible sprite. Keep UIHoverPanel enabled and hoverEnabled=true because it is a
+        // stock PointerEnterExitHandler and owns the row's hover events. Remove only the recall
+        // Button from hoverObjects so the panel no longer hides it. Restore EventTriggerForwarder
+        // pointer flags instead of replacing the stock delivery path.
         public static void NeuterUIHoverPanel(GameObject row)
         {
             if (row == null) return;
@@ -323,10 +335,8 @@ namespace RosterRotation
                     Type t = c.GetType();
 
                     // Swap backgroundNormal to the hover sprite so the border is always visible.
-                    var bgNF = t.GetField("backgroundNormal",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var bgHF = t.GetField("backgroundHover",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var bgNF = ReflectionUtils.FindField(t, "backgroundNormal");
+                    var bgHF = ReflectionUtils.FindField(t, "backgroundHover");
                     if (bgNF != null && bgHF != null)
                     {
                         try
@@ -338,8 +348,7 @@ namespace RosterRotation
                     }
 
                     // Set backgroundImage.sprite to the hover sprite immediately.
-                    var bgIF = t.GetField("backgroundImage",
-                        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var bgIF = ReflectionUtils.FindField(t, "backgroundImage");
                     if (bgIF != null && bgHF != null)
                     {
                         try
@@ -348,50 +357,123 @@ namespace RosterRotation
                             var hoverSprite = bgHF.GetValue(c);
                             if (img != null && hoverSprite != null)
                             {
-                                var spriteP = img.GetType().GetProperty("sprite",
-                                    BindingFlags.Instance | BindingFlags.Public);
+                                var spriteP = ReflectionUtils.FindProperty(img.GetType(), "sprite");
                                 if (spriteP != null) spriteP.SetValue(img, hoverSprite, null);
-                                var enabledP2 = img.GetType().GetProperty("enabled",
-                                    BindingFlags.Instance | BindingFlags.Public);
+                                var enabledP2 = ReflectionUtils.FindProperty(img.GetType(), "enabled");
                                 if (enabledP2 != null) enabledP2.SetValue(img, true, null);
                             }
                         }
                         catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:359", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:359", ex); }
                     }
 
-                    // Clear hoverObjects so PointerExit() stops calling SetActive(false) on Button GO.
-                    foreach (string fieldName in new[] { "hoverObjects", "_hoverObjects", "HoverObjects" })
+                    // Remove only the recall button from the panel's object lists. Clearing either
+                    // list discards stock row behavior; disabling this component prevents its pointer
+                    // events from firing at all. Removing the button from both lists means neither
+                    // pointer enter nor pointer exit can hide the always-visible recall control.
+                    GameObject recallButton = null;
+                    foreach (Transform child in row.GetComponentsInChildren<Transform>(true))
                     {
-                        var hoF = t.GetField(fieldName,
-                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (hoF == null) continue;
-                        var hoVal = hoF.GetValue(c);
-                        if (hoVal == null) break;
-                        var clearM = hoVal.GetType().GetMethod("Clear",
-                            BindingFlags.Instance | BindingFlags.Public);
-                        if (clearM != null)
-                            try { clearM.Invoke(hoVal, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:373", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:373", ex); }
-                        break;
+                        if (child != null && child.name == "Button")
+                        {
+                            recallButton = child.gameObject;
+                            recallButton.SetActive(true);
+                            break;
+                        }
                     }
 
-                    // CRITICAL: Disable UIHoverPanel entirely so its Update() never runs.
-                    // This is the definitive fix — clearing hoverObjects alone is a race condition
-                    // because OnEnable repopulates them from serialized data on each SetActive(true).
-                    var enabledP = t.GetProperty("enabled",
-                        BindingFlags.Instance | BindingFlags.Public);
-                    if (enabledP != null) try { enabledP.SetValue(c, false, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:382", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:382", ex); }
+                    foreach (string fieldName in new[] { "hoverObjects", "normalObjects" })
+                    {
+                        var objectListF = ReflectionUtils.FindField(t, fieldName);
+                        if (objectListF == null) continue;
+                        var list = objectListF.GetValue(c) as IList;
+                        if (list == null || recallButton == null) continue;
+                        try
+                        {
+                            while (list.Contains(recallButton)) list.Remove(recallButton);
+                        }
+                        catch (global::System.Exception ex)
+                        {
+                            RRLog.VerboseExceptionOnce(
+                                "AstronautComplexACPatch.Tooltips.cs:" + fieldName + ".remove",
+                                "Unable to remove recall button from UIHoverPanel." + fieldName,
+                                ex);
+                        }
+                    }
+
+                    var hoverEnabledF = ReflectionUtils.FindField(t, "hoverEnabled");
+                    if (hoverEnabledF != null)
+                        try { hoverEnabledF.SetValue(c, true); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:hoverenabled", "Unable to enable stock retired-row hover", ex); }
+
+                    // Keep the stock pointer handler alive. Older EAC builds disabled this every
+                    // time the tab was shown, which removed the row from the stock hover lifecycle.
+                    var enabledP = ReflectionUtils.FindProperty(t, "enabled");
+                    if (enabledP != null)
+                    {
+                        try
+                        {
+                            if (!(bool)enabledP.GetValue(c, null))
+                                enabledP.SetValue(c, true, null);
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:hoverpanel.enable", "Unable to enable stock retired-row hover panel", ex); }
+                    }
 
                     break;
                 }
 
-                // DO NOT destroy EventTriggerForwarder from DragObject.
-                // EventTriggerForwarder relays PointerEnter events from DragObject (the raycast
-                // target) to Button (where UIStateButtonTooltip lives). Without it, hover events
-                // never reach the tooltip system and tooltips stop working after AC close/reopen.
+                // The normal EventSystem hierarchy already sends enter/exit from DragObject and
+                // Button to the row. Forwarding the same events duplicates the row callbacks and
+                // lets the crew tooltip run after the nested Recall tooltip. Disable only these
+                // redundant enter/exit relays; leave the component and all other forwarding intact.
+                foreach (Component c in row.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null || c.GetType().Name != "EventTriggerForwarder") continue;
+
+                    foreach (string flagName in new[] { "forwardPointerEnter", "forwardPointerExit" })
+                    {
+                        var flag = ReflectionUtils.FindField(c.GetType(), flagName);
+                        if (flag != null)
+                            try { flag.SetValue(c, false); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:forwarder." + flagName, "Unable to disable duplicate retired-row pointer forwarding", ex); }
+                    }
+
+                    var enabledP = ReflectionUtils.FindProperty(c.GetType(), "enabled");
+                    if (enabledP != null)
+                        try
+                        {
+                            if (!(bool)enabledP.GetValue(c, null))
+                                enabledP.SetValue(c, true, null);
+                        }
+                        catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:forwarder.enable", "Unable to enable stock pointer forwarder", ex); }
+                }
             }
             catch (Exception ex)
             {
                 RRLog.Warn("[EAC] NeuterUIHoverPanel failed: " + ex.Message);
+            }
+        }
+
+
+        private static void InstallRetiredRecallHoverGuard(Transform row, Transform button)
+        {
+            if (row == null || button == null) return;
+
+            try
+            {
+                RetiredRecallHoverGuard guard =
+                    button.gameObject.GetComponent<RetiredRecallHoverGuard>();
+                if (guard == null)
+                    guard = button.gameObject.AddComponent<RetiredRecallHoverGuard>();
+
+                guard.Configure(row);
+                RRLog.VerboseOnce(
+                    "ac.recall.hoverguard.v6",
+                    "[EAC] RecallHoverGuard v6 installed; parent CrewAC tooltip is suspended while Recall is hovered.");
+            }
+            catch (Exception ex)
+            {
+                RRLog.VerboseExceptionOnce(
+                    "ac.recall.hoverguard.install",
+                    "Unable to install retired Recall hover arbitration",
+                    ex);
             }
         }
 
@@ -420,8 +502,8 @@ namespace RosterRotation
                 sb.Append(" [").Append(tn);
                 if (tn == "Image" || tn == "RawImage")
                 {
-                    var ep = c.GetType().GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
-                    var cp = c.GetType().GetProperty("color",   BindingFlags.Instance | BindingFlags.Public);
+                    var ep = ReflectionUtils.FindProperty(c.GetType(), "enabled");
+                    var cp = ReflectionUtils.FindProperty(c.GetType(), "color");
                     if (ep != null) try { sb.Append(" en=").Append((bool)ep.GetValue(c, null)); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:428", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:428", ex); }
                     if (cp != null) try { var col = (Color)cp.GetValue(c, null); sb.Append(" a=").Append(col.a.ToString("F2")); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.Tooltips.cs:429", "Suppressed exception in AstronautComplexACPatch.Tooltips.cs:429", ex); }
                 }
@@ -432,4 +514,147 @@ namespace RosterRotation
                 DumpHierarchy(t.GetChild(i), sb, indent + "  ");
         }
     }
+
+
+    /// <summary>
+    /// The Recall button is nested inside a row that also owns TooltipController_CrewAC.
+    /// Unity enters the button first and then executes pointer-enter handlers on its parents.
+    /// Suspend the actual parent tooltip component while Recall is hovered so the parent cannot
+    /// replace the nested button tooltip. Re-enable and re-enter CrewAC when the pointer moves
+    /// from Recall back onto the rest of the row.
+    /// </summary>
+    internal sealed class RetiredRecallHoverGuard : MonoBehaviour,
+        IPointerEnterHandler,
+        IPointerExitHandler
+    {
+        private Transform _row;
+        private Behaviour _crewTooltipBehaviour;
+        private IPointerEnterHandler _crewTooltipEnterHandler;
+        private bool _suppressed;
+        private bool _crewTooltipWasEnabled;
+
+        internal void Configure(Transform row)
+        {
+            if (_row == row) return;
+
+            RestoreCrewTooltip(false, null);
+            _row = row;
+            _crewTooltipBehaviour = null;
+            _crewTooltipEnterHandler = null;
+            ResolveCrewTooltip();
+        }
+
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            if (_suppressed || !ResolveCrewTooltip()) return;
+
+            _crewTooltipWasEnabled = _crewTooltipBehaviour.enabled;
+            if (_crewTooltipWasEnabled)
+                _crewTooltipBehaviour.enabled = false;
+
+            _suppressed = true;
+            RRLog.VerboseOnce(
+                "ac.recall.hoverguard.v6.suppressed",
+                "[EAC] RecallHoverGuard v6 suppressed TooltipController_CrewAC on Recall enter.");
+        }
+
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            RestoreCrewTooltip(true, eventData);
+        }
+
+        private void OnDisable()
+        {
+            RestoreCrewTooltip(false, null);
+        }
+
+        private bool ResolveCrewTooltip()
+        {
+            if (_crewTooltipBehaviour != null) return true;
+            if (_row == null) return false;
+
+            foreach (Component component in _row.GetComponents<Component>())
+            {
+                if (component == null
+                    || component.GetType().Name != "TooltipController_CrewAC")
+                    continue;
+
+                _crewTooltipBehaviour = component as Behaviour;
+                _crewTooltipEnterHandler = component as IPointerEnterHandler;
+                break;
+            }
+
+            if (_crewTooltipBehaviour == null)
+            {
+                RRLog.VerboseOnce(
+                    "ac.recall.hoverguard.v6.crewtooltip.missing",
+                    "[EAC] RecallHoverGuard v6 could not resolve TooltipController_CrewAC.");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void RestoreCrewTooltip(
+            bool enterCrewTooltipIfStillInsideRow,
+            PointerEventData eventData)
+        {
+            if (!_suppressed) return;
+
+            bool shouldEnter = _crewTooltipWasEnabled
+                && enterCrewTooltipIfStillInsideRow
+                && IsPointerInsideRowButOutsideRecall(eventData);
+
+            if (_crewTooltipBehaviour != null
+                && _crewTooltipWasEnabled
+                && !_crewTooltipBehaviour.enabled)
+            {
+                _crewTooltipBehaviour.enabled = true;
+            }
+
+            _suppressed = false;
+
+            if (!shouldEnter
+                || _crewTooltipEnterHandler == null
+                || _crewTooltipBehaviour == null
+                || !_crewTooltipBehaviour.isActiveAndEnabled
+                || _row == null
+                || !_row.gameObject.activeInHierarchy)
+            {
+                return;
+            }
+
+            _crewTooltipEnterHandler.OnPointerEnter(eventData);
+            RRLog.VerboseOnce(
+                "ac.recall.hoverguard.v6.restored",
+                "[EAC] RecallHoverGuard v6 restored and re-entered TooltipController_CrewAC.");
+        }
+
+        private bool IsPointerInsideRowButOutsideRecall(PointerEventData eventData)
+        {
+            if (_row == null || eventData == null) return false;
+
+            GameObject hit = eventData.pointerCurrentRaycast.gameObject;
+            if (hit == null) hit = eventData.pointerEnter;
+            Transform current = hit != null ? hit.transform : null;
+            bool insideRow = false;
+
+            while (current != null)
+            {
+                if (current == transform)
+                    return false;
+
+                if (current == _row)
+                {
+                    insideRow = true;
+                    break;
+                }
+
+                current = current.parent;
+            }
+
+            return insideRow;
+        }
+    }
+
 }

@@ -1128,27 +1128,41 @@ private static void EnsureMaxCrewCached()
                             GameObject clone = UnityEngine.Object.Instantiate(row.gameObject, retiredList);
                             clone.SetActive(true);
 
-                            // DestroyImmediate — regular Destroy is deferred to end-of-frame,
-                            // meaning CrewListItem runs one more Update() and resets our star/label changes.
-                            // Keep TooltipController_CrewAC alive — it provides the kerbal info popup on hover.
-                            var toDestroy = new System.Collections.Generic.List<Component>();
+                            // CrewListItem owns data used by the stock kerbal-information tooltip.
+                            // Destroying it makes the information popup disappear for rows cloned
+                            // immediately after retirement. Disable its updater instead, preserving
+                            // the serialized kerbal references while preventing it from overwriting
+                            // EAC's retired-row status, stars, and button state.
                             foreach (Component c in clone.GetComponentsInChildren<Component>(true))
-                                if (c != null && c.GetType().Name == "CrewListItem")
-                                    toDestroy.Add(c);
-                            foreach (var c in toDestroy)
-                                try { UnityEngine.Object.DestroyImmediate(c); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:665", "Suppressed exception in AstronautComplexACPatch.cs:665", ex); }
+                            {
+                                if (c == null || c.GetType().Name != "CrewListItem") continue;
+                                var enabledProperty = ReflectionUtils.FindProperty(c.GetType(), "enabled");
+                                if (enabledProperty != null && enabledProperty.CanWrite)
+                                {
+                                    try { enabledProperty.SetValue(c, false, null); }
+                                    catch (global::System.Exception ex)
+                                    {
+                                        RRLog.VerboseExceptionOnce("ac.retired.crewlistitem.disable",
+                                            "Unable to disable CrewListItem on retired row", ex);
+                                    }
+                                }
+                            }
 
-                            // Find the kerbal for this row
-                            string rowKerbalName = GetKerbalNameFromRow(clone);
+                            // Resolve against the complete roster, not just CrewRoster.Crew.
+                            // Retired kerbals may be outside the active Crew collection after the
+                            // Astronaut Complex is closed and reopened.
+                            string rowKerbalName = GetKerbalNameFromRowAny(clone);
                             double nowUT = Planetarium.GetUniversalTime();
-                            ProtoCrewMember rowKerbal = null;
-                            if (rowKerbalName != null && HighLogic.CurrentGame?.CrewRoster != null)
-                                foreach (var pcm in HighLogic.CurrentGame.CrewRoster.Crew)
-                                    if (pcm != null && pcm.name == rowKerbalName) { rowKerbal = pcm; break; }
+                            ProtoCrewMember rowKerbal = FindKerbalByName(rowKerbalName);
 
                             if (rowKerbal != null)
                             {
                                 RosterRotationState.Records.TryGetValue(rowKerbal.name, out var rec);
+
+                                // Rebind the stock CrewListItem tooltip to the current roster object.
+                                // The cloned source row can carry a stale crew reference after the AC
+                                // is destroyed and rebuilt, even though the visible text was restored.
+                                RebindCrewListItemTooltip(clone, rowKerbal);
 
                                 // --- Status label (TextMeshProUGUI on GO='label') ---
                                 string newStatus = "Retired";
@@ -1176,10 +1190,8 @@ private static void EnsureMaxCrewCached()
                                 WireRecallButton(clone, rowKerbal, effStars);
                             }
 
-                            // Disable UIHoverPanel — its Update/LateUpdate continuously disables
-                            // DragObject.Image when no mouse hover is active, killing both the
-                            // border visual and GraphicRaycaster hit detection. We don't need
-                            // hover highlighting on retired rows.
+                            // Preserve UIHoverPanel as the stock pointer-enter/exit owner, but
+                            // keep the recall control and border visible across hover transitions.
                             NeuterUIHoverPanel(clone);
 
                             RectTransform cloneRT = clone.GetComponent<RectTransform>();
@@ -1498,7 +1510,7 @@ private static void EnsureMaxCrewCached()
                 {
                     RepositionRetiredRows(RetiredListTransform);
                     RewireTooltipsInRetiredList(RetiredListTransform);
-                    // UIHoverPanel.Awake() may have fired and deactivated Button GOs — force them on.
+                    // The stock hover transition may have deactivated Button GOs — force them on.
                     for (int ri = 0; ri < RetiredListTransform.childCount; ri++)
                     {
                         Transform row = RetiredListTransform.GetChild(ri);
@@ -1543,8 +1555,8 @@ private static void EnsureMaxCrewCached()
                         }
                     }
                     RetiredListTransform.gameObject.SetActive(true);
-                    // OnEnable fires on SetActive(true) — UIHoverPanel may deactivate Button GOs.
-                    // Reposition, rewire, then explicitly re-enable any deactivated buttons.
+                    // Stock AC work may replace or retoggle rows after list activation.
+                    // Reposition, rewire, then explicitly re-enable any hidden buttons.
                     RepositionRetiredRows(RetiredListTransform);
                     RewireTooltipsInRetiredList(RetiredListTransform);
                     ReenableRetiredButtons(RetiredListTransform);
@@ -1582,7 +1594,7 @@ private static void EnsureMaxCrewCached()
         }
 
         // ---------------------------------------------------------------
-        // Re-enable any Button GOs deactivated by UIHoverPanel.OnEnable.
+        // Re-enable any Button GOs deactivated by a stock hover visibility transition.
         // Called from ShowRetiredList after SetActive(true) on the retired list.
         // ---------------------------------------------------------------
         public static void ReenableRetiredButtons(Transform retiredList)
@@ -1732,348 +1744,6 @@ private static void EnsureMaxCrewCached()
         RRLog.WarnOnce("ac.fixhire.nobuttons", "[RosterRotation] FixHireButtons: no Button components found under applicants list rows — cannot adjust hire buttons.");
     }
 }
-private static bool IsStockAstronautCrew(ProtoCrewMember pcm)
-        {
-            return pcm != null && pcm.type == ProtoCrewMember.KerbalType.Crew;
-        }
-
-        private static ProtoCrewMember FindRosterKerbalByNameForAcCount(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return null;
-            foreach (var pcm in EnumerateAllRosterKerbals())
-            {
-                if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
-                if (string.Equals(pcm.name, name, StringComparison.Ordinal))
-                    return pcm;
-            }
-            return null;
-        }
-
-        private static bool IsStockAstronautCrewNameForAcCount(string name)
-        {
-            var pcm = FindRosterKerbalByNameForAcCount(name);
-            // DeepFreeze can have names cached while the stock roster entry is temporarily
-            // absent.  If we cannot resolve the name, keep the DeepFreeze row/count rather
-            // than dropping a legitimate frozen astronaut.
-            return pcm == null || IsStockAstronautCrew(pcm);
-        }
-
-        private static void FixAvailableBadge(GameObject acGo,
-            System.Collections.Generic.List<string> retiredNames)
-        {
-            try
-            {
-                Transform tab = FindDescendant(acGo.transform, "Tab Available");
-                if (tab == null)
-                {
-                    RRLog.WarnOnce("acpatch.tabavailable.missing", "[RosterRotation] ACPatch: 'Tab Available' not found while fixing Available badge.");
-                    if (RRLog.VerboseEnabled)
-                    {
-                        foreach (Transform t in acGo.transform.GetComponentsInChildren<Transform>(true))
-                        {
-                            if (t != null && t.name.StartsWith("Tab", StringComparison.OrdinalIgnoreCase))
-                                RRLog.VerboseOnce("acpatch.tabavailable.seen." + t.name, "[EAC] ACPatch: saw tab '" + t.name + "' while looking for 'Tab Available'.");
-                        }
-                    }
-                    return;
-                }
-                int count = 0;
-                foreach (ProtoCrewMember pcm in HighLogic.CurrentGame.CrewRoster.Crew)
-                {
-                    if (!IsStockAstronautCrew(pcm)) continue;
-                    if (pcm.rosterStatus != ProtoCrewMember.RosterStatus.Available) continue;
-                    if (retiredNames.Contains(pcm.name)) continue;
-                    count++;
-                }
-                SetBadgeText(tab, count, "Available");
-            }
-            catch (Exception ex) { RRLog.Error("[RosterRotation] FixAvailableBadge: " + ex); }
-        }
-
-        private static void FixRetiredBadge(GameObject acGo, int count)
-        {
-            try
-            {
-                Transform tab = FindDescendant(acGo.transform, "Tab Retired");
-                if (tab == null) return;
-                SetBadgeText(tab, count, "Retired");
-            }
-            catch (Exception ex) { RRLog.Error("[RosterRotation] FixRetiredBadge: " + ex); }
-        }
-
-        private static void SetBadgeText(Transform tab, int count, string label)
-        {
-            if (tab == null) return;
-
-            Component fallbackComponent = null;
-            System.Reflection.PropertyInfo fallbackProperty = null;
-            string fallbackText = null;
-
-            foreach (Component c in tab.GetComponentsInChildren<Component>(true))
-            {
-                if (c == null) continue;
-                var p = c.GetType().GetProperty("text",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (p == null || p.PropertyType != typeof(string)) continue;
-                string s = null;
-                try { s = p.GetValue(c, null) as string; } catch { continue; }
-                if (string.IsNullOrEmpty(s)) continue;
-
-                // Prefer the visible tab label itself.  Some KSP tab objects have
-                // child text fields that contain bracketed values for unrelated UI
-                // elements; updating the first bracketed text can leave the tab's
-                // displayed count unchanged.
-                if (s.IndexOf(label, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    string newText;
-                    if (s.Contains("[") && s.Contains("]"))
-                    {
-                        int bracket = s.IndexOf('[');
-                        newText = s.Substring(0, bracket + 1) + count + "]";
-                    }
-                    else
-                    {
-                        newText = s + "[" + count + "]";
-                    }
-
-                    try { p.SetValue(c, newText, null); }
-                    catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.SetBadgeText.label", "Suppressed exception while setting tab badge text", ex); }
-                    return;
-                }
-
-                if (fallbackComponent == null && s.Contains("[") && s.Contains("]"))
-                {
-                    fallbackComponent = c;
-                    fallbackProperty = p;
-                    fallbackText = s;
-                }
-            }
-
-            if (fallbackComponent != null && fallbackProperty != null)
-            {
-                try
-                {
-                    // Do not preserve the fallback label prefix.  In KSP 1.12 the
-                    // reflected text component under a tab can be stale or cloned
-                    // from another tab (most visibly Available).  Preserving that
-                    // prefix makes Assigned inherit Available's badge text.  Force
-                    // the requested tab label while keeping the corrected count.
-                    string newText = label + "[" + count + "]";
-                    fallbackProperty.SetValue(fallbackComponent, newText, null);
-                }
-                catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.SetBadgeText.fallback", "Suppressed exception while setting fallback tab badge text", ex); }
-            }
-        }
-
-        // ---------------------------------------------------------------
-        // Helpers
-        // ---------------------------------------------------------------
-        private static System.Collections.Generic.List<string> GetRetiredNames()
-        {
-            return RosterRotationState.GetRetiredNames();
-        }
-
-        private static int GetRetiredCrewCount()
-        {
-            int n = 0;
-            foreach (var kvp in RosterRotationState.Records)
-                if (kvp.Value != null && kvp.Value.Retired) n++;
-            return n;
-        }
-
-        private static int CountAssignedCrew()
-        {
-            try
-            {
-                var names = new HashSet<string>(StringComparer.Ordinal);
-
-                // Refresh DeepFreeze before testing roster members.  The assigned
-                // badge treats frozen Kerbals as assigned/unavailable, and using a
-                // stale cache can make the badge drift from the visible Assigned list.
-                try { RosterRotation.DeepFreeze.EACDeepFreezeBridge.Update(force: true); } catch { }
-
-                foreach (var pcm in EnumerateAllRosterKerbals())
-                {
-                    if (pcm == null || string.IsNullOrEmpty(pcm.name)) continue;
-                    if (!IsStockAstronautCrew(pcm)) continue;
-
-                    RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
-                    if (rec != null && (rec.Retired || (rec.DeathUT > 0 && !rec.DeepFreezeActive)))
-                        continue;
-
-                    bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
-                    if (frozen || pcm.rosterStatus == ProtoCrewMember.RosterStatus.Assigned)
-                        names.Add(pcm.name);
-                }
-
-                // Frozen Kerbals can be absent from roster.Crew and can be stored
-                // as Unowned/Dead in the full roster.  The DeepFreeze cache is the
-                // authoritative list for the synthetic Assigned rows, so count it
-                // directly for the Assigned tab badge too.
-                foreach (var frozenInfo in RosterRotation.DeepFreeze.EACDeepFreezeBridge.FrozenKerbals.Values)
-                {
-                    if (frozenInfo == null || string.IsNullOrEmpty(frozenInfo.Name)) continue;
-                    if (!IsStockAstronautCrewNameForAcCount(frozenInfo.Name)) continue;
-                    if (RosterRotationState.Records.TryGetValue(frozenInfo.Name, out var rec) &&
-                        rec != null && rec.Retired)
-                        continue;
-                    names.Add(frozenInfo.Name);
-                }
-
-                foreach (var kvp in RosterRotationState.Records)
-                {
-                    if (kvp.Value != null && kvp.Value.DeepFreezeActive &&
-                        !kvp.Value.Retired && kvp.Value.DeathUT <= 0 &&
-                        IsStockAstronautCrewNameForAcCount(kvp.Key))
-                        names.Add(kvp.Key);
-                }
-
-                return names.Count;
-            }
-            catch (Exception ex)
-            {
-                RRLog.VerboseExceptionOnce("acpatch.countassigned.fail", "[EAC] ACPatch: CountAssignedCrew failed; returning 0.", ex);
-                return 0;
-            }
-        }
-
-        private static void FixAssignedBadge(GameObject acGo)
-        {
-            try
-            {
-                if (acGo == null) return;
-                Transform tab = FindDeepChild(acGo.transform, "Tab Assigned");
-                if (tab == null) return;
-                SetBadgeText(tab, CountAssignedCrew(), "Assigned");
-            }
-            catch (Exception ex)
-            {
-                RRLog.Warn("[RosterRotation] ACPatch: FixAssignedBadge failed: " + ex.Message);
-            }
-        }
-
-        private static int CountLostCrew()
-        {
-            try
-            {
-                var roster = HighLogic.CurrentGame?.CrewRoster;
-                if (roster == null) return 0;
-
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                for (int i = 0; i < roster.Count; i++)
-                {
-                    ProtoCrewMember pcm;
-                    try { pcm = roster[i]; } catch { continue; }
-                    if (pcm == null) continue;
-                    if (!IsStockAstronautCrew(pcm)) continue;
-
-                    RosterRotationState.Records.TryGetValue(pcm.name, out var rec);
-                    bool frozen = RosterRotationKSCUI.IsDeepFreezeFrozen(pcm) || (rec != null && rec.DeepFreezeActive);
-                    if (frozen) continue;
-
-                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead ||
-                        pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing)
-                    {
-                        names.Add(pcm.name);
-                        continue;
-                    }
-
-                    if (rec != null && rec.DeathUT > 0)
-                        names.Add(pcm.name);
-                }
-
-                foreach (var kvp in RosterRotationState.Records)
-                {
-                    if (kvp.Value != null && kvp.Value.DeathUT > 0 && !kvp.Value.DeepFreezeActive)
-                        names.Add(kvp.Key);
-                }
-
-                return names.Count;
-            }
-            catch (Exception ex)
-            {
-                RRLog.VerboseExceptionOnce("acpatch.countlost.fail", "[EAC] ACPatch: CountLostCrew failed; returning 0.", ex);
-                return 0;
-            }
-        }
-
-        private static Transform FindDeepChild(Transform root, string name)
-        {
-            if (root == null || string.IsNullOrEmpty(name)) return null;
-            var stack = new Stack<Transform>();
-            stack.Push(root);
-            while (stack.Count > 0)
-            {
-                var cur = stack.Pop();
-                if (cur == null) continue;
-                if (string.Equals(cur.name, name, StringComparison.Ordinal)) return cur;
-                for (int i = cur.childCount - 1; i >= 0; i--)
-                {
-                    var child = cur.GetChild(i);
-                    if (child != null) stack.Push(child);
-                }
-            }
-            return null;
-        }
-
-        private static void FixLostBadge(GameObject acGo)
-        {
-            try
-            {
-                if (acGo == null) return;
-                Transform tab = FindDeepChild(acGo.transform, "Tab Lost");
-                if (tab == null) return;
-
-                int count = CountLostCrew();
-                string replacement = "Lost [" + count.ToString(System.Globalization.CultureInfo.InvariantCulture) + "]";
-
-                foreach (Component c in tab.GetComponentsInChildren<Component>(true))
-                {
-                    if (c == null) continue;
-                    var p = c.GetType().GetProperty("text", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (p == null || p.PropertyType != typeof(string)) continue;
-                    string cur = null;
-                    try { cur = p.GetValue(c, null) as string; } catch { continue; }
-                    if (string.IsNullOrEmpty(cur)) continue;
-                    if (cur.IndexOf("Lost", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    try { p.SetValue(c, replacement, null); } catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("AstronautComplexACPatch.cs:1369", "Suppressed exception in AstronautComplexACPatch.cs:1369", ex); }
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                RRLog.Warn("[RosterRotation] ACPatch: FixLostBadge failed: " + ex.Message);
-            }
-        }
-
-        // Counts crew that KSP generally treats as 'active' for AC capacity,
-        // excluding our 'retired' kerbals.
-        private static int CountActiveNonRetiredCrew()
-        {
-            try
-            {
-                var roster = HighLogic.CurrentGame?.CrewRoster;
-                if (roster == null || roster.Crew == null) return -1;
-
-                int n = 0;
-                foreach (var pcm in roster.Crew)
-                {
-                    if (pcm == null) continue;
-                    if (!IsStockAstronautCrew(pcm)) continue;
-                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Dead) continue;
-                    if (pcm.rosterStatus == ProtoCrewMember.RosterStatus.Missing) continue;
-
-                    if (RosterRotationState.Records.TryGetValue(pcm.name, out var r) && r != null && r.Retired) continue;
-                    n++;
-                }
-                return n;
-            }
-            catch (Exception ex)
-            {
-                RRLog.VerboseExceptionOnce("acpatch.countactivenonretired.fail", "[EAC] ACPatch: CountActiveNonRetiredCrew failed; returning -1.", ex);
-                return -1;
-            }
-        }
 
     }
 

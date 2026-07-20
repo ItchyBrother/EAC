@@ -511,10 +511,6 @@ namespace RosterRotation
             }
             else
             {
-                var dayCounts = _cache.Milestones
-                    .GroupBy(m => string.IsNullOrEmpty(m.DayGroupLabel) ? "Archive" : m.DayGroupLabel)
-                    .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
-
                 string activeGroup = null;
                 foreach (var entry in _cache.Milestones)
                 {
@@ -523,7 +519,7 @@ namespace RosterRotation
                     {
                         activeGroup = groupLabel;
                         int count;
-                        if (!dayCounts.TryGetValue(groupLabel, out count))
+                        if (!_cache.MilestoneDayCounts.TryGetValue(groupLabel, out count))
                             count = 0;
                         GUILayout.Label(BuildMilestoneGroupLabel(groupLabel, count), _timelineHeaderStyle, GUILayout.ExpandWidth(true));
                     }
@@ -568,9 +564,9 @@ namespace RosterRotation
                 _selectedMemorial = entry;
             GUILayout.EndHorizontal();
 
-            GUILayout.Label(BuildRoleServiceLine(entry), _mutedStyle);
+            GUILayout.Label(entry.RoleServiceLine, _mutedStyle);
 
-            GUILayout.Label(BuildMemorialMetricsLine(entry, "Date unavailable"), _smallMutedStyle);
+            GUILayout.Label(entry.MetricsLine, _smallMutedStyle);
 
             GUILayout.Space(4);
             GUILayout.Label(entry.Citation, _wrapStyle, GUILayout.Height(34));
@@ -594,11 +590,11 @@ namespace RosterRotation
             GUILayout.BeginHorizontal(GUILayout.ExpandWidth(true));
             GUILayout.Label(entry.StatusText, _badgeStyle, GUILayout.Width(60f));
             GUILayout.Space(8f);
-            GUILayout.Label(BuildRoleServiceLine(entry), _mutedStyle, GUILayout.ExpandWidth(true));
+            GUILayout.Label(entry.RoleServiceLine, _mutedStyle, GUILayout.ExpandWidth(true));
             GUILayout.EndHorizontal();
             GUILayout.Label(entry.StatusDetailText, _smallMutedStyle, GUILayout.ExpandWidth(true));
             GUILayout.Space(4f);
-            GUILayout.Label(BuildMemorialSummary(entry), _metaValueStyle, GUILayout.ExpandWidth(true));
+            GUILayout.Label(entry.SummaryLine, _metaValueStyle, GUILayout.ExpandWidth(true));
             GUILayout.EndVertical();
 
             GUILayout.Space(12f);
@@ -786,14 +782,8 @@ namespace RosterRotation
             if (entry == null || entry.CrewNames == null || entry.CrewNames.Length == 0)
                 return;
 
-            List<string> crewNames = entry.CrewNames
-                .Where(x => !string.IsNullOrEmpty(x))
-                .Select(x => x.Trim())
-                .Where(x => x.Length > 0)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (crewNames.Count == 0)
+            string[] crewNames = entry.CrewNames;
+            if (crewNames.Length == 0)
                 return;
 
             const float cardWidth = 108f;
@@ -803,10 +793,10 @@ namespace RosterRotation
 
             bool anyLinked = false;
             int index = 0;
-            while (index < crewNames.Count)
+            while (index < crewNames.Length)
             {
                 GUILayout.BeginHorizontal();
-                for (int col = 0; col < itemsPerRow && index < crewNames.Count; col++, index++)
+                for (int col = 0; col < itemsPerRow && index < crewNames.Length; col++, index++)
                 {
                     string crewName = crewNames[index];
                     MemorialEntry memorial = FindMemorialEntryByName(crewName);
@@ -821,7 +811,7 @@ namespace RosterRotation
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
-                if (index < crewNames.Count)
+                if (index < crewNames.Length)
                     GUILayout.Space(6f);
             }
 
@@ -890,9 +880,8 @@ namespace RosterRotation
             if (string.IsNullOrEmpty(crewName) || _cache == null || _cache.Memorials == null)
                 return null;
 
-            return _cache.Memorials.FirstOrDefault(x =>
-                !string.IsNullOrEmpty(x.Name) &&
-                string.Equals(x.Name, crewName, StringComparison.OrdinalIgnoreCase));
+            MemorialEntry entry;
+            return _cache.MemorialByName.TryGetValue(crewName, out entry) ? entry : null;
         }
         private bool TryGetKerbalVeteranStatus(string kerbalName)
         {
@@ -1472,8 +1461,12 @@ namespace RosterRotation
                 entry.IsVeteran = (roster != null && roster.IsVeteran) || (live != null && live.IsVeteran);
                 entry.Citation = BuildMemorialCitation(entry, eac);
                 entry.Notes = BuildMemorialNotes(eac);
+                entry.RoleServiceLine = BuildRoleServiceLine(entry);
+                entry.MetricsLine = BuildMemorialMetricsLine(entry, "Date unavailable");
+                entry.SummaryLine = BuildMemorialSummary(entry);
 
                 _cache.Memorials.Add(entry);
+                _cache.MemorialByName[entry.Name] = entry;
             }
 
             _cache.Memorials.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
@@ -1500,6 +1493,15 @@ namespace RosterRotation
                 .Select(g => g.OrderByDescending(x => x.SortValue).First())
                 .OrderBy(x => x.SortValue)
                 .ToList();
+
+            for (int i = 0; i < _cache.Milestones.Count; i++)
+            {
+                MilestoneEntry milestone = _cache.Milestones[i];
+                string groupLabel = string.IsNullOrEmpty(milestone.DayGroupLabel) ? "Archive" : milestone.DayGroupLabel;
+                int count;
+                _cache.MilestoneDayCounts.TryGetValue(groupLabel, out count);
+                _cache.MilestoneDayCounts[groupLabel] = count + 1;
+            }
         }
 
         private void ParseMilestoneChildren(ConfigNode node, string inheritedBody, string inheritedKind, string inheritedPath)

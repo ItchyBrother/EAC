@@ -597,7 +597,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.4.1";
+        private const string ModVersion  = "1.5";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -640,6 +640,7 @@ namespace RosterRotation
         private ProtoCrewMember _pendingTrainKerbal;
         private bool            _showTrainConfirm;
         private bool _pendingForceRefresh = false;
+        private ProtoCrewMember _pendingRetirementUiRefreshKerbal;
 
         // ── UI cache constants / capacity cache ────────────────────────────────
         private const float UiCacheSeconds = 0.25f;
@@ -1003,6 +1004,17 @@ namespace RosterRotation
                 InvalidateUICaches();
             }
 
+            if (_pendingRetirementUiRefreshKerbal != null)
+            {
+                ProtoCrewMember retiredKerbal = _pendingRetirementUiRefreshKerbal;
+                _pendingRetirementUiRefreshKerbal = null;
+
+                if (!ACPatches.RefreshAstronautComplexAfterRetirement(retiredKerbal))
+                    _pendingForceRefresh = true;
+
+                InvalidateUICaches();
+            }
+
             if (_pendingForceRefresh)
             {
                 _pendingForceRefresh = false;
@@ -1210,6 +1222,11 @@ namespace RosterRotation
             k.inactive        = true;
             k.inactiveTimeEnd = nowUT + RosterRotationState.YearSeconds * 1000.0;
             RosterRotationState.InvalidateRetiredCache();
+
+            // Defer the UI mutation until Update so we do not replace Unity hierarchy
+            // objects from inside the IMGUI button event. The targeted refresh rebuilds
+            // only EAC's synthetic Retired rows and preserves the stock Available rows.
+            _pendingRetirementUiRefreshKerbal = k;
         }
 
         private void DoRecall(ProtoCrewMember k, RosterRotationState.KerbalRecord r, int effStars)

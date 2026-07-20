@@ -600,7 +600,6 @@ namespace RosterRotation
                 {
                     DoRetire(k, r);
                     InvalidateUICaches();
-                    _pendingForceRefresh = true;
                 }
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
