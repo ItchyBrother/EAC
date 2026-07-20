@@ -1,5 +1,94 @@
 # Enhanced Astronaut Complex (EAC) Change Log
 
+## 2026-07-20: EAC Core v1.5.0 and EAC Contract Configuration v1.5.0 for KSP >= 1.12.x
+
+EAC 1.5.0 adds custom-calendar compatibility, changes Contract Configurator support to a clean two-package release model, reduces repeated reflection and UI allocation work, and fixes Retired-tab tooltip and refresh behavior. The release addresses custom calendar support tracked in GitHub issue #43, Contract Configurator packaging tracked in issue #44, and the performance and Retired-tab work tracked in issue #45.
+
+### Custom calendar support
+
+- Updated EAC calendar handling so it is no longer limited to the stock 6-hour/426-day Kerbin calendar or 24-hour/365-day Earth calendar assumptions.
+- EAC now uses active game calendar day/year values when custom calendar information is available.
+- Improved age and date alignment for installations using Kronometer, JNSQ, and rescaled Kopernicus/Sigma Dimensions systems.
+- Preserved stock Kerbin-time and Earth-time compatibility.
+- Added a safe fallback to EAC's supported stock time basis when a custom calendar provider is unavailable or does not return usable values.
+- Calendar support changes EAC's calendar-based display/conversion behavior and does not rewrite universal time in existing saves.
+
+### Two-package Contract Configurator release
+
+- Split the release into **EAC Core 1.5.0** and the optional **EAC Contract Configuration 1.5.0** add-on.
+- EAC Core contains `EAC.dll` and no longer ships the Contract Configurator bridge, exam contracts, agencies, craft, or scenarios.
+- EAC Core has no Contract Configurator dependency.
+- EAC Contract Configuration contains the active `EAC_CCBridge.dll` plus the Contract Configurator exam content.
+- EAC Contract Configuration requires EAC Core 1.5.0 and Contract Configurator.
+- Both packages use the same 1.5.0 release version to make compatibility clear.
+
+### Bridge installation changes
+
+- Removed the old `EAC_CCBridge.dll.disabled` rename workflow from the 1.5.0 release process.
+- Players who do not use Contract Configurator install only EAC Core.
+- Players who use Contract Configurator install EAC Core and then merge the EAC Contract Configuration package into `GameData/EAC/`.
+- The add-on installs `GameData/EAC/Plugins/EAC_CCBridge.dll` already enabled; no DLL rename is required.
+- Upgrade instructions now tell users to remove stale `EAC_CCBridge.dll.disabled` files left by EAC 1.4.x or earlier.
+
+### Reflection and optional-mod discovery optimization
+
+- Added process-lifetime caches for `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty`.
+- Cache keys include the target `Type` and the ordered candidate member names, preserving the existing fallback order.
+- Cached both successful lookups and misses so unavailable fields and properties are not searched repeatedly.
+- Protected shared reflection-cache access with locking.
+- Routed repeated per-row, tooltip, and badge `FieldInfo` / `PropertyInfo` lookups through `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty`.
+- Preserved existing value-setting logic, event wiring, fallbacks, public/internal method signatures, and call sites.
+- Added `EACOptionalModRegistry.cs` as one shared cache for optional-mod assembly discovery, optional bridge-type discovery, successful results, and missing assemblies/types.
+- Updated Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and `EAC_CCBridge` discovery to use the shared registry.
+- Removed repeated scans of `AssemblyLoader.loadedAssemblies` and `AppDomain.CurrentDomain.GetAssemblies()` from the individual adapters.
+- Left already-explicit one-time or separately cached reflection paths unchanged.
+
+### Hall of History allocation reduction
+
+- Cached milestone day-group counts during Hall data refresh instead of rebuilding `GroupBy` / `ToDictionary` results during every `OnGUI` repaint.
+- Reused the normalized `MilestoneEntry.CrewNames` array instead of allocating a new LINQ list during every detail repaint.
+- Added a case-insensitive memorial-name index for O(1) milestone portrait-link lookup instead of repeated `FirstOrDefault` scans.
+- Cached memorial role/service, metrics, and summary display strings when entries are built instead of rebuilding lists and formatted strings every repaint.
+- Cleared all new indexes with the existing Hall cache refresh.
+- Preserved Hall data rules, sorting, filtering, layout, and user-visible wording.
+
+### Retired-tab tooltip and targeted refresh fixes
+
+- Fixed the Recall-button tooltip so it works regardless of the direction from which the pointer enters the button.
+- Added a small production hover guard that temporarily suppresses the row's `TooltipController_CrewAC` while the existing Recall `UIStateButtonTooltip` is active.
+- Restored and re-entered the crew tooltip when the pointer leaves Recall but remains over the Kerbal row, allowing the normal Kerbal-information popup to appear immediately.
+- Disabled only the redundant forwarded enter/exit events that caused the row tooltip to run after the Recall tooltip.
+- Avoided duplicate Recall tooltip objects and duplicate click listeners.
+- Replaced the full Astronaut Complex `ForceRefresh()` after recall with a targeted update that removes only the recalled Retired clone, reactivates the existing Available row, and rebinds surviving retired-row tooltips.
+- Replaced retirement-time full list rebuilding with a deferred EAC-only refresh after the roster status change completes.
+- Kept the native Available list intact while rebuilding only EAC's synthetic Retired rows.
+- Rebound every new retired clone to the correct `ProtoCrewMember` and explicitly checked/re-enabled its crew tooltip.
+- Applied the same targeted retirement refresh path to manual and automatic retirement.
+- Removed temporary continuous raycast logging, pointer-event probes, diagnostic row/button components, and `RecallRaycast` logging after verification.
+- Verified in game that Recall and Kerbal-information tooltips work immediately after recall and retirement, the Available list remains unchanged, and no Astronaut Complex full-refresh trace or exception was produced during the tested sequence.
+
+### Astronaut Complex source organization
+
+- Moved Available, Assigned, Retired, and Lost badge updates; crew-count calculations; stock-crew filtering; roster-name lookup; and badge reflection helpers into `AstronautComplexACPatch.Badges.cs`.
+- Replaced the remaining direct badge-text `GetProperty("text", ...)` calls with `ReflectionUtils.FindProperty(...)` so badge refreshes use the shared cache.
+- Preserved `Prefix_ActivateList`, `Postfix_CreateAvailableList`, `Postfix_CreateApplicantList`, `ForceRefresh`, Retired-tab registration, native-list ownership methods, tab creation, and list-anchor discovery behavior.
+
+### Documentation and packaging
+
+- Updated the main README for custom calendars, the two-package install model, compatibility, troubleshooting, performance improvements, Retired-tab behavior, and separate packaging checklists.
+- Replaced the old bridge-renaming README with installation and upgrade instructions for the EAC Contract Configuration package.
+- Updated Kerbal Changelog release notes for EAC 1.5.0.
+- Updated `EAC.version` to 1.5.0.
+- Clarified that EAC Core and EAC Contract Configuration should be released and installed at matching versions.
+
+### Upgrade notes
+
+1. Remove any stale `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled` from an older release.
+2. Install EAC Core 1.5.0.
+3. If Contract Configurator is installed and final exams are desired, install EAC Contract Configuration 1.5.0.
+4. Do not rename the bridge DLL in the new package.
+5. Keep only one copy of each EAC DLL.
+
 ## 2026-0604: EAC v1.4.1 for KSP >= 1.12.x
 
 This hotfix addresses GitHub issue #41, where the **EAC Starting Crew Setup** configuration dialog could appear repeatedly in existing saves after entering and exiting buildings or otherwise changing scenes.

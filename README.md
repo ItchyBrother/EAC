@@ -1,16 +1,16 @@
 # Enhanced Astronaut Complex (EAC)
 
-Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to Kerbal Space Program 1.12.x by extending the stock Astronaut Complex with long-term crew development, training, aging, retirement, recovery leave, career history, and optional Contract Configurator final exams.
+Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to Kerbal Space Program 1.12.x by extending the stock Astronaut Complex with long-term crew development, training, aging, retirement, recovery leave, career history, and optional Contract Configurator final exams supplied through the separate EAC Contract Configuration add-on.
 
 EAC is designed to feel stock-like while making career-mode crew decisions matter. It can run as a self-contained career crew-management mod, while still deferring to supported specialist mods when they are actually installed and loaded.
 
 ## What EAC Adds
 
-EAC expands the stock Astronaut Complex into a career-management hub for Kerbals. It tracks training, service history, aging, retirement, recovery/rest time, roster state, and optional recognition systems. It also adds retired/lost roster handling, Hall of History presentation, Contract Configurator final-exam support, and new EAC 1.4 crew-management tools.
+EAC expands the stock Astronaut Complex into a career-management hub for Kerbals. It tracks training, service history, aging, retirement, recovery/rest time, roster state, and optional recognition systems. It also adds retired/lost roster handling, Hall of History presentation, optional Contract Configurator final-exam support, and EAC 1.5 calendar-compatibility and crew-management tools.
 
 ## Why Use EAC by Itself Instead of Adding Crew R&R or Earn Your Stripes?
 
-Crew R&R and Earn Your Stripes have always been optional. EAC can run without either of them. EAC 1.4 goes further by adding EAC-native versions of the major overlapping systems those mods provide, plus additional EAC-specific career-management features. For many players, that means there is no need to add two more mods just to get recovery leave, veteran recognition, suit presentation, or starting crew control.
+Crew R&R and Earn Your Stripes have always been optional. EAC can run without either of them. EAC 1.5 includes EAC-native versions of the major overlapping systems those mods provide, plus additional EAC-specific career-management features. For many players, that means there is no need to add two more mods just to get recovery leave, veteran recognition, suit presentation, or starting crew control.
 
 EAC's advantage is integration:
 
@@ -37,9 +37,9 @@ Important: EAC only delegates when the other mod's DLL is actually loaded by KSP
 
 ### Aging and Retirement
 
-- Kerbals age over time using Kerbin-time or Earth-time settings.
+- Kerbals age over time using the active game calendar when available, with supported stock Kerbin-time and Earth-time fallback behavior.
 - Retirement age ranges are configurable.
-- Default EAC 1.4 retirement values:
+- Current default retirement values:
   - Retire minimum: 37
   - Retire maximum: 47
   - Retired death minimum: 50
@@ -48,6 +48,16 @@ Important: EAC only delegates when the other mod's DLL is actually loaded by KSP
 - Retired Kerbals can lose effective experience over time while retired.
 - Optional retired-death and mission-old-age-death settings are available.
 
+### Calendar Compatibility
+
+EAC 1.5 improves compatibility with custom KSP calendars.
+
+- EAC uses the active game's calendar day and year lengths when custom values are available.
+- Stock Kerbin-time and Earth-time behavior remain supported.
+- Custom calendars used by Kronometer, JNSQ, and rescaled Kopernicus/Sigma Dimensions installations can keep EAC age and date displays aligned with the rest of the game.
+- If a custom calendar cannot be resolved, EAC falls back to its supported stock time basis instead of failing.
+- Calendar support affects EAC's calendar-based age/date presentation and related lifecycle timing conversions; it does not alter the save's universal time.
+
 ### Astronaut Complex Roster Management
 
 - Adds EAC-aware roster handling to the stock Astronaut Complex.
@@ -55,6 +65,10 @@ Important: EAC only delegates when the other mod's DLL is actually loaded by KSP
 - Keeps Assigned, Retired, Lost/KIA/Dead, Training, Recovering, Frozen, and otherwise unavailable Kerbals out of the Available tab.
 - Adds a synthetic Retired tab while safely avoiding unsafe stock UI activation paths for custom tabs.
 - Shows assignment duration in the Assigned tab.
+- Keeps the Recall-button tooltip reliable regardless of which direction the pointer enters the button.
+- Switches cleanly between the Recall tooltip and the normal Kerbal-information popup while moving across a retired crew row.
+- Uses targeted recall and deferred EAC-only retirement refreshes so recalling or retiring a Kerbal does not duplicate or rebuild the native Available list.
+- Rebinds retired-row crew tooltips after UI updates so newly retired Kerbals and surviving rows show their information immediately without closing and reopening the Astronaut Complex.
 - Re-applies tab ownership while the Astronaut Complex is open so KSP list rebuilds do not leak rows into the wrong tab.
 - Keeps the watchdog/filter logic limited to Astronaut Complex use instead of running constantly.
 
@@ -77,7 +91,7 @@ Important: EAC only delegates when the other mod's DLL is actually loaded by KSP
 
 ### Suggested Next Crew Advisor
 
-EAC 1.4 adds an optional Suggested Next Crew Advisor for the VAB/SPH.
+EAC includes an optional Suggested Next Crew Advisor for the VAB/SPH.
 
 The advisor is intentionally advisory only:
 
@@ -135,6 +149,19 @@ EAC includes Hall of History style presentation for career records, including:
 - Portrait support.
 - Career and service history presentation.
 - Veteran/status display where applicable.
+- Reduced repaint-time allocations by caching milestone day-group counts, memorial-name lookups, and preformatted memorial role, service, metrics, and summary text during data refresh.
+- Preserved the existing Hall data rules, sorting, filtering, layout, and visible wording.
+
+### Performance and Internal Stability
+
+EAC 1.5 reduces repeated reflection and optional-mod discovery work in frequently refreshed UI paths.
+
+- `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty` use lock-protected process-lifetime caches keyed by the target type and ordered candidate member names.
+- Both successful reflection lookups and misses are cached, preventing the same unavailable member from being searched repeatedly.
+- Repeated Astronaut Complex row, tooltip, and badge member lookups now use the shared reflection cache while preserving the existing lookup order, value-setting logic, event wiring, and fallbacks.
+- A shared optional-mod registry caches assembly and bridge-type discovery for Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and the EAC Contract Configurator bridge.
+- Astronaut Complex badge code was moved into a dedicated source file without changing the existing tab entry points, tab creation, list-anchor discovery, or native-list ownership behavior.
+- These changes do not alter EAC settings, save formats, public/internal method signatures, or normal gameplay rules.
 
 ### Notifications
 
@@ -170,25 +197,40 @@ GameData/000_Harmony/
 
 CKAN installs should include the Harmony2 dependency.
 
-### Contract Configurator
+### Contract Configurator and the EAC Contract Configuration Add-on
 
-Contract Configurator is optional, but the EAC Contract Configurator bridge has a hard dependency on Contract Configurator. To avoid dependency errors for players who do not use Contract Configurator, the release package ships the bridge disabled as:
+Beginning with version 1.5.0, EAC is released as two coordinated packages:
 
-```text
-GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
-```
+1. **Enhanced Astronaut Complex (EAC Core)** — the required base mod. It contains `EAC.dll` and has no Contract Configurator dependency.
+2. **EAC Contract Configuration** — an optional add-on for players who want Contract Configurator final exams. It contains the active bridge DLL and the exam contracts/content.
 
-If you want to use Contract Configurator final exams, install Contract Configurator and then rename the bridge file to:
+The optional add-on requires:
+
+- EAC Core 1.5.0,
+- Contract Configurator,
+- and the normal EAC Core dependency on HarmonyKSP / Harmony2.
+
+Install the add-on only when Contract Configurator is installed. The add-on merges into the existing `GameData/EAC/` folder and provides:
 
 ```text
 GameData/EAC/Plugins/EAC_CCBridge.dll
+GameData/EAC/Contracts/
+GameData/EAC/Agencies/
+GameData/EAC/Craft/
+GameData/EAC/Scenarios/
 ```
 
-When Contract Configurator and the enabled EAC CC bridge are both installed, EAC can use Contract Configurator contracts as final exams for training advancement. EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
+The old `EAC_CCBridge.dll.disabled` rename workflow is no longer used for 1.5.0 releases. EAC Core does not ship the bridge. Players who do not use Contract Configurator install only EAC Core and take no additional action.
 
-If Contract Configurator is not installed, leave `EAC_CCBridge.dll.disabled` disabled. Final exam contract mode will be unavailable, and EAC's non-contract training path remains available.
+When EAC Core, Contract Configurator, and EAC Contract Configuration are installed, EAC can use Contract Configurator contracts as final exams for training advancement. EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
 
-If final exams are disabled after a Kerbal has already entered the final-exam path, or if Contract Configurator/the enabled bridge are later removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
+If final exams are disabled after a Kerbal has entered the final-exam path, or if Contract Configurator/the add-on is later removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
+
+When upgrading from EAC 1.4.x or earlier:
+
+- remove any stale `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled`,
+- install EAC Core 1.5.0,
+- and install EAC Contract Configuration 1.5.0 only if Contract Configurator is present.
 
 For contract authors, see:
 
@@ -250,13 +292,15 @@ Kerbal Changelog is optional.
 
 ## Installation
 
-1. Download the release zip.
-2. Copy the `GameData/EAC/` folder into your KSP `GameData/` directory.
-3. Make sure HarmonyKSP is installed at `GameData/000_Harmony/`.
+### EAC Core
+
+1. Install HarmonyKSP / Harmony2.
+2. Download the EAC Core 1.5.0 release.
+3. Copy the included `GameData/EAC/` folder into the KSP `GameData/` directory.
 4. Start KSP and open a save.
 5. Review EAC settings under Difficulty Options before starting a long career save.
 
-A typical install should look like this:
+A core-only install should look like this:
 
 ```text
 Kerbal Space Program/
@@ -266,14 +310,37 @@ Kerbal Space Program/
       Changelog.cfg
       Plugins/
         EAC.dll
-        EAC_CCBridge.dll.disabled
+```
+
+### Optional EAC Contract Configuration
+
+Install this package only when Contract Configurator is installed.
+
+1. Install EAC Core 1.5.0.
+2. Install Contract Configurator.
+3. Copy the EAC Contract Configuration 1.5.0 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
+4. Confirm that `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
+5. Do not rename any DLL.
+
+A combined install should look like this:
+
+```text
+Kerbal Space Program/
+  GameData/
+    000_Harmony/
+    ContractConfigurator/
+    EAC/
+      Changelog.cfg
+      Plugins/
+        EAC.dll
+        EAC_CCBridge.dll
       Contracts/
       Agencies/
       Craft/
       Scenarios/
 ```
 
-Only one copy of EAC should be installed at a time.
+Only one copy of EAC Core and one copy of the matching EAC Contract Configuration package should be installed at a time.
 
 ## Settings
 
@@ -283,13 +350,13 @@ EAC settings are available at:
 Space Center -> Settings -> Difficulty Options -> EAC
 ```
 
-EAC 1.4 keeps the basic Difficulty Settings screen more compact and moves detailed/low-frequency options into an EAC Advanced Settings window.
+EAC keeps the basic Difficulty Settings screen more compact and moves detailed/low-frequency options into an EAC Advanced Settings window.
 
 Advanced Settings can be opened from the EAC Space Center window.
 
 Configurable areas include:
 
-- Kerbin time or Earth time.
+- Calendar/time behavior, including active custom-calendar compatibility.
 - Training time and cost rules.
 - Funds and science scaling.
 - Aging on or off.
@@ -304,7 +371,7 @@ Configurable areas include:
 - Suit presentation.
 - Badass progression.
 - Starting crew setup.
-- Contract Configurator final exam behavior.
+- Contract Configurator final exam behavior when the EAC Contract Configuration add-on is installed.
 - Debug and verbose logging.
 
 Settings are saved into the save file and persist across reloads.
@@ -340,10 +407,11 @@ If manually editing saves, make a backup first.
 - Intended for the stock Astronaut Complex UI.
 - Other mods that heavily replace or rebuild the Astronaut Complex UI may conflict with EAC roster-tab adjustments.
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
-- Contract Configurator is optional.
-- Final exam contract mode requires Contract Configurator and the EAC CC bridge.
-- The release package ships the bridge as `EAC_CCBridge.dll.disabled`; rename it to `EAC_CCBridge.dll` only when Contract Configurator is installed.
-- Do not enable `EAC_CCBridge.dll` without Contract Configurator installed, because the bridge depends on Contract Configurator.
+- Contract Configurator is optional and is not required by EAC Core.
+- Final exam contract mode requires the separate, matching-version EAC Contract Configuration package and Contract Configurator.
+- EAC Core 1.5.0 does not ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
+- The EAC Contract Configuration package ships the active `EAC_CCBridge.dll` and must not be installed without Contract Configurator.
+- Custom calendar support is designed for stock calendars and calendar providers used by setups such as Kronometer, JNSQ, and rescaled Kopernicus systems.
 - Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
 - EAC delegates to Crew R&R or Earn Your Stripes only when those mods are actually loaded as assemblies.
 
@@ -361,7 +429,7 @@ If Astronaut Complex UI oddities appear, check for:
 - Some Astronaut Complex UI layouts may not expose every stock list in the same way. EAC handles missing lists as gracefully as possible.
 - Facility upgrades can cause the Astronaut Complex UI to rebuild. EAC attempts to re-sync hiring and roster behavior afterward.
 - Mission old-age death is controlled separately from retired-death behavior. A Kerbal assigned to an unlaunched vessel will only be eligible for mission old-age death when that setting is enabled.
-- Suggested Next Crew is advisory-only in EAC 1.4. It does not auto-populate stock crew slots.
+- Suggested Next Crew is advisory-only. It does not auto-populate stock crew slots.
 
 ## Troubleshooting
 
@@ -399,8 +467,11 @@ Use verbose logging only while troubleshooting because it can create more log ou
 
 Check that:
 
+- EAC Core and EAC Contract Configuration are both version 1.5.0,
 - Contract Configurator is installed,
-- `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled` has been renamed to `GameData/EAC/Plugins/EAC_CCBridge.dll`,
+- `GameData/EAC/Plugins/EAC_CCBridge.dll` exists,
+- no stale `EAC_CCBridge.dll.disabled` from an older release is being mistaken for the active bridge,
+- the EAC Contract Configuration `Contracts`, `Agencies`, `Craft`, and `Scenarios` content was copied into `GameData/EAC/`,
 - the contract group exists,
 - the contract uses the expected EAC requirement and behaviour blocks,
 - the contract's trait, target level, and exam ID match the pending Kerbal's final exam state.
@@ -417,7 +488,7 @@ Check that:
 
 ### A Kerbal Is Stuck in Training or Final Exam State
 
-Check whether final exam mode was disabled, Contract Configurator was removed, or `EAC_CCBridge.dll` was disabled after the Kerbal entered the exam path. EAC includes recovery handling for this case, but the save may need to be loaded at the Space Center for EAC to reconcile the state.
+Check whether final exam mode was disabled, Contract Configurator was removed, or the EAC Contract Configuration add-on was removed after the Kerbal entered the exam path. EAC includes recovery handling for this case, but the save may need to be loaded at the Space Center for EAC to reconcile the state.
 
 ### Crew R&R or Earn Your Stripes Options Are Unavailable
 
@@ -427,32 +498,44 @@ A ZIP file in `GameData` should not trigger delegation by itself. The mod assemb
 
 ## Packaging Checklist
 
-A normal EAC release should include at least:
+### EAC Core 1.5.0
+
+The core release should include at least:
 
 ```text
 GameData/EAC/Changelog.cfg
 GameData/EAC/Plugins/EAC.dll
+EAC.version
+README.md
+CHANGE_LOG.md
+```
+
+The core release should not include:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
 GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
+GameData/EAC/Contracts/
+GameData/EAC/Agencies/
+GameData/EAC/Craft/
+GameData/EAC/Scenarios/
+```
+
+### EAC Contract Configuration 1.5.0
+
+The optional add-on should include its bridge and Contract Configurator content:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
 GameData/EAC/Contracts/*.cfg
 GameData/EAC/Agencies/*.cfg
 GameData/EAC/Agencies/*.png
 GameData/EAC/Craft/*.craft
 GameData/EAC/Scenarios/*.cfg
+EAC_CC_README_FIRST.md
 ```
 
-For players using Contract Configurator final exams, rename:
-
-```text
-GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
-```
-
-to:
-
-```text
-GameData/EAC/Plugins/EAC_CCBridge.dll
-```
-
-Only do this when Contract Configurator is installed.
+Both release packages should identify version 1.5.0 and should be published together so users do not mix incompatible core and bridge builds.
 
 Do not include development artifacts such as:
 
