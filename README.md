@@ -579,7 +579,7 @@ Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed
 
 - Kerbal Space Program by Squad / Private Division.
 - Thanks to the KSP modding community.
-- Thanks to KSP forum user edgomes27 for beta testing EAC 1.3.0.
+- Thanks to KSP forum user edgomes27 for beta testing EAC.
 - Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.
 - Thanks to severedsolo for the Earn Your Stripes and FlightTracker mods, which EAC can integrate with when present.
 - Thanks to JPLRepo / DeepFreeze Continued maintainers for the DeepFreeze ecosystem that EAC can detect and respect when present.
