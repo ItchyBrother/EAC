@@ -1,9 +1,0 @@
-J:\KSPMods\EAC\ContractConfigurator\bin\Release\EAC_CCBridge.dll
-J:\KSPMods\EAC\ContractConfigurator\bin\Release\EAC_CCBridge.pdb
-J:\KSPMods\EAC\ContractConfigurator\bin\Release\EAC.dll
-J:\KSPMods\EAC\ContractConfigurator\bin\Release\EAC.pdb
-J:\KSPMods\EAC\ContractConfigurator\obj\Release\EAC_CCBridge.csproj.AssemblyReference.cache
-J:\KSPMods\EAC\ContractConfigurator\obj\Release\EAC_CCBridge.csproj.CoreCompileInputs.cache
-J:\KSPMods\EAC\ContractConfigurator\obj\Release\EAC_CCBr.DB6A1B63.Up2Date
-J:\KSPMods\EAC\ContractConfigurator\obj\Release\EAC_CCBridge.dll
-J:\KSPMods\EAC\ContractConfigurator\obj\Release\EAC_CCBridge.pdb
