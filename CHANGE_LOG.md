@@ -1,5 +1,27 @@
 # Enhanced Astronaut Complex (EAC) Change Log
 
+## 2026-08-30: EAC Core v1.5.1 and EAC Contract Configuration v1.5.1 for KSP >= 1.12.x
+
+EAC 1.5.1 is a targeted hotfix for applicant hiring through the EAC interface. It corrects a funds-handling bug where hiring through EAC could add a Kerbal to the roster without charging the normal Astronaut Complex recruitment cost.
+
+### Applicant hiring funds fix
+
+- Fixed EAC applicant hiring bypassing the normal Astronaut Complex recruitment charge.
+- EAC now calculates the next recruitment cost before changing the applicant's roster state, preserving recruitment cost scaling.
+- Career-mode hires made through either EAC hire entry point now deduct Funds with the `CrewRecruited` transaction reason.
+- EAC blocks the hire when available Funds are below the required recruitment cost and shows the required amount.
+- Game modes without a Funds economy remain free to hire.
+- Added a shared hire routine so both EAC hire paths use the same cost validation, roster update, save, cache refresh, and Astronaut Complex refresh logic.
+- If the roster update fails after Funds were charged, EAC attempts to refund the recruitment cost and reports any hire/refund failure.
+- Successful EAC hires are written to the log with the Kerbal name and charged amount. This transaction log entry is written independently of the Verbose UI logging setting.
+- Verified in KSP 1.12.5 with consecutive EAC hires that the expected recruitment cost is deducted.
+- No save-format changes.
+
+### Packaging
+
+- EAC Core and EAC Contract Configuration remain separate packages and should use the matching 1.5.1 version.
+- Contract Configurator integration behavior is unchanged in this hotfix.
+
 ## 2026-07-20: EAC Core v1.5.0 and EAC Contract Configuration v1.5.0 for KSP >= 1.12.x
 
 EAC 1.5.0 adds custom-calendar compatibility, changes Contract Configurator support to a clean two-package release model, reduces repeated reflection and UI allocation work, and fixes Retired-tab tooltip and refresh behavior. The release addresses custom calendar support tracked in GitHub issue #43, Contract Configurator packaging tracked in issue #44, and the performance and Retired-tab work tracked in issue #45.
