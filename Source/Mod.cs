@@ -597,7 +597,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.5";
+        private const string ModVersion  = "1.5.1";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -1357,6 +1357,76 @@ namespace RosterRotation
 
         private static int GetMaxCrew()             { RefreshCrewCapacityCacheIfNeeded(); return _cachedMaxCrew; }
         private static int GetActiveNonRetiredCount() { RefreshCrewCapacityCacheIfNeeded(); return _cachedActiveNonRetiredCount; }
+
+        // ── Hiring ─────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Hire an applicant through EAC while preserving the stock career-mode
+        /// recruitment transaction.  EAC's UI does not invoke the stock Astronaut
+        /// Complex hire handler, so changing Applicant -> Crew directly would
+        /// otherwise bypass the funds deduction.
+        /// </summary>
+        private void TryHireApplicant(ProtoCrewMember applicant)
+        {
+            if (applicant == null || applicant.type != ProtoCrewMember.KerbalType.Applicant)
+                return;
+
+            // Calculate before changing the roster: stock recruit cost depends on
+            // the current crew/recruit count.
+            double hireCost = GetNextHireCost();
+            Funding funding = Funding.Instance;
+
+            // Funding is absent outside modes that use Funds; in those modes the
+            // roster change remains free, matching the lack of a Funds economy.
+            if (funding != null && hireCost > 0 && funding.Funds < hireCost)
+            {
+                ScreenMessages.PostScreenMessage(
+                    $"Cannot hire {applicant.name} — insufficient funds (need {hireCost:N0} funds).",
+                    4f, ScreenMessageStyle.UPPER_CENTER);
+                return;
+            }
+
+            bool charged = false;
+            try
+            {
+                if (funding != null && hireCost > 0)
+                {
+                    funding.AddFunds(-hireCost, TransactionReasons.CrewRecruited);
+                    charged = true;
+                }
+
+                applicant.type         = ProtoCrewMember.KerbalType.Crew;
+                applicant.rosterStatus = ProtoCrewMember.RosterStatus.Available;
+            }
+            catch (Exception ex)
+            {
+                // Avoid taking the player's money if the roster mutation fails.
+                bool refundFailed = false;
+                if (charged)
+                {
+                    try { funding.AddFunds(hireCost, TransactionReasons.CrewRecruited); }
+                    catch (Exception refundEx)
+                    {
+                        refundFailed = true;
+                        RRLog.Error("[EAC] Failed to refund applicant hire after hire error: " + refundEx);
+                    }
+                }
+
+                RRLog.Error("[EAC] Failed to hire applicant " + applicant.name + ": " + ex);
+                ScreenMessages.PostScreenMessage(
+                    refundFailed
+                        ? $"Could not hire {applicant.name}; automatic funds refund failed — check your balance."
+                        : $"Could not hire {applicant.name}; any hire charge was refunded.",
+                    4f, ScreenMessageStyle.UPPER_CENTER);
+                return;
+            }
+
+            RRLog.Info("[EAC] Hired applicant " + applicant.name
+                + (funding != null ? " for " + hireCost.ToString("N0") + " funds." : "."));
+
+            SaveScheduler.RequestSave("hire applicant");
+            InvalidateUICaches();
+            ACPatches.ForceRefresh();
+        }
 
         // ── Hire cost ──────────────────────────────────────────────────────────
         internal static double GetNextHireCost()

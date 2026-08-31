@@ -130,11 +130,7 @@ namespace RosterRotation
                 GUI.enabled = !atCap;
                 if (GUILayout.Button("Hire", GUILayout.Width(70)))
                 {
-                    k.type         = ProtoCrewMember.KerbalType.Crew;
-                    k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-                    SaveScheduler.RequestSave("hire applicant");
-                    InvalidateUICaches();
-                    ACPatches.ForceRefresh();
+                    TryHireApplicant(k);
                 }
                 GUI.enabled = true;
                 if (GUILayout.Button("Reject", GUILayout.Width(70)))
@@ -454,11 +450,7 @@ namespace RosterRotation
                 GUI.enabled = !atCap;
                 if (GUILayout.Button("Hire", GUILayout.Width(70)))
                 {
-                    k.type         = ProtoCrewMember.KerbalType.Crew;
-                    k.rosterStatus = ProtoCrewMember.RosterStatus.Available;
-                    SaveScheduler.RequestSave("hire applicant");
-                    InvalidateUICaches();
-                    ACPatches.ForceRefresh();
+                    TryHireApplicant(k);
                 }
                 GUI.enabled = true;
                 if (GUILayout.Button("Reject", GUILayout.Width(70)))
