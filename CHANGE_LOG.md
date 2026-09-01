@@ -1,447 +1,450 @@
-# Enhanced Astronaut Complex (EAC) Change Log
+# Enhanced Astronaut Complex (EAC)
+# Change Log
 
-## 2026-08-30: EAC Core v1.5.1 and EAC Contract Configuration v1.5.1 for KSP >= 1.12.x
+### 2026-0901: EAC v1.6.0 — Service Records, External Data, and Career History for KSP >= 1.12.x
 
-EAC 1.5.1 is a targeted hotfix for applicant hiring through the EAC interface. It corrects a funds-handling bug where hiring through EAC could add a Kerbal to the roster without charging the normal Astronaut Complex recruitment cost.
+This release expands the Hall of History into a lightweight Kerbal career-history system, adds optional external EAC data storage and retired/lost roster archival for long-running careers, and adds a configurable maximum hire age. The 1.6.0 development build has been exercised in KSP 1.12.5 with the Service Records, Program First, migration, rehydration, revision reuse, and cleanup paths verified in-game.
 
-### Applicant hiring funds fix
+#### Hall of History Service Records - GitHub issue #46
+- Expanded the Flight Roster Tracker into Hall of History Service Records for each Kerbal.
+- Added recovered-flight history with flight classification, vessel, primary body, recovery date, mission duration, time since last flight, and total EAC-tracked mission time.
+- Added conservative import of existing KSP CAREER_LOG accomplishments for older careers without inventing missing vessel, date, duration, or crew information.
+- Added Kerbal portraits to Service Records using the existing Hall of History portrait capture and fallback system.
+- Added Career Distinctions and Program First recognition with visible star badges on the Service Records roster and detailed Service File.
+- Program First wording is presented in Hall-style form such as First Suborbital Flight at Minmus.
+- Program Firsts are assigned to the participating crew where EAC can identify the crew reliably.
+- Verified in KSP 1.12.5 that native flight history is recorded, portraits display, and Program First stars persist and appear in Service Records.
 
+#### External EAC datastore and roster archive - GitHub issue #47
+- Added optional external storage for growing EAC-owned Kerbal records under the save folder EAC data directory.
+- External storage is off by default for new careers and can be enabled from EAC Advanced Settings.
+- Existing saves that are already using external data continue using their referenced external revision.
+- Added a one-time informational message recommending external storage for long-running careers.
+- Added reversible migration between embedded EAC records in persistent.sfs and the external EAC datastore.
+- Added external archival of Retired and Lost Kerbals while keeping Active, Available, and Assigned Kerbals in the normal KSP roster.
+- Archived Kerbals are rehydrated when loading so EAC, the Astronaut Complex, and Hall of History can continue using them.
+- Added immutable save revision references so persistent, quicksaves, named saves, and backups can restore the correct EAC historical state.
+- Added content hashing so unchanged EAC data reuses the current external revision instead of creating a new file on every save.
+- Added reference-aware cleanup that protects revisions and roster payloads still referenced by any save and retains three additional safety copies.
+- External write or validation failure falls back to embedded save data rather than risking loss of EAC records.
+- Verified in KSP 1.12.5 that migration works in both directions, retired/lost roster data archives and rehydrates, unchanged revisions are reused, and old unreferenced revisions and archive payloads are cleaned up.
+
+#### Maximum hire age - GitHub issue #49
+- Added a configurable Max hire age setting to EAC Aging settings.
+- Default maximum hire age remains 45, preserving the previous default hire-age distribution.
+- Supported maximum hire-age range is 18 through 120.
+- New Kerbal age generation now respects the configured upper limit and persists the setting with the career.
+- Static boundary and persistence checks passed; dedicated in-game hire-age ceiling verification is still recommended before release.
+
+#### Persistence and data safety
+- EAC external save references are kept small so long-running career history does not continuously enlarge persistent.sfs.
+- Historical Service Record data is stored with EAC-owned records when external storage is enabled.
+- External archive and datastore cleanup are conservative and keep referenced data plus rollback safety copies.
+
+## Notes for EAC 1.6.0
+
+1. **External EAC data storage is opt-in for new careers.** It is disabled by default and can be enabled from EAC Advanced Settings. Saves already using the external datastore remain on the external path unless the player explicitly migrates them back.
+2. **Retired/Lost roster archival is separate from active crew.** Active, Available, and Assigned Kerbals remain in KSP's normal roster. Retired/Lost Kerbals can be archived and rehydrated by EAC when needed.
+3. **Program Firsts are conservative.** EAC only assigns a historical first when the participating crew can be identified reliably; it does not guess from incomplete legacy KSP history.
+4. **Issue #49 is implemented and has passed static boundary/persistence checks.** A focused in-game test that changes the maximum hire age and hires several new Kerbals is still recommended before release.
+
+### EAC v1.5.1 — Applicant Hiring Funds Hotfix for KSP >= 1.12.x
+
+#### Applicant hiring funds fix
 - Fixed EAC applicant hiring bypassing the normal Astronaut Complex recruitment charge.
-- EAC now calculates the next recruitment cost before changing the applicant's roster state, preserving recruitment cost scaling.
-- Career-mode hires made through either EAC hire entry point now deduct Funds with the `CrewRecruited` transaction reason.
-- EAC blocks the hire when available Funds are below the required recruitment cost and shows the required amount.
-- Game modes without a Funds economy remain free to hire.
-- Added a shared hire routine so both EAC hire paths use the same cost validation, roster update, save, cache refresh, and Astronaut Complex refresh logic.
-- If the roster update fails after Funds were charged, EAC attempts to refund the recruitment cost and reports any hire/refund failure.
-- Successful EAC hires are written to the log with the Kerbal name and charged amount. This transaction log entry is written independently of the Verbose UI logging setting.
+- EAC now calculates the next recruitment cost before changing the applicant roster state so recruitment cost scaling is preserved.
+- Career-mode hires through either EAC hire entry point now deduct Funds using the CrewRecruited transaction reason.
+- Hires are blocked when available Funds are below the required recruitment cost; game modes without a Funds economy remain free to hire.
+- Both EAC hire paths now use one shared routine for cost validation, roster updates, saving, cache invalidation, and Astronaut Complex refresh.
+- If a roster update fails after Funds were charged, EAC attempts to refund the recruitment cost and reports hire or refund failures.
+- Successful EAC hires are logged with the Kerbal name and charged amount even when Verbose UI logging is disabled.
 - Verified in KSP 1.12.5 with consecutive EAC hires that the expected recruitment cost is deducted.
 - No save-format changes.
 
-### Packaging
-
-- EAC Core and EAC Contract Configuration remain separate packages and should use the matching 1.5.1 version.
+#### Packaging
+- EAC Core and EAC Contract Configuration remain separate packages and should use matching 1.5.1 versions.
 - Contract Configurator integration behavior is unchanged in this hotfix.
 
-## 2026-07-20: EAC Core v1.5.0 and EAC Contract Configuration v1.5.0 for KSP >= 1.12.x
+### EAC v1.5.0 — Calendars, Package Split, and Retired UI Fixes for KSP >= 1.12.x
 
-EAC 1.5.0 adds custom-calendar compatibility, changes Contract Configurator support to a clean two-package release model, reduces repeated reflection and UI allocation work, and fixes Retired-tab tooltip and refresh behavior. The release addresses custom calendar support tracked in GitHub issue #43, Contract Configurator packaging tracked in issue #44, and the performance and Retired-tab work tracked in issue #45.
+#### Custom calendar support
+- Added active custom-calendar day and year support for age/date calculations and presentation.
+- Improved compatibility with Kronometer, JNSQ, and rescaled Kopernicus / Sigma Dimensions systems.
+- Preserved stock Kerbin-time and Earth-time behavior.
+- Added a safe fallback when custom calendar values are unavailable or invalid.
 
-### Custom calendar support
-
-- Updated EAC calendar handling so it is no longer limited to the stock 6-hour/426-day Kerbin calendar or 24-hour/365-day Earth calendar assumptions.
-- EAC now uses active game calendar day/year values when custom calendar information is available.
-- Improved age and date alignment for installations using Kronometer, JNSQ, and rescaled Kopernicus/Sigma Dimensions systems.
-- Preserved stock Kerbin-time and Earth-time compatibility.
-- Added a safe fallback to EAC's supported stock time basis when a custom calendar provider is unavailable or does not return usable values.
-- Calendar support changes EAC's calendar-based display/conversion behavior and does not rewrite universal time in existing saves.
-
-### Two-package Contract Configurator release
-
-- Split the release into **EAC Core 1.5.0** and the optional **EAC Contract Configuration 1.5.0** add-on.
-- EAC Core contains `EAC.dll` and no longer ships the Contract Configurator bridge, exam contracts, agencies, craft, or scenarios.
-- EAC Core has no Contract Configurator dependency.
-- EAC Contract Configuration contains the active `EAC_CCBridge.dll` plus the Contract Configurator exam content.
+#### EAC Core and EAC Contract Configuration packages
+- Split the 1.5.0 release into EAC Core and the optional EAC Contract Configuration add-on.
+- EAC Core no longer ships the Contract Configurator bridge or exam content and has no Contract Configurator dependency.
+- EAC Contract Configuration ships the active EAC_CCBridge.dll plus contracts, agencies, craft, and scenarios.
 - EAC Contract Configuration requires EAC Core 1.5.0 and Contract Configurator.
-- Both packages use the same 1.5.0 release version to make compatibility clear.
+- Both packages use version 1.5.0 and should be installed at matching versions.
 
-### Bridge installation changes
+#### Bridge installation and upgrades
+- Removed the old EAC_CCBridge.dll.disabled rename workflow from 1.5.0 packaging.
+- Players without Contract Configurator install only EAC Core.
+- Players using final exams install the EAC Contract Configuration add-on, which provides EAC_CCBridge.dll already enabled.
+- Upgrade instructions remove stale EAC_CCBridge.dll.disabled files from EAC 1.4.x or earlier.
+- Updated README, troubleshooting, packaging notes, and version metadata for the new release model.
 
-- Removed the old `EAC_CCBridge.dll.disabled` rename workflow from the 1.5.0 release process.
-- Players who do not use Contract Configurator install only EAC Core.
-- Players who use Contract Configurator install EAC Core and then merge the EAC Contract Configuration package into `GameData/EAC/`.
-- The add-on installs `GameData/EAC/Plugins/EAC_CCBridge.dll` already enabled; no DLL rename is required.
-- Upgrade instructions now tell users to remove stale `EAC_CCBridge.dll.disabled` files left by EAC 1.4.x or earlier.
+#### Reflection and optional-mod discovery performance
+- Added lock-protected process-lifetime caches for ReflectionUtils.FindField and ReflectionUtils.FindProperty.
+- Cache keys include the target type and ordered candidate names; successful lookups and misses are both cached.
+- Routed repeated Astronaut Complex row, tooltip, and badge reflection through the shared cache without changing lookup order, event wiring, value handling, or fallbacks.
+- Added a shared optional-mod registry for Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and EAC_CCBridge assembly/type discovery.
+- Removed repeated loaded-assembly and AppDomain scans from individual optional-mod adapters.
+- No public or internal method signatures, call sites, settings, or save formats changed.
 
-### Reflection and optional-mod discovery optimization
+#### Hall of History allocation reductions
+- Cached milestone day-group counts during data refresh instead of rebuilding them during every OnGUI repaint.
+- Reused normalized crew-name arrays and added a case-insensitive memorial-name index for milestone portrait links.
+- Cached memorial role, service, metrics, and summary display strings when entries are built.
+- Cleared the new indexes with the existing Hall refresh while preserving data rules, sorting, filtering, layout, and visible wording.
 
-- Added process-lifetime caches for `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty`.
-- Cache keys include the target `Type` and the ordered candidate member names, preserving the existing fallback order.
-- Cached both successful lookups and misses so unavailable fields and properties are not searched repeatedly.
-- Protected shared reflection-cache access with locking.
-- Routed repeated per-row, tooltip, and badge `FieldInfo` / `PropertyInfo` lookups through `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty`.
-- Preserved existing value-setting logic, event wiring, fallbacks, public/internal method signatures, and call sites.
-- Added `EACOptionalModRegistry.cs` as one shared cache for optional-mod assembly discovery, optional bridge-type discovery, successful results, and missing assemblies/types.
-- Updated Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and `EAC_CCBridge` discovery to use the shared registry.
-- Removed repeated scans of `AssemblyLoader.loadedAssemblies` and `AppDomain.CurrentDomain.GetAssemblies()` from the individual adapters.
-- Left already-explicit one-time or separately cached reflection paths unchanged.
+#### Retired-tab tooltip and refresh fixes
+- Fixed the Recall tooltip so it works regardless of pointer approach direction.
+- Added hover arbitration between the Recall tooltip and the row's normal Kerbal-information tooltip.
+- Restored the crew tooltip immediately when moving from Recall back onto the row.
+- Replaced recall-time full Astronaut Complex rebuilding with a targeted row update that preserves unaffected rows and the native Available list.
+- Replaced retirement-time full rebuilding with a deferred EAC-only Retired-row refresh for manual and automatic retirement.
+- Rebound new Retired rows to the correct crew member and ensured their crew-information tooltips are active immediately.
+- Removed temporary raycast and pointer diagnostics after successful in-game verification.
+- Astronaut Complex tab creation, list-anchor discovery, and native-list ownership behavior were not changed.
 
-### Hall of History allocation reduction
+#### Astronaut Complex source organization
+- Moved roster badge updates, crew-count calculations, stock-crew filtering, roster-name lookup, and badge reflection helpers into AstronautComplexACPatch.Badges.cs.
+- Routed the remaining badge-text property lookups through ReflectionUtils.FindProperty.
+- Preserved the existing tab entry points, Retired-tab registration, ForceRefresh entry point, and native-list ownership methods.
 
-- Cached milestone day-group counts during Hall data refresh instead of rebuilding `GroupBy` / `ToDictionary` results during every `OnGUI` repaint.
-- Reused the normalized `MilestoneEntry.CrewNames` array instead of allocating a new LINQ list during every detail repaint.
-- Added a case-insensitive memorial-name index for O(1) milestone portrait-link lookup instead of repeated `FirstOrDefault` scans.
-- Cached memorial role/service, metrics, and summary display strings when entries are built instead of rebuilding lists and formatted strings every repaint.
-- Cleared all new indexes with the existing Hall cache refresh.
-- Preserved Hall data rules, sorting, filtering, layout, and user-visible wording.
+### EAC v1.4.1 — Starting Crew Setup Hotfix for KSP >= 1.12.x
 
-### Retired-tab tooltip and targeted refresh fixes
-
-- Fixed the Recall-button tooltip so it works regardless of the direction from which the pointer enters the button.
-- Added a small production hover guard that temporarily suppresses the row's `TooltipController_CrewAC` while the existing Recall `UIStateButtonTooltip` is active.
-- Restored and re-entered the crew tooltip when the pointer leaves Recall but remains over the Kerbal row, allowing the normal Kerbal-information popup to appear immediately.
-- Disabled only the redundant forwarded enter/exit events that caused the row tooltip to run after the Recall tooltip.
-- Avoided duplicate Recall tooltip objects and duplicate click listeners.
-- Replaced the full Astronaut Complex `ForceRefresh()` after recall with a targeted update that removes only the recalled Retired clone, reactivates the existing Available row, and rebinds surviving retired-row tooltips.
-- Replaced retirement-time full list rebuilding with a deferred EAC-only refresh after the roster status change completes.
-- Kept the native Available list intact while rebuilding only EAC's synthetic Retired rows.
-- Rebound every new retired clone to the correct `ProtoCrewMember` and explicitly checked/re-enabled its crew tooltip.
-- Applied the same targeted retirement refresh path to manual and automatic retirement.
-- Removed temporary continuous raycast logging, pointer-event probes, diagnostic row/button components, and `RecallRaycast` logging after verification.
-- Verified in game that Recall and Kerbal-information tooltips work immediately after recall and retirement, the Available list remains unchanged, and no Astronaut Complex full-refresh trace or exception was produced during the tested sequence.
-
-### Astronaut Complex source organization
-
-- Moved Available, Assigned, Retired, and Lost badge updates; crew-count calculations; stock-crew filtering; roster-name lookup; and badge reflection helpers into `AstronautComplexACPatch.Badges.cs`.
-- Replaced the remaining direct badge-text `GetProperty("text", ...)` calls with `ReflectionUtils.FindProperty(...)` so badge refreshes use the shared cache.
-- Preserved `Prefix_ActivateList`, `Postfix_CreateAvailableList`, `Postfix_CreateApplicantList`, `ForceRefresh`, Retired-tab registration, native-list ownership methods, tab creation, and list-anchor discovery behavior.
-
-### Documentation and packaging
-
-- Updated the main README for custom calendars, the two-package install model, compatibility, troubleshooting, performance improvements, Retired-tab behavior, and separate packaging checklists.
-- Replaced the old bridge-renaming README with installation and upgrade instructions for the EAC Contract Configuration package.
-- Updated Kerbal Changelog release notes for EAC 1.5.0.
-- Updated `EAC.version` to 1.5.0.
-- Clarified that EAC Core and EAC Contract Configuration should be released and installed at matching versions.
-
-### Upgrade notes
-
-1. Remove any stale `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled` from an older release.
-2. Install EAC Core 1.5.0.
-3. If Contract Configurator is installed and final exams are desired, install EAC Contract Configuration 1.5.0.
-4. Do not rename the bridge DLL in the new package.
-5. Keep only one copy of each EAC DLL.
-
-## 2026-0604: EAC v1.4.1 for KSP >= 1.12.x
-
-This hotfix addresses GitHub issue #41, where the **EAC Starting Crew Setup** configuration dialog could appear repeatedly in existing saves after entering and exiting buildings or otherwise changing scenes.
-
-### Starting crew setup
-
-- Fixed the **EAC Starting Crew Setup** dialog appearing repeatedly in existing saves after scene changes.
+#### Hotfix for GitHub issue #41
+- Fixed the EAC Starting Crew Setup dialog appearing repeatedly in existing saves after entering and exiting buildings or otherwise changing scenes.
 - Made the starting crew setup session identity stable across scene changes by using save folder, save title, and game seed instead of unstable runtime state.
 - Existing EAC-managed saves with persisted EAC roster records are now treated as already past starting crew setup if they do not yet have the EAC 1.4 setup-complete flag.
 - No save-breaking changes.
 
-## 2026-0603: EAC v1.4.0 for KSP >= 1.12.x
+### EAC v1.4.0 — Integrated Career Crew Management for KSP >= 1.12.x
 
-EAC 1.4.0 is a major stabilization, refactor, and career-management release. Crew R&R and Earn Your Stripes remain optional as they always were, but EAC now includes EAC-native systems that cover their major overlapping use cases while adding broader integrated crew-career management.
-
-This release also fixes several Astronaut Complex tab contamination paths, adds assignment-duration display, adds EAC-native veteran/suit/starting-crew behavior, adds an advisory Suggested Next Crew tool, improves recovery handling, improves DeepFreeze compatibility, and cleans up legacy save data.
-
-### Highlights
-
+#### EAC 1.4 overview
+- Major stabilization, refactor, and career-management release.
 - Crew R&R and Earn Your Stripes remain optional; EAC does not require either mod.
-- EAC now provides built-in recovery leave, veteran recognition, suit presentation, Badass progression, starting crew setup, and Suggested Next Crew behavior when the relevant external specialist mod is not loaded.
-- For players who want fewer overlapping mods, EAC can now handle the major Crew R&R / Earn Your Stripes style functions itself, plus EAC-specific systems such as training, retirement, Astronaut Complex tab management, Hall of History records, DeepFreeze-aware mission-time handling, and advisory crew recommendations.
+- EAC now provides EAC-native recovery leave, veteran recognition, suit presentation, Badass progression, starting crew setup, and Suggested Next Crew behavior when the relevant specialist mod is not loaded.
+- EAC can now cover the major Crew R&R / Earn Your Stripes style use cases itself while adding broader EAC career systems such as training, retirement, Hall of History, DeepFreeze-aware mission-time handling, and advisory crew recommendations.
 - EAC still defers to Crew R&R and Earn Your Stripes when those mods are installed as loaded assemblies.
 
-### Astronaut Complex roster fixes
-
-- Fixed Astronaut Complex tab contamination where Kerbals from Assigned, Retired, Lost/KIA/Dead, Training, Recovery, Frozen, or other unavailable states could appear in Available.
+#### Astronaut Complex roster fixes
+- Fixed tab contamination where Assigned, Retired, Lost/KIA/Dead, Training, Recovering, Frozen, or otherwise unavailable Kerbals could appear in Available.
 - Enforced tab ownership while the Astronaut Complex is open.
-- Limited the Astronaut Complex watchdog/filter logic to Astronaut Complex usage.
-- Fixed synthetic/custom Retired tab activation by avoiding unsafe stock `UIList.SetActive` reflection for non-stock tabs.
-- Retained safe stock activation paths for native stock tabs.
-- Added assignment-duration display in the Assigned tab.
-- Improved row reflection caching and roster-name-set reuse during Astronaut Complex list rebuilds.
-- Reduced repeated warnings from expected Astronaut Complex UI-shape variations.
+- Fixed synthetic Retired tab activation by avoiding unsafe stock UIList.SetActive reflection for custom tabs.
+- Added assignment duration display in the Assigned tab.
+- Improved Astronaut Complex row reflection caching and roster-name reuse during list rebuilds.
 
-### Recovery, Crew R&R, and rest handling
-
+#### Recovery and Crew R&R compatibility
 - Added loaded-assembly detection for Crew R&R.
-- If Crew R&R is loaded, EAC recovery settings are disabled/delegated and EAC does not apply its own recovery leave.
-- If Crew R&R is not loaded, EAC recovery settings remain available.
-- Fixed recovery leave not appearing after some recovery paths.
-- Added support for focused-vessel recovery and Space Center / Tracking Station / map-style recovery paths.
+- If Crew R&R is loaded, EAC recovery settings and overlapping Suggested Next Crew behavior are disabled or delegated.
+- If Crew R&R is not loaded, EAC provides configurable recovery leave.
+- Fixed recovery leave for focused-vessel recovery and Space Center / Tracking Station / map-style recovery paths.
 - Added recovery-state rehydration from EAC records if KSP clears stock inactive state during scene changes.
-- Added a minimum visible recovery floor for positive recovery leave so very short flights do not immediately appear available when recovery is enabled.
-- Recovery leave percentage and RestDay Max behavior are preserved.
+- Added a minimum visible recovery floor for positive recovery leave.
 
-### DeepFreeze compatibility
-
+#### DeepFreeze compatibility
 - Improved DeepFreeze freeze/thaw lifecycle handling.
 - Frozen Kerbals are treated as an external lifecycle state rather than normal active, missing, or deceased crew.
 - Frozen time is excluded from recovery fatigue.
 - Awake mission time before freezing is accumulated and preserved.
 - Awake mission time after thawing is added to the preserved pre-freeze time.
 - Recovery after DeepFreeze now uses total awake mission time, not frozen duration.
-- Fixed transition timing where mission tracking could be cleared before the frozen-state capture occurred.
 
-### Earn Your Stripes compatibility and EAC-native alternatives
-
+#### Earn Your Stripes compatibility and EAC-native alternatives
 - Added loaded-assembly detection for Earn Your Stripes.
-- If Earn Your Stripes is loaded, EAC defers veteran, suit, and starting crew behavior to Earn Your Stripes.
+- If Earn Your Stripes is loaded, EAC defers veteran, suit, and starting crew behavior.
 - If Earn Your Stripes is not loaded, EAC can provide EAC-native veteran recognition, suit presentation, and starting crew setup.
 
-### EAC-native veteran recognition
-
-- Added configurable veteran requirements.
-- Veteran eligibility can use flight count, flight hours, optional milestone requirement, and optional class restrictions.
-- Existing saves can be evaluated so Kerbals who already meet requirements can be promoted retroactively.
-- Added veteran recognition notifications through HUD and Message App paths.
-- Added Message App category support for veteran recognition.
-
-### Suit presentation
-
+#### Veteran, suit, and Badass progression
+- Added configurable EAC-native veteran requirements using flight count, flight hours, optional milestone requirement, and optional class restrictions.
+- Existing saves can be evaluated so already-qualified Kerbals can be promoted retroactively.
 - Added optional default and veteran suit presentation when Earn Your Stripes is not loaded.
-- Suit handling is configurable.
-- EAC does not apply suit presentation when Earn Your Stripes is loaded.
+- Added optional conservative Badass progression with milestone roll tracking.
+- Added HUD and Message App recognition notifications for Veteran and Badass recognition.
 
-### Badass progression
-
-- Added optional Badass progression.
-- Badass progression is conservative/off by default.
-- Badass progression can require veteran status and milestone qualification.
-- Badass milestone rolls are tracked so save reloads cannot repeatedly reroll the same milestone.
-- Added Badass recognition notifications through HUD and Message App paths.
-- Added Message App category support for Badass recognition.
-
-### New-game starting crew setup
-
+#### New-game starting crew setup
 - Added EAC-native new-game starting crew setup when Earn Your Stripes is not loaded.
-- Added startup dialog flow:
-  - Keep Default Crew
-  - Replace Default Crew
-- Added gender filters:
-  - Male
-  - Female
-  - Both
-- Added class filters:
-  - Pilot
-  - Engineer
-  - Scientist
-- Added configurable starting crew count.
-- If all three classes are selected and the starting crew count is three or more, generated crews guarantee at least one Pilot, one Engineer, and one Scientist.
-- Fixed startup dialog not reappearing for subsequent new games in the same KSP session.
-- Centered the startup setup window to avoid awkward overlap with stock popups.
+- Added Keep Default Crew and Replace Default Crew startup choices.
+- Added gender filters, class filters, and configurable starting crew count.
+- When all three classes are selected and crew count is three or more, EAC guarantees at least one Pilot, one Engineer, and one Scientist.
+- Fixed startup setup not reappearing for later new saves in the same KSP session.
+- Centered the startup setup window to avoid awkward stock popup overlap.
 
-### Suggested Next Crew Advisor
-
+#### Suggested Next Crew Advisor
 - Added first-pass Suggested Next Crew Advisor for VAB/SPH.
-- Advisor is intentionally suggestion-only career management.
-- Advisor does not auto-fill stock crew slots.
-- Advisor does not enforce morale, refusal, or hard rotation.
-- Advisor can be opened from the EAC editor toolbar button in the VAB/SPH.
-- Recommendation labels include:
-  1. Needs experience
-  2. Due for flight
-  3. Long service priority
-  4. Recently flew
-- Fixed recommendation priority so Needs Experience outranks Due for Flight, Long Service Priority, and Recently Flew.
-- Suggested Next Crew is disabled/delegated when Crew R&R is loaded.
+- Advisor is suggestion-only and does not auto-fill stock crew slots.
+- Recommendation labels are Needs experience, Due for flight, Long service priority, and Recently flew.
+- Fixed recommendation priority so Needs Experience is the top recommendation.
+- Suggested Next Crew is disabled or delegated when Crew R&R is loaded.
 
-### Settings and UI
-
-- Reworked settings to avoid overcrowding the stock KSP Difficulty Settings screen.
+#### Settings and notifications
+- Reworked EAC settings to keep the stock Difficulty Settings screen more compact.
 - Moved detailed and lower-frequency settings into an EAC Advanced Settings window.
-- Advanced Settings is accessible from the EAC toolbar/window.
-- Moved the Advanced button near Close in the EAC Space Center window.
-- Adjusted the Advanced Settings notice in basic settings to avoid unsupported star glyphs.
-- Moved these options to Advanced Settings:
-  - Auto-clean unreferenced retired/dead Kerbals
-  - Message App subcategories
-  - Veteran settings
-  - Suit settings
-  - Badass settings
-  - Starting crew settings
-  - Verbose/debug settings
-- Changed Auto-clean unreferenced retired/dead Kerbals into a one-shot command:
-  - check it,
-  - click Apply,
-  - EAC runs one cleanup pass,
-  - the option resets unchecked.
+- Added Advanced Settings access from the EAC Space Center window.
+- Moved message subcategories, veteran, suit, Badass, starting crew, auto-clean, and debug settings into Advanced Settings.
+- Changed Auto-clean unreferenced retired/dead Kerbals into a one-shot command that resets unchecked after Apply.
+- Re-enabling Message App support now defaults all EAC message categories back on.
 
-### Message App behavior
-
-- If Message App support is re-enabled after being disabled, all EAC message categories default back on.
-- Added message categories for Veteran recognition and Badass recognition.
-
-### Default aging values
-
-- Retire minimum default: 37
-- Retire maximum default: 47
-- Retired death minimum default: 50
-
-### Save migration and persistence
-
-- Migrated EAC scenario save data to `EACScenario`.
-- Removed stale/empty legacy `RosterRotationScenario` nodes from persistent saves to avoid future confusion.
+#### Defaults, save migration, and persistence
+- Updated default aging values: retire minimum 37, retire maximum 47, retired death minimum 50.
+- Migrated EAC scenario save data to EACScenario.
+- Removed stale or empty legacy RosterRotationScenario nodes from persistent saves.
 - If legacy data-bearing EAC save information is found, EAC backs up the persistent file before cleanup and notifies the user at Space Center.
 - Empty legacy scenario stubs are removed silently without backup or popup.
-- Added/updated persistence for recovery state, Badass roll tracking, starting crew setup state, DeepFreeze-aware accumulated mission time, and settings.
+- Added or updated persistence for recovery state, Badass roll tracking, starting crew setup state, DeepFreeze-aware accumulated mission time, and settings.
 
-### Internal refactor and performance
-
+#### Internal refactor and performance
 - Split broad EAC 1.4 feature code into clearer service boundaries.
-- Kept compatibility facades where needed so existing callers remain stable.
 - Refactored veteran, suit, Badass, starting crew, and Suggested Next Crew logic into smaller services.
-- Added type-keyed reflection caches in hot or repeated paths.
+- Added type-keyed reflection caches in repeated UI and recovery paths.
 - Replaced repeated dictionary snapshots in stale training cleanup with a key-list cleanup pass.
-- Added a Space Center UI instance refresh path to avoid cold-path `FindObjectsOfType` scans.
-- Added a small DeepFreeze bridge refresh throttle with forced refreshes for lifecycle transitions.
+- Added Space Center UI instance refresh path and DeepFreeze bridge refresh throttling.
 - Preserved existing save scheduling and idle-disabled runner behavior.
 
-### Notes
+### 2026-0520: EAC v1.3.1 — Roster, DeepFreeze, Contracts, and Dependencies for KSP >= 1.12.x
 
-1. HarmonyKSP/Harmony2 remains required.
-2. Contract Configurator remains optional.
-3. Crew R&R remains optional. If loaded, EAC delegates overlapping recovery and crew-suggestion behavior.
-4. Earn Your Stripes remains optional. If loaded, EAC delegates overlapping veteran, suit, and starting-crew behavior.
-5. DeepFreeze remains optional. If loaded, EAC excludes frozen time from recovery fatigue.
-6. Suggested Next Crew is advisory-only in EAC 1.4. Stock crew auto-fill is intentionally deferred.
-
-## 2026-0520: EAC v1.3.1 for KSP >= 1.12.x
-
-This release is a targeted compatibility, roster, dependency-documentation, and Contract Configurator contract update. It addresses the three open GitHub issues for EAC 1.3.0, adds Kerbal Changelog support, and documents HarmonyKSP/Harmony2 as a required dependency.
-
-### Astronaut Complex roster tabs
-
+#### Astronaut Complex roster tabs
 - Fixed a bug where Kerbals from one Astronaut Complex tab could appear under another tab after switching views.
 - Fixed the reported LOST-tab case where Available Kerbals could appear while viewing LOST.
 - Tightened tab-specific filtering for Available, Assigned, Retired, and Lost lists after KSP rebuilds the Astronaut Complex UI.
 - Improved roster cleanup timing so EAC re-applies the correct tab filter after UI refreshes rather than leaving stale rows visible.
 
-### DeepFreeze compatibility
-
+#### DeepFreeze compatibility
 - Added optional DeepFreeze compatibility handling.
-- EAC treats DeepFreeze frozen/suspended Kerbals as an external lifecycle state instead of processing them as normal active, missing, or deceased crew.
+- EAC now treats DeepFreeze frozen/suspended Kerbals as an external lifecycle state instead of processing them as normal active, missing, or deceased crew.
 - Fixed the reported case where a Kerbal could be marked KIA after being taken out of suspended animation.
-- DeepFreeze remains optional.
+- DeepFreeze remains optional; EAC should continue to load normally when DeepFreeze is not installed.
 
-### Contract Configurator final-exam contracts
+#### Contract Configurator final-exam contracts
+- Deferred all Contract Configurator final-exam XP awards until contract completion.
+- Changed all affected AwardExperience blocks from awardImmediately = true to awardImmediately = false.
+- Updated Level 1/2 Scientist rover science contracts so CollectScience no longer handles recovery directly.
+- Changed affected Scientist CollectScience objectives from recoveryMethod = Recover to recoveryMethod = None.
+- Added an explicit final rover/test-article recovery objective using EACRecoverVesselWithPart after the science objective completes.
+- Updated visible contract titles, notes, and synopses so the intended flow is clear: collect science first, then recover the rover/test article.
 
-- Deferred affected Contract Configurator final-exam XP awards until contract completion.
-- Updated affected Scientist contracts so CollectScience no longer handles recovery directly.
-- Added explicit final rover/test-article recovery objectives using `EACRecoverVesselWithPart`.
+#### Affected Scientist contracts
+- EAC.Graduation.Scientist.Level1.KSCSurvey
+- EAC.Graduation.Scientist.Level1.MysteryGoo
+- EAC.Graduation.Scientist.Level1.InstrumentCalibration
+- EAC.Graduation.Scientist.Level1.AtmosphericData
+- EAC.Graduation.Scientist.Level1.ShorelineExpedition
+- EAC.Graduation.Scientist.Level2.ThermometerRoverSurvey
+- EAC.Graduation.Scientist.Level2.GooFieldSurvey
+- EAC.Graduation.Scientist.Level2.PressureFieldSurvey
+- EAC.Graduation.Scientist.Level2.GravityCalibration
+- EAC.Graduation.Scientist.Level2.SeismicMotionCalibration
 
-### Dependency and Kerbal Changelog documentation
+#### Required dependency documentation
+- Documented HarmonyKSP / Harmony2 as a required dependency for EAC.
+- Updated installation notes to verify GameData/000_Harmony before starting KSP with EAC enabled.
+- Updated compatibility, troubleshooting, and packaging notes for the HarmonyKSP dependency.
 
-- Documented HarmonyKSP/Harmony2 as a required dependency.
-- Added `Changelog.cfg` support for Kerbal Changelog.
-- Updated README installation, compatibility, troubleshooting, and packaging notes.
+#### Kerbal Changelog support
+- Added Changelog.cfg support for the Kerbal Changelog mod.
+- Added EAC release notes in Kerbal Changelog format for in-game display.
+- Updated README installation, compatibility, troubleshooting, and packaging notes for Changelog.cfg.
 
-## 2026-0516: EAC v1.3.0 for KSP >= 1.12.x
+#### Notes
+- HarmonyKSP / Harmony2 is required. EAC will not load correctly without GameData/000_Harmony installed.
+- Kerbal Changelog remains optional. EAC should still load without Kerbal Changelog installed.
+- DeepFreeze remains optional. DeepFreeze compatibility only applies when DeepFreeze is installed.
+- Contract Configurator remains optional. Final exam contract mode requires Contract Configurator and the EAC CC bridge.
+- Mods that heavily replace or rebuild the Astronaut Complex UI may still conflict with EAC roster-tab adjustments.
 
-This release is a targeted optimization, stability, and Contract Configurator integration update.
+### 2026-0516: EAC v1.3.0 — Contract Configurator Final Exams for KSP >= 1.12.x
 
+#### Contract Configurator final exams
 - Added optional Contract Configurator final-exam support for EAC training progression.
-- Added EAC final exam requirements and completion behaviours through the EAC CC bridge.
+- Added support for EAC final exam requirements and completion behaviours through the EAC CC bridge.
 - Added final exam tracking by Kerbal trait, target level, and exam ID.
-- Added exam rotation support.
-- Added recovery handling for Kerbals pending or active in a final exam if final exams are disabled or Contract Configurator is removed.
-- Added support for EAC-provided exam craft and scenario vessels.
-- Added scenario-vessel cleanup safeguards.
+- Added exam rotation support so the same exam is not repeatedly selected when alternatives exist.
+- Added recovery handling for Kerbals who were pending or active in a Contract Configurator final exam when final exams are later disabled or Contract Configurator is removed.
+- EAC now falls back to the normal training award path when final exam contracts are no longer available.
+
+#### Scenario vessel and craft provisioning
+- Added support for EAC-provided exam craft and scenario vessels for Contract Configurator exams.
+- Added support for loading scenario vessels into the current save for contracts that require a pre-positioned test article.
+- Added cleanup safeguards so spawned scenario vessels can be removed after use while protecting crewed vessels.
+
+#### Applicant management
 - Optimized applicant rejection by caching reflected KerbalRoster rejection methods.
-- Fixed Reject All skipping applicants while the applicant list changes.
+- Fixed Reject All so it rejects all intended applicants instead of skipping entries while the applicant list changes.
+- Added validation so applicant rejection only acts on valid applicant Kerbals.
+
+#### Astronaut Complex roster fixes
+- Fixed cases where retired Kerbals could temporarily appear in the Available tab after applicant rejection or retirement.
+- Fixed cases where dead or missing Kerbals could appear in the Available tab after KSP rebuilt the Astronaut Complex roster.
 - Improved Available / Retired / Lost tab cleanup after KSP UI refreshes.
+- Cleaned up the EAC LOST tab so dead Kerbals no longer show an unnecessary current-age column while still showing useful age-at-death text.
+
+#### Aging, retirement, and mission death
 - Optimized aging and mission-death cleanup reflection paths.
-- Reduced repeated reflection scans and avoidable list allocations.
+- Cached proto-vessel and ConfigNode member lookups used when removing deceased Kerbals from assigned vessels.
+- Confirmed mission old-age death cleanup removes deceased Kerbals from assigned but unlaunched vessels.
+- Improved retirement and recall timestamp handling.
 
-## 2026-0505: EAC v1.2.1 for KSP >= 1.12.x
+#### Performance and internal cleanup
+- Reduced repeated reflection scans in applicant, vessel, aging, and mission-death paths.
+- Reduced unnecessary roster and vessel list allocations.
+- Improved crew-name cache correctness when roster contents change without a crew-count change.
+- Preserved Contract Configurator spawned-vessel association order while reducing avoidable list copies.
 
-- Fixed potential issues with Kerbin/Earth time.
-- Earth time now shows correctly throughout EAC.
-- Fixed dismissed Kerbals who were Training still showing up.
-- Minor code cleanup.
+### 2026-0505: EAC v1.2.1 for KSP >= 1.12.x
 
-## 2026-0412: EAC v1.2.0 for KSP >= 1.12.x
+#### Fixed potential issues with Kerbin/Earth time. Earth time will now show correctly throughout EAC.
+- Fixed issue with dismissed Kerbals who were Training still showing up.
+- Minor code clean up.
 
-- Fixed issue with Crash Detection giving a false positive.
-- Fixed Space Center startup lags on heavily modded installs.
+### 2026-0412: EAC v1.2.0 for KSP >= 1.12.x
+
+#### Fixed issue with Crash Detection giving a false positive.
+- Fixed Space Center startup lags on heavily modded installs of KSP.
 - Hall of History now only initiates when called, not at startup.
-- Retired Tab helper code was added so it loads faster.
-- Reduced calls to the persistent file.
+- Retired Tab added helper code so it fast loads versus scanning every object.
+- Reduced calls from three to one on the persistent file.
 
-## 2026-0411: EAC v1.1.9 "Jeremiah" for KSP >= 1.12.x
+### 2026-0411: EAC v1.1.9 — Jeremiah for KSP >= 1.12.x
 
-- Behind-the-scenes maintenance update.
-- Improved performance and reliability in crew-related screens.
-- Fixed a small retired-roster edge case.
-- Cleaned up internals for easier future updates.
+#### This release is a behind-the-scenes maintenance update. It does not change gameplay, but it improves performance and reliability in crew-related screens, fixes a small retired-roster edge case, and cleans up the mod's internals for easier future updates.
 
-## 2026-0409: EAC v1.1.8 for KSP >= 1.12.x
+### 2026-0409: EAC v1.1.8 for KSP >= 1.12.x
 
-- Improved retired-Kerbal hiding performance by caching CrewAssignmentDialog field lookups.
-- Reduced repeated reflection overhead in retired-Kerbal scrubbing.
-- Skipped unnecessary roster scans when no retired Kerbals exist.
+#### Improved retired-kerbal hiding performance by caching CrewAssignmentDialog field lookups after the first live dialog is found.
+- Reduced repeated reflection overhead in ScrubRetiredFromObject() by reusing cached field references.
+- Skipped unnecessary roster scans in HideRetiredKerbals() when no retired kerbals exist.
 
-## 2026-0327: EAC v1.1.7 for KSP >= 1.12.x
+### 2026-0327: EAC v1.1.7 for KSP >= 1.12.x
 
-- Fixed recovery timing where `MissionStartUT` could be cleared before post-mission recovery leave was calculated.
-- Normal recovery leave now explicitly requests a save after it is applied.
-- Fixed `RestDay Max = 0` so it behaves as a true zero cap.
-- Fixed multi-crew crash-recovery edge cases.
-- Fixed FlightTracker veteran progression and sync behavior.
-- Fixed retirement-probability bug for never-flown Kerbals.
-- Improved save reconciliation and recovery precedence rules.
+#### Recovery / R&R
+- Fixed a recovery timing bug where MissionStartUT could be cleared before post-mission recovery leave was calculated.
+- Fixed a related flight-scene status-change issue where MissionStartUT could be wiped too early when a kerbal changed from Assigned to another roster state.
+- Normal recovery leave now explicitly requests a save after it is applied, so rest/recovery state persists reliably.
+- Fixed RestDay Max = 0 so it now behaves as a true zero cap instead of acting like no cap.
+- Fixed a multi-crew crash-recovery issue where vessel-wide base recovery leave could be re-applied multiple times during no-injury outcomes. Base recovery leave is now only applied once per vessel recovery.
 
-## 2026-0326: EAC v1.1.6 for KSP >= 1.12.x
+#### FlightTracker / veteran progression
+- Fixed a bug where the one-time EAC to FlightTracker flight-count sync only ran when verbose logging was enabled. It now runs correctly for all users.
+- Fixed veteran hour progression so FlightTracker takes precedence when installed.
+- Fixed a potential double-counting issue where veteran service-hour growth could add both FlightTracker recorded hours and current mission time for the same flight.
+- Veteran flight counts now also prefer FlightTracker when it is installed, instead of mixing or max-merging counts.
 
-- Added mission-time tracking independent of aging.
-- Added syncing in flight-scene startup, Kerbal status changes, and KSC periodic update.
+#### Retirement / morale
+- Fixed a retirement-probability bug for kerbals who had never flown a mission.
+- New kerbals were previously treated as if they had been inactive for an extreme amount of time, causing retirement odds that were far too high immediately after training.
+- Never-flown kerbals are now treated as fresh rather than long-neglected veterans.
 
-## 2026-0325: EAC v1.1.5 for KSP >= 1.12.x
+#### Persistence / save consistency
+- Fixed a save-time flight-count drift issue where writing a reconciled flight total to the save file could also overwrite the live in-memory value for the rest of the session.
+- Save reconciliation now preserves the live runtime record while still writing the corrected value to disk.
 
-- Base recovery leave now uses each Kerbal's own `MissionStartUT`.
-- Crash recovery leave base time also uses each Kerbal's own `MissionStartUT`.
-- Recovery no longer uses vessel mission time for EAC leave calculations.
-- Added per-Kerbal verbose recovery logging.
+#### Internal cleanup / behavior consistency
+- Recovery leave, crash leave, and veteran progression behavior were tightened up to better respect the intended precedence rules when external mods such as FlightTracker are installed.
+- Reduced redundant recovery processing and verbose-log spam in multi-crew recovery edge cases.
 
-## 2026-0324-1: EAC v1.1.4 for KSP >= 1.12.x
+### 2026-0326: EAC v1.1.6 for KSP >= 1.12.x
 
-- Fixed issue with RestDay and Recovery percentages not working as expected.
+#### Added mission-time tracking that runs independently of aging.
+- Added syncing in flight-scene startup, Kerbal status changes to/from Assigned, and KSC periodic update.
 
-## 2026-0324: EAC v1.1.3 for KSP >= 1.12.x
+### 2026-0325: EAC v1.1.5 for KSP >= 1.12.x
 
+#### Recovery timing updates
+- Base recovery leave now uses each kerbal's own MissionStartUT.
+- Crash recovery leave base time also uses each kerbal's own MissionStartUT.
+- Recovery no longer uses vessel.missionTime for EAC leave calculations.
+- Added per-kerbal verbose logging so you can verify missionDays, missionStartUT, baseRecoveryDays, and maxDays.
+- If a kerbal's MissionStartUT was never set or is invalid, EAC now treats their personal mission duration as 0 for base recovery leave rather than falling back to vessel age.
+
+### 2026-0324-1: EAC v1.1.4 for KSP >= 1.12.x
+
+#### Fixed issue with RestDay and Recovery percentages not working as expected. Thanks Terensky!
+
+### 2026-0324: EAC v1.1.3 for KSP >= 1.12.x
+
+#### Fixed Training
 - Level-up training now uses the configurable TrainingStarDays setting instead of hardcoded 30.
 - Training confirmation preview now uses TrainingStarDays.
 - Training overlay duration preview now uses TrainingStarDays.
+- Recall refresher remains fixed at 30 days, unchanged.
 
-## 2026-0323: EAC v1.1.2 for KSP >= 1.12.x
+### 2026-0323: EAC v1.1.2 for KSP >= 1.12.x
 
-- Updated EAC UI styling to use KSP's native `HighLogic.Skin`.
-- Improved Hall of History and Memorial presentation.
+#### UI / Skinning
+- Updated EAC UI styling to use KSP's native HighLogic.Skin instead of relying on BRP-only or generic GUI.skin styling.
+- Applied KSP skin usage to main EAC windows, Hall of History windows, and related button and label styles.
+- Removed the temporary custom gray window override and switched to pure KSP skin window styling.
+- Windows now match stock KSP more closely, and theme mods such as HUDReplacer and ZTheme can affect EAC window appearance naturally.
+
+#### Memorial / Hall of History
+- Changed the memorial page label from Service Time to Flight Hours for clarity.
 - Memorial flight-hours display now prefers FlightTracker data when available.
-- Added visible recovery-time settings.
-- Added Recovery leave percentage and RestDay Max behavior.
-- Reworked crash detection to avoid detached-stage false positives.
-- Preserved EAC flight-count behavior for career records.
-- Added recovery-time controls to the Aging column.
+- Removed EAC fallback mission-hours display from the memorial page.
+- If FlightTracker is not installed, or no flight-hours data is available, Flight Hours is not shown instead of displaying an unclear unavailable message.
+- Confirmed and retained separate Flights tracking in EAC.
 
-## 2026-0316: EAC v1.1.1 for KSP >= 1.12.x
+#### Recovery / Vacation Time
+- Made recovery-time settings visible in the settings UI.
+- Added a new Recovery time section in the Aging column.
+- Added Recovery leave percentage setting, adjustable from 0 percent to 100 percent; 0 percent disables EAC recovery leave calculation.
+- Reworked restDays to act as RestDay Max, now used as the maximum recovery/vacation time cap.
+- If CrewRandR is installed, it takes precedence over EAC's internal recovery-time system.
 
+#### Crash Detection / Crash Penalties
+- Reworked crash detection so crash penalties apply to the craft the crew is currently occupying rather than detached-stage incidents.
+- Fixed an issue where detached boosters or staged-off parts crashing later could trigger a penalty on the occupied vessel.
+- Added split/separation-aware crash handling and detached-vessel matching so clean staging does not count against the crewed vessel.
+
+### 2026-0316: EAC v1.1.1 for KSP >= 1.12.x
+
+#### UI and portrait fixes
 - Made EAC windows more opaque.
-- Adjusted some windows to avoid opening on top of each other.
-- Improved portrait capture.
-- Minor logic and visual fixes.
+- Adjusted some windows to not open on top of each other.
+- Adjusted portrait capture so that valid portraits are captured versus static screens.
+- Portraits are stored in /saves/(savegamename)/EAC/HallofPortraits.
+- Minor logic fixes and visual fixes.
 
-## 2026-0314: EAC v1.1.0 for KSP >= 1.12.x
+### 2026-0314: EAC v1.1.0 for KSP >= 1.12.x
 
-- Added crash outcome handling.
-- Added mission old-age death checks.
-- Added Space Center / Astronaut Complex UI extensions for retirement, training, and retired crew management.
-- Added Hall of History with Memorial Wall, portraits, Milestone Wall, and veteran presentation/status support.
-- Added optional cleanup of unreferenced retired Kerbals.
-- Improved notifications and messaging.
-- Improved save/persistence handling.
-- Improved optional mod compatibility behavior.
-- Performed major internal reliability and maintenance refactoring.
+#### New features and improvements
+- Added crash outcome handling, including configurable injury and medical-retirement style penalties on recovery.
+- Added support for mission old-age death checks for Kerbals serving beyond retirement age.
+- Added new Space Center / Astronaut Complex UI extensions for retirement, training, and retired crew management.
+- Added Hall of History with Memorial Wall, portrait capture, Milestone Wall, and veteran presentation/status support.
+- Added optional cleanup of unreferenced retired Kerbals, with safeguards to avoid removing stock-referenced data.
+- Improved notifications, save/persistence handling, and optional mod compatibility behavior.
 
-## 2026-0307: EAC v1.0.2.0 for KSP >= 1.12.x
+#### Internal reliability and maintenance refactoring
+- Centralized save scheduling.
+- Safer reflection helpers.
+- Better logging and diagnostics.
+- Fewer silent failures.
+- Stronger UI/object discovery checks.
 
-- Fixed debug information not being sent to `KSP.log`.
+### 2026-0307: EAC v1.0.2 for KSP >= 1.12.x
+
+#### Debug and Astronaut Complex performance fixes
+- Fixed issue with Debug information not being sent to the KSP.log as expected.
+- EAC will now clearly show ACOpenPolls=0 ExpensiveScans=0 ScanMs=0.0 FPS=0.0 in Debug mode.
 - Fixed ACOpenCache scan throttling.
 - Reworked AstronautComplexHook.
-- Stopped scanning entirely when the Astronaut Complex is closed.
+- Stopped scanning entirely when Astronaut Complex is closed; Harmony hooks are used as the trigger.
 
-## 2026-0306: EAC v1.0.1.0 for KSP >= 1.12.x
+### 2026-0306: EAC v1.0.1 for KSP >= 1.12.x
 
-- Fixed slow framerate issue.
+#### Initial performance and Astronaut Complex fixes
+- Fixed issue with slow framerate. Clean install improved FPS by 20+ FPS.
 - Further optimized code.
-- Reordered tabs in Astronaut Complex to Available / Assigned / Retired / Lost.
-- Added configurable recall cost for retired Kerbals.
+- Reordered tabs in Astronaut Complex to Available/Assigned/Retired/Lost.
+- Added configurable cost to recall retired Kerbals.
 - Added further debugging options.
 
-## 2026-0303: EAC v1.0.0 for KSP >= 1.12.x
+### 2026-0303: EAC v1.0.0 for KSP >= 1.12.x
 
-- Initial release.
+#### Initial release.
