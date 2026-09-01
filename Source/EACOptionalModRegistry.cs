@@ -10,7 +10,6 @@ namespace RosterRotation
     /// </summary>
     internal static class EACOptionalModRegistry
     {
-        private static readonly object Sync = new object();
         private static readonly Dictionary<string, Assembly> AssemblyCache =
             new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> MissingAssemblies =
@@ -31,14 +30,11 @@ namespace RosterRotation
                 return null;
 
             string key = BuildKey(candidateNames);
-            lock (Sync)
-            {
-                Assembly cached;
-                if (AssemblyCache.TryGetValue(key, out cached))
-                    return cached;
-                if (MissingAssemblies.Contains(key))
-                    return null;
-            }
+            Assembly cached;
+            if (AssemblyCache.TryGetValue(key, out cached))
+                return cached;
+            if (MissingAssemblies.Contains(key))
+                return null;
 
             Assembly result = null;
             try
@@ -68,13 +64,10 @@ namespace RosterRotation
                 RRLog.VerboseWarn("[EAC] Optional-mod assembly lookup failed: " + ex.Message);
             }
 
-            lock (Sync)
-            {
-                if (result != null)
-                    AssemblyCache[key] = result;
-                else
-                    MissingAssemblies.Add(key);
-            }
+            if (result != null)
+                AssemblyCache[key] = result;
+            else
+                MissingAssemblies.Add(key);
 
             return result;
         }
@@ -85,14 +78,11 @@ namespace RosterRotation
                 return null;
 
             string key = fullName + "|" + BuildKey(preferredAssemblyNames);
-            lock (Sync)
-            {
-                Type cached;
-                if (TypeCache.TryGetValue(key, out cached))
-                    return cached;
-                if (MissingTypes.Contains(key))
-                    return null;
-            }
+            Type cached;
+            if (TypeCache.TryGetValue(key, out cached))
+                return cached;
+            if (MissingTypes.Contains(key))
+                return null;
 
             Type result = null;
             Assembly preferred = FindAssembly(preferredAssemblyNames);
@@ -116,13 +106,10 @@ namespace RosterRotation
                 }
             }
 
-            lock (Sync)
-            {
-                if (result != null)
-                    TypeCache[key] = result;
-                else
-                    MissingTypes.Add(key);
-            }
+            if (result != null)
+                TypeCache[key] = result;
+            else
+                MissingTypes.Add(key);
 
             return result;
         }

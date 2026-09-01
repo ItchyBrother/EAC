@@ -32,7 +32,14 @@ namespace RosterRotation
 
         private static bool CleanupRequested
         {
-            get { return RosterRotationState.AutoCleanupUnreferencedKerbals || _oneShotCleanupRequested; }
+            // The external roster archive supersedes destructive cleanup. Keeping
+            // the legacy purge available only when archive storage is disabled
+            // prevents an event-order race from deleting a Kerbal before it is archived.
+            get
+            {
+                return !RosterRotationState.ExternalRosterArchiveEnabled
+                    && (RosterRotationState.AutoCleanupUnreferencedKerbals || _oneShotCleanupRequested);
+            }
         }
 
         private static void MarkOneShotCleanupComplete(string phase)

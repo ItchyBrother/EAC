@@ -75,10 +75,17 @@ namespace RosterRotation
             return baseP * inactivityMultiplier * (1.0 - activityReduction);
         }
 
-        public static AgeAssignmentResult CalculateAgeOnHire(double nowUT, double yearSeconds, int retirementAgeMin, int retirementAgeMax, double randomAgeA, double randomAgeB, double randomBirthdayOffset, double randomRetireAge)
+        public static AgeAssignmentResult CalculateAgeOnHire(double nowUT, double yearSeconds, int retirementAgeMin, int retirementAgeMax, int maximumHireAge, double randomAgeA, double randomAgeB, double randomBirthdayOffset, double randomRetireAge)
         {
-            double r1 = 25.0 + randomAgeA * 20.0;
-            double r2 = 25.0 + randomAgeB * 20.0;
+            // Preserve the existing triangular 25-45 distribution at the default
+            // maximum while allowing players to choose a different upper bound.
+            // For unusually low caps, keep a small 18+ adult range instead of
+            // generating an age above the configured maximum.
+            double ageMax = Math.Max(18.0, Math.Min(120.0, maximumHireAge));
+            double ageMin = ageMax >= 25.0 ? 25.0 : 18.0;
+            double span = Math.Max(0.0, ageMax - ageMin);
+            double r1 = ageMin + randomAgeA * span;
+            double r2 = ageMin + randomAgeB * span;
             double ageYears = (r1 + r2) * 0.5;
             return BuildAgeAssignment(nowUT, yearSeconds, retirementAgeMin, retirementAgeMax, ageYears, randomBirthdayOffset, randomRetireAge);
         }

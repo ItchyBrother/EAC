@@ -219,12 +219,15 @@ namespace RosterRotation
             return ProcessedRecoveryVessels.ContainsKey(vesselId);
         }
 
-        internal static void ProcessRecoveredKerbalBasics(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, Vessel vessel, double nowUT)
+        internal static void ProcessRecoveredKerbalBasics(ProtoCrewMember pcm, RosterRotationState.KerbalRecord rec, Vessel vessel, double nowUT, string fallbackVesselName = null, string fallbackFlightId = null)
         {
             if (pcm == null || rec == null) return;
 
+            double missionSeconds = MissionTimeTracker.GetMissionSeconds(rec, nowUT);
             rec.Flights++;
             rec.LastFlightUT = nowUT;
+            EACNativeFlightHistory.RecordRecovery(
+                pcm, rec, vessel, fallbackVesselName, fallbackFlightId, nowUT, missionSeconds, rec.Flights);
             RosterRotationKSCUI.TryApplyVeteranTraitGrowthOnRecovery(pcm, rec, vessel, nowUT);
             EACVeteranService.EvaluateKerbal(pcm, rec, "vessel recovery", requestSave: false);
 
@@ -294,9 +297,12 @@ namespace RosterRotation
                 ProtoCrewMember pcm = crew[i];
                 if (pcm == null) continue;
                 RosterRotationState.KerbalRecord rec = RosterRotationState.GetOrCreate(pcm.name);
-                ProcessRecoveredKerbalBasics(pcm, rec, null, now);
+                ProcessRecoveredKerbalBasics(
+                    pcm, rec, null, now, SafeProtoVesselName(protoVessel),
+                    hasVesselId ? vesselId.ToString("N") : null);
             }
 
+            EACCareerHistory.MarkProgramFirstsForRecoveredCrew(crew, now);
             RecoveryLeaveService.ApplyDefaultRecoveryRestIfNeeded(crew, SafeProtoVesselName(protoVessel), now);
 
             for (int i = 0; i < crew.Count; i++)
@@ -486,6 +492,7 @@ namespace RosterRotation
                 EACRecoveryCoordinator.ProcessRecoveredKerbalBasics(pcm, r, v, now);
             }
 
+            EACCareerHistory.MarkProgramFirstsForRecoveredCrew(recoveredCrew, now);
             CrashSeverityState.HandleRecovery(v, now);
 
             foreach (var pcm in recoveredCrew)
@@ -597,7 +604,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.5.1";
+        private const string ModVersion  = "1.6.0";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -631,7 +638,7 @@ namespace RosterRotation
         private GUISkin   _windowStyleSourceSkin;
         private bool      _windowStyleReady;
 
-        private enum Tab { Applicants, Active, Assigned, Training, RandR, Retired, Lost }
+        private enum Tab { Applicants, Active, Assigned, Flights, Training, RandR, Retired, Lost }
         private Tab _tab = Tab.Active;
 
         private float _nextCheckRT  = 0f;
@@ -1605,6 +1612,7 @@ namespace RosterRotation
             AgeAssignmentResult result = CareerRules.CalculateAgeOnHire(
                 nowUT, yearSec,
                 RosterRotationState.RetirementAgeMin, RosterRotationState.RetirementAgeMax,
+                RosterRotationState.MaximumHireAge,
                 UnityEngine.Random.value, UnityEngine.Random.value,
                 UnityEngine.Random.value, UnityEngine.Random.value);
             rec.BirthUT            = result.BirthUT;

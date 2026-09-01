@@ -123,10 +123,23 @@ namespace RosterRotation
                 // if our Settings node doesn't exist (brand new game with no save data).
                 if (root.HasNode("Settings"))
                 {
-                    var settings = KerbalRecordPersistence.ReadSettings(root.GetNode("Settings"));
+                    ConfigNode settingsNode = root.GetNode("Settings");
+                    bool hasExternalStorageSetting = settingsNode.HasValue("externalDataStorageEnabled");
+                    var settings = KerbalRecordPersistence.ReadSettings(settingsNode);
                     _settingsNodeLoadedForSave = true;
                     _startingCrewSetupCompletedLoadedForSave = settings.EACNewGameCrewSetupCompleted;
                     KerbalRecordPersistence.ApplySettingsToState(settings, RosterRotationState.VerboseSettingsDirty);
+
+                    // Compatibility for the first external-data test builds: they wrote a
+                    // revision pointer before the master opt-in setting existed. Preserve
+                    // external mode for those already-migrated saves, while brand-new and
+                    // ordinary legacy saves still default to OFF.
+                    if (!hasExternalStorageSetting && root.HasValue("externalDataRevision"))
+                    {
+                        RosterRotationState.ExternalDataStorageEnabled = true;
+                        RosterRotationState.ExternalStoragePromptShown = true;
+                        RRLog.Info("[EAC] Existing external-data revision detected; preserving external EAC storage for this migrated save.");
+                    }
 
                     RRLog.Verbose($"[EAC] Settings loaded from save: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
@@ -134,6 +147,12 @@ namespace RosterRotation
                 {
                     _settingsNodeLoadedForSave = false;
                     _startingCrewSetupCompletedLoadedForSave = false;
+                    // These advanced storage options are not GameParameters fields, so
+                    // explicitly reset their new-career defaults instead of allowing
+                    // static state from a previously loaded career to bleed across.
+                    RosterRotationState.ExternalDataStorageEnabled = false;
+                    RosterRotationState.ExternalStoragePromptShown = false;
+                    RosterRotationState.ExternalRosterArchiveEnabled = false;
                     EACGameSettings.TryApplyToStateFromGameParams();
                     RRLog.Verbose($"[EAC] Settings node missing; applied GameParameters defaults: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
@@ -146,15 +165,33 @@ namespace RosterRotation
                 // shows the correct values when the player opens it.
                 EACGameSettings.TrySyncGameParamsFromState();
 
-                if (!root.HasNode("Record")) return;
-
-                foreach (ConfigNode rNode in root.GetNodes("Record"))
+                if (root.HasNode("Record"))
                 {
-                    if (KerbalRecordPersistence.TryReadRecord(rNode, out string name, out var rec))
-                        RosterRotationState.Records[name] = rec;
+                    foreach (ConfigNode rNode in root.GetNodes("Record"))
+                    {
+                        if (KerbalRecordPersistence.TryReadRecord(rNode, out string name, out var rec))
+                            RosterRotationState.Records[name] = rec;
+                    }
                 }
+
+                // External EAC data is authoritative when this save points to a valid
+                // immutable revision. Embedded Record nodes remain a migration/failure
+                // fallback for older saves and failed external writes.
+                long externalRevision;
+                if (EACExternalDataStore.TryLoadReferencedSnapshot(root, true, out externalRevision))
+                    _recordNodesLoadedForSave = true;
+
+                // Archived retired/lost stock roster records remain a separate concern:
+                // merge their EAC records after the main datastore so archived people
+                // are still available to the Hall/Astronaut Complex.
+                EACRosterArchive.MergeArchivedRecordsIntoState(root);
+
+                // CAREER_LOG is evidence for legacy accomplishments. Import what KSP
+                // actually supplies; unknown historical vessel/date/duration data stays
+                // unknown rather than being fabricated.
+                EACCareerHistory.SyncAllAvailableCrew();
                 RosterRotationState.InvalidateRetiredCache();
-                RRLog.Info($"Loaded {RosterRotationState.Records.Count} kerbal records.");
+                RRLog.Info($"Loaded {RosterRotationState.Records.Count} kerbal records (including external EAC data/roster archive).");
             }
             catch (Exception ex) { RRLog.Error($"LoadFromScenarioNode failed ({source}): {ex}"); }
         }
@@ -176,15 +213,54 @@ namespace RosterRotation
 
                 RecoveryLeaveService.SavePendingCrewRandRExtensions(root);
 
+                // ScenarioModule save nodes can be rebuilt from scratch. Carry forward the
+                // exact external archive references loaded with this save; the later
+                // onGameStateSave archive pass removes stale refs for Kerbals now present in
+                // the stock roster and adds fresh refs for newly archived Kerbals.
+                if (RosterRotationState.ExternalRosterArchiveEnabled)
+                    EACRosterArchive.PreserveActiveReferences(root);
+                else
+                    EACRosterArchive.ClearSaveReferences(root);
+
+                // Legacy CAREER_LOG reconciliation is intentionally load-time only.
+                // Recovery-time imports keep live history current; repeating pcm.Save() for
+                // every available Kerbal on every KSP save creates avoidable ConfigNode
+                // allocations and parsing work in long careers.
+
+                // Keep the same practical recovered-flight count EAC historically saved,
+                // then persist all growing per-Kerbal state externally. The scenario only
+                // retains a tiny revision pointer. If the external write cannot be verified,
+                // fall back to embedded Record nodes for this save.
                 foreach (var kvp in RosterRotationState.Records)
                 {
-                    var r = kvp.Value;
-                    ConfigNode rNode = root.AddNode("Record");
-                    int liveFlights = r.Flights;
-                    int savedFlights = GetRecoveredFlightCountFromRoster(kvp.Key, liveFlights);
-                    r.Flights = savedFlights;
-                    KerbalRecordPersistence.WriteRecordNode(rNode, kvp.Key, r, ci);
-                    r.Flights = liveFlights;
+                    if (kvp.Value == null) continue;
+                    kvp.Value.Flights = GetRecoveredFlightCountFromRoster(kvp.Key, kvp.Value.Flights);
+                }
+
+                long externalRevision = 0;
+                bool externalSaved = false;
+                if (RosterRotationState.ExternalDataStorageEnabled)
+                {
+                    externalSaved = EACExternalDataStore.TryWriteSnapshot(root, out externalRevision);
+                }
+                else
+                {
+                    // Opting out is reversible: the next save embeds the complete EAC
+                    // record set again and removes the revision pointer. Existing external
+                    // revisions are left for the conservative cleanup pass to retain while
+                    // any .sfs file still references them.
+                    EACExternalDataStore.RemoveReference(root);
+                }
+
+                if (!externalSaved)
+                {
+                    foreach (var kvp in RosterRotationState.Records)
+                    {
+                        var r = kvp.Value;
+                        if (r == null) continue;
+                        ConfigNode rNode = root.AddNode("Record");
+                        KerbalRecordPersistence.WriteRecordNode(rNode, kvp.Key, r, ci);
+                    }
                 }
             }
             catch (Exception ex) { RRLog.Error($"OnSave failed: {ex}"); }
@@ -329,74 +405,18 @@ namespace RosterRotation
         private static string _lastMigrationBackupPath;
         private static string _migrationBackupCreatedForSaveKey;
 
-        private bool _gameStateSaveEventSubscribed;
-        private bool _gameStateSaveEventUnavailableLogged;
-
         private void Awake()
         {
+            // The Main Menu instance only owns migration-notice state.  KSP's
+            // onGameStateSave event is not guaranteed to be fully initialized while
+            // MainMenu addons are being constructed. Legacy save-tree cleanup is
+            // invoked by the already-established EACRosterArchiveService save callback.
             DontDestroyOnLoad(gameObject);
-            TrySubscribeToGameStateSave();
-        }
-
-        private void OnDestroy()
-        {
-            if (!_gameStateSaveEventSubscribed) return;
-
-            try
-            {
-                if (GameEvents.onGameStateSave != null)
-                    GameEvents.onGameStateSave.Remove(OnGameStateSave);
-            }
-            catch (Exception ex)
-            {
-                RRLog.Warn("[EAC] Failed to unsubscribe scenario migration cleaner from onGameStateSave: " + ex.Message);
-            }
-            finally
-            {
-                _gameStateSaveEventSubscribed = false;
-            }
         }
 
         private void Update()
         {
-            // Some heavily modded installs initialize or replace this GameEvent after
-            // MainMenu addons are created. Retry harmlessly until it is available.
-            if (!_gameStateSaveEventSubscribed)
-                TrySubscribeToGameStateSave();
-
             TryShowPendingMigrationNotice("main-menu persistent monitor");
-        }
-
-        private void TrySubscribeToGameStateSave()
-        {
-            if (_gameStateSaveEventSubscribed) return;
-
-            try
-            {
-                if (GameEvents.onGameStateSave == null)
-                {
-                    if (!_gameStateSaveEventUnavailableLogged)
-                    {
-                        RRLog.Warn("[EAC] GameEvents.onGameStateSave is not available yet; scenario migration cleaner will retry.");
-                        _gameStateSaveEventUnavailableLogged = true;
-                    }
-                    return;
-                }
-
-                GameEvents.onGameStateSave.Add(OnGameStateSave);
-                _gameStateSaveEventSubscribed = true;
-
-                if (_gameStateSaveEventUnavailableLogged)
-                    RRLog.Info("[EAC] Scenario migration cleaner successfully subscribed to onGameStateSave after a delayed initialization.");
-            }
-            catch (Exception ex)
-            {
-                if (!_gameStateSaveEventUnavailableLogged)
-                {
-                    RRLog.Warn("[EAC] Unable to subscribe scenario migration cleaner to onGameStateSave; will retry: " + ex.Message);
-                    _gameStateSaveEventUnavailableLogged = true;
-                }
-            }
         }
 
         internal static void QueueLegacyMigrationNoticeFromLegacyLoad()
@@ -526,7 +546,7 @@ namespace RosterRotation
             return true;
         }
 
-        private static void OnGameStateSave(ConfigNode root)
+        internal static void OnGameStateSave(ConfigNode root)
         {
             try
             {
@@ -793,38 +813,4 @@ namespace RosterRotation
         }
     }
 
-    [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
-    public class EACScenarioMigrationSpaceCenterNotice : MonoBehaviour
-    {
-        private int _attempts;
-        private float _nextAttemptTime;
-
-        private void Start()
-        {
-            TryShowOrFinish("space-center Start");
-        }
-
-        private void Update()
-        {
-            if (Time.realtimeSinceStartup < _nextAttemptTime) return;
-            _nextAttemptTime = Time.realtimeSinceStartup + 1f;
-
-            if (TryShowOrFinish("space-center retry")) return;
-
-            _attempts++;
-            if (_attempts > 30)
-                Destroy(this);
-        }
-
-        private bool TryShowOrFinish(string reason)
-        {
-            if (EACScenarioMigrationCleaner.TryShowPendingMigrationNotice(reason))
-            {
-                Destroy(this);
-                return true;
-            }
-
-            return false;
-        }
-    }
 }

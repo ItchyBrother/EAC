@@ -20,6 +20,8 @@ namespace RosterRotation
         private bool _notifyVeterans;
         private bool _notifyBadass;
         private bool _autoCleanup;
+        private bool _externalDataStorage;
+        private bool _externalRosterArchive;
         private bool _verboseUi;
         private bool _verboseAging;
 
@@ -104,6 +106,8 @@ namespace RosterRotation
             _notifyVeterans = RosterRotationState.VeteranNotificationsEnabled;
             _notifyBadass = RosterRotationState.BadassNotificationsEnabled;
             _autoCleanup = RosterRotationState.AutoCleanupUnreferencedKerbals;
+            _externalDataStorage = RosterRotationState.ExternalDataStorageEnabled;
+            _externalRosterArchive = RosterRotationState.ExternalRosterArchiveEnabled;
             _verboseUi = RosterRotationState.VerboseLogging;
             _verboseAging = RosterRotationState.VerboseAgeLogging;
 
@@ -156,9 +160,12 @@ namespace RosterRotation
             // Auto-clean is intentionally a one-shot command, not a persisted background setting.
             // Checking it and clicking Apply queues one cleanup pass; the checkbox resets to false
             // as the user's visible indication that the command was accepted/run.
+            RosterRotationState.ExternalDataStorageEnabled = _externalDataStorage;
+            if (_externalDataStorage) RosterRotationState.ExternalStoragePromptShown = true;
+            RosterRotationState.ExternalRosterArchiveEnabled = _externalRosterArchive;
             RosterRotationState.AutoCleanupUnreferencedKerbals = false;
             _autoCleanup = false;
-            if (runAutoCleanupNow)
+            if (runAutoCleanupNow && !_externalRosterArchive)
                 RetiredKerbalCleanupService.RequestOneShotCleanup("advanced settings Apply");
             RosterRotationState.VerboseLogging = _verboseUi;
             RosterRotationState.VerboseAgeLogging = _verboseAging;
@@ -220,10 +227,24 @@ namespace RosterRotation
             _notifyVeterans = GUILayout.Toggle(_notifyVeterans, "Veteran recognition");
             _notifyBadass = GUILayout.Toggle(_notifyBadass, "Badass recognition");
 
-            DrawHeading("Cleanup");
-            _autoCleanup = GUILayout.Toggle(_autoCleanup, "Auto-clean unreferenced retired/dead Kerbals now");
-            GUILayout.Label("One-shot: check this, click Apply, EAC runs one cleanup pass, then resets this box to unchecked.");
-            GUILayout.Label("Caution: backup your persistent.sfs before running cleanup.");
+            DrawHeading("Data storage");
+            _externalDataStorage = GUILayout.Toggle(_externalDataStorage, "Store EAC career/history data outside persistent.sfs");
+            GUILayout.Label(_externalDataStorage
+                ? "External EAC datastore is ON. Career/service records are versioned under saves/<save>/EAC/data and persistent.sfs keeps a small revision pointer."
+                : "External EAC datastore is OFF. EAC career/service records remain inside persistent.sfs. Enable this for long-running careers to reduce save-file growth.");
+            GUILayout.Label("External storage is opt-in. Disabling it is reversible: the next save embeds the EAC records back into the .sfs.");
+
+            GUILayout.Space(4f);
+            _externalRosterArchive = GUILayout.Toggle(_externalRosterArchive, "Also store retired/lost stock roster outside persistent.sfs");
+            GUILayout.Label("When enabled, eligible retired/lost KERBAL nodes move to saves/<save>/EAC/roster-archive.cfg and are rehydrated when a referenced save loads.");
+
+            bool cleanupGuiEnabled = GUI.enabled;
+            GUI.enabled = cleanupGuiEnabled && !_externalRosterArchive;
+            _autoCleanup = GUILayout.Toggle(_autoCleanup, "Legacy destructive cleanup now");
+            GUI.enabled = cleanupGuiEnabled;
+            GUILayout.Label(_externalRosterArchive
+                ? "Legacy deletion is disabled while external roster storage is enabled."
+                : "One-shot legacy cleanup permanently deletes eligible unreferenced retired/dead Kerbals. Back up persistent.sfs first.");
 
             DrawHeading("Veterans, suits, and starting crew");
             bool eysInstalled = EACExternalModDetector.IsEarnYourStripesInstalled();

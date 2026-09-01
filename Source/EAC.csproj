@@ -44,6 +44,12 @@
     <Compile Include="Mod.Aging.cs" />
     <Compile Include="Mod.Drawing.cs" />
     <Compile Include="Mod.FlightTracker.cs" />
+    <Compile Include="EACNativeFlightHistory.cs" />
+    <Compile Include="EACCareerHistory.cs" />
+    <Compile Include="EACSaveFileScanner.cs" />
+    <Compile Include="EACHashing.cs" />
+    <Compile Include="EACExternalDataStore.cs" />
+    <Compile Include="Mod.NativeFlightRoster.cs" />
     <Compile Include="Mod.Roster.cs" />
     <Compile Include="DeepFreeze\EACDeepFreezeKerbalInfo.cs" />
     <Compile Include="DeepFreeze\EACDeepFreezeBridge.cs" />
@@ -70,9 +76,11 @@
     <Compile Include="LaunchBlocker.cs" />
     <Compile Include="KspGuiSkin.cs" />
     <Compile Include="RetiredKerbalCleanup.cs" />
+    <Compile Include="EACRosterArchive.cs" />
     <Compile Include="HallOfHistoryWindow.cs" />
     <Compile Include="HallOfHistoryWindow.Portraits.cs" />
     <Compile Include="HallOfHistoryWindow.DataTypes.cs" />
+    <Compile Include="HallOfHistoryWindow.ServiceRecords.cs" />
     <Compile Include="EACPortraitCaptureWatcher.cs" />
     <Compile Include="EACPortraitRenderer.cs" />
     <Compile Include="KspAssemblyCache.cs" />

@@ -53,7 +53,8 @@ namespace RosterRotation
         private enum Tab
         {
             Memorial,
-            Milestones
+            Milestones,
+            ServiceRecords
         }
 
         private Tab _tab = Tab.Memorial;
@@ -384,8 +385,10 @@ namespace RosterRotation
 
             if (_tab == Tab.Memorial)
                 DrawMemorialTab();
-            else
+            else if (_tab == Tab.Milestones)
                 DrawMilestonesTab();
+            else
+                DrawServiceRecordsTab();
 
             GUILayout.FlexibleSpace();
             GUILayout.BeginHorizontal();
@@ -431,6 +434,7 @@ namespace RosterRotation
 
             string memorialLabel = _tab == Tab.Memorial ? "[ Memorial Wall ]" : "Memorial Wall";
             string milestoneLabel = _tab == Tab.Milestones ? "[ Milestone Wall ]" : "Milestone Wall";
+            string serviceLabel = _tab == Tab.ServiceRecords ? "[ Service Records ]" : "Service Records";
 
             if (GUILayout.Button(memorialLabel, GUILayout.Width(160)))
                 _tab = Tab.Memorial;
@@ -438,8 +442,12 @@ namespace RosterRotation
             if (GUILayout.Button(milestoneLabel, GUILayout.Width(160)))
                 _tab = Tab.Milestones;
 
+            if (GUILayout.Button(serviceLabel, GUILayout.Width(160)))
+                _tab = Tab.ServiceRecords;
+
             GUILayout.Space(8f);
-            GUILayout.Label(_tab == Tab.Memorial ? "Viewing memorial archive" : "Viewing milestone archive", _mutedStyle);
+            string viewText = _tab == Tab.Memorial ? "Viewing memorial archive" : _tab == Tab.Milestones ? "Viewing milestone archive" : "Viewing Kerbal service files";
+            GUILayout.Label(viewText, _mutedStyle);
 
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
@@ -1166,6 +1174,7 @@ namespace RosterRotation
 
             _cache.Clear();
             _portraitCache.Clear();
+            InvalidateServiceRecordCaches();
             _cache.LastPath = path;
             _cache.LastWriteUtc = stamp;
 

@@ -214,6 +214,7 @@ namespace RosterRotation
                 EACStateBridge.SetBool("AgingEnabled", ag.AgingEnabled);
                 EACStateBridge.SetInt("RetirementAgeMin", ag.RetirementAgeMin);
                 EACStateBridge.SetInt("RetirementAgeMax", ag.RetirementAgeMax);
+                EACStateBridge.SetInt("MaximumHireAge", ag.MaximumHireAge);
                 EACStateBridge.SetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
                 if (!EACExternalModDetector.IsCrewRandRInstalled())
                 {
@@ -267,6 +268,7 @@ namespace RosterRotation
                 ag.AgingEnabled       = EACStateBridge.GetBool("AgingEnabled", ag.AgingEnabled);
                 ag.RetirementAgeMin   = EACStateBridge.GetInt("RetirementAgeMin", ag.RetirementAgeMin);
                 ag.RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", ag.RetirementAgeMax);
+                ag.MaximumHireAge     = EACStateBridge.GetInt("MaximumHireAge", ag.MaximumHireAge);
                 ag.RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", ag.RetiredDeathAgeMin);
                 ag.RecoveryIntegrationStatus = EACExternalModDetector.IsCrewRandRInstalled()
                     ? "Crew R&R detected: Crew R&R handles recovery leave; EAC recovery settings are hidden."
@@ -572,6 +574,13 @@ namespace RosterRotation
         public int RetirementAgeMax = 47;
 
         [GameParameters.CustomIntParameterUI(
+            "Max hire age",
+            toolTip = "Maximum age assigned to a newly hired Kerbal. The default of 45 preserves EAC's original hire-age range.",
+            minValue = 18, maxValue = 120, stepSize = 1,
+            autoPersistance = false)]
+        public int MaximumHireAge = 45;
+
+        [GameParameters.CustomIntParameterUI(
             "Retired death min",
             toolTip = "Minimum age at which retired Kerbals may die (years).",
             minValue = 18, maxValue = 200, stepSize = 1,
@@ -627,6 +636,7 @@ namespace RosterRotation
             AgingEnabled       = EACStateBridge.GetBool("AgingEnabled", true);
             RetirementAgeMin   = EACStateBridge.GetInt("RetirementAgeMin", 37);
             RetirementAgeMax   = EACStateBridge.GetInt("RetirementAgeMax", 47);
+            MaximumHireAge     = EACStateBridge.GetInt("MaximumHireAge", 45);
             RetiredDeathAgeMin = EACStateBridge.GetInt("RetiredDeathAgeMin", 50);
             RecoveryIntegrationStatus = EACExternalModDetector.IsCrewRandRInstalled()
                 ? "Crew R&R detected: Crew R&R handles recovery leave; EAC recovery settings are hidden."
@@ -638,6 +648,8 @@ namespace RosterRotation
         protected override void PushToState()
         {
             if (RetirementAgeMax < RetirementAgeMin) RetirementAgeMax = RetirementAgeMin;
+            if (MaximumHireAge < 18) MaximumHireAge = 18;
+            if (MaximumHireAge > 120) MaximumHireAge = 120;
             if (RecoveryLeavePercent < 0f) RecoveryLeavePercent = 0f;
             if (RecoveryLeavePercent > 100f) RecoveryLeavePercent = 100f;
             if (RecoveryLeaveMaxDays < 0f) RecoveryLeaveMaxDays = 0f;
@@ -645,6 +657,7 @@ namespace RosterRotation
             EACStateBridge.SetBool("AgingEnabled", AgingEnabled);
             EACStateBridge.SetInt("RetirementAgeMin", RetirementAgeMin);
             EACStateBridge.SetInt("RetirementAgeMax", RetirementAgeMax);
+            EACStateBridge.SetInt("MaximumHireAge", MaximumHireAge);
             EACStateBridge.SetInt("RetiredDeathAgeMin", RetiredDeathAgeMin);
             if (!EACExternalModDetector.IsCrewRandRInstalled())
             {

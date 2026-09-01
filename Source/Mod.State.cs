@@ -36,6 +36,14 @@ namespace RosterRotation
             public ProtoCrewMember.KerbalType OriginalType;
             public int    Flights;
             public double LastFlightUT;
+            // Native EAC flight roster history. Flights predating this feature remain
+            // represented by Flights/LastFlightUT, while newly recovered missions are
+            // appended here with their tracked duration and recovery context.
+            public double TotalTrackedFlightUT;
+            public readonly List<FlightRecord> FlightHistory = new List<FlightRecord>();
+            // Conservative per-Kerbal service events imported from stock CAREER_LOG.
+            // Unknown historical dates/vessels are intentionally left unknown.
+            public readonly List<CareerEventRecord> CareerEvents = new List<CareerEventRecord>();
             public double RestUntilUT;
             public double MissionStartUT;
             // Accumulated awake/assigned mission time for the current mission.
@@ -90,6 +98,31 @@ namespace RosterRotation
             public bool   EACBadassAwarded = false;
         }
 
+        public class FlightRecord
+        {
+            public string FlightId = "";
+            public int FlightNumber;
+            public string VesselName = "";
+            public string FlightType = "";
+            public string BodyName = "";
+            public double StartUT;
+            public double EndUT;
+            public double DurationUT;
+        }
+
+        public class CareerEventRecord
+        {
+            public int FlightNumber;
+            public string EventType = "";
+            public string BodyName = "";
+            public string Source = "";
+            public double EventUT;
+            // True only when EAC can establish that this accomplishment was achieved
+            // by the first crew in the program. Legacy stock logs without reliable
+            // timing are never guessed into a program-first award.
+            public bool IsProgramFirst;
+        }
+
         // EAC-native veteran/suit/startup-crew config.  These features are ignored
         // when Earn Your Stripes is installed so EYS remains authoritative.
         public static bool EACVeteranStatusEnabled = true;
@@ -134,7 +167,18 @@ namespace RosterRotation
         public static bool BadassNotificationsEnabled     = true;
         public static int  RetirementAgeMin          = 37;
         public static int  RetirementAgeMax          = 47;
+        public static int  MaximumHireAge            = 45;
         public static int  RetiredDeathAgeMin        = 50;
+        // External persistence is opt-in for new careers. When enabled, EAC-owned
+        // career/service records are stored outside persistent.sfs in immutable revisions.
+        // Existing saves that already reference an external revision remain enabled during
+        // migration so their history is not silently pulled back into the stock save.
+        public static bool ExternalDataStorageEnabled = false;
+        public static bool ExternalStoragePromptShown = false;
+
+        // Stock roster archival is a separate opt-in. It moves only eligible retired/lost
+        // KERBAL nodes outside persistent.sfs and rehydrates them when a save is loaded.
+        public static bool ExternalRosterArchiveEnabled = false;
         public static bool AutoCleanupUnreferencedKerbals = false;
         public static bool VerboseLogging    = false;
         public static bool VerboseAgeLogging = false;
@@ -327,6 +371,9 @@ namespace RosterRotation
                    || rec.HighestLevelEverCertified >= 0
                    || rec.Flights > 0
                    || rec.LastFlightUT > 0
+                   || rec.TotalTrackedFlightUT > 0
+                   || rec.FlightHistory.Count > 0
+                   || rec.CareerEvents.Count > 0
                    || rec.RestUntilUT > 0
                    || rec.MissionStartUT > 0
                    || rec.MissionAccumulatedUT > 0

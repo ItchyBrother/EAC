@@ -25,7 +25,11 @@ namespace RosterRotation
         public bool BadassNotificationsEnabled = true;
         public int RetirementAgeMin = 37;
         public int RetirementAgeMax = 47;
+        public int MaximumHireAge = 45;
         public int RetiredDeathAgeMin = 50;
+        public bool ExternalDataStorageEnabled = false;
+        public bool ExternalStoragePromptShown = false;
+        public bool ExternalRosterArchiveEnabled = false;
         public bool AutoCleanupUnreferencedKerbals = false;
         public bool VerboseLogging = false;
         public bool VerboseAgeLogging = false;
@@ -92,7 +96,11 @@ namespace RosterRotation
                 BadassNotificationsEnabled = RosterRotationState.BadassNotificationsEnabled,
                 RetirementAgeMin = RosterRotationState.RetirementAgeMin,
                 RetirementAgeMax = RosterRotationState.RetirementAgeMax,
+                MaximumHireAge = RosterRotationState.MaximumHireAge,
                 RetiredDeathAgeMin = RosterRotationState.RetiredDeathAgeMin,
+                ExternalDataStorageEnabled = RosterRotationState.ExternalDataStorageEnabled,
+                ExternalStoragePromptShown = RosterRotationState.ExternalStoragePromptShown,
+                ExternalRosterArchiveEnabled = RosterRotationState.ExternalRosterArchiveEnabled,
                 AutoCleanupUnreferencedKerbals = RosterRotationState.AutoCleanupUnreferencedKerbals,
                 VerboseLogging = RosterRotationState.VerboseLogging,
                 VerboseAgeLogging = RosterRotationState.VerboseAgeLogging,
@@ -162,7 +170,11 @@ namespace RosterRotation
             settings.BadassNotificationsEnabled = PB(settingsNode.GetValue("badassNotificationsEnabled"), true);
             settings.RetirementAgeMin = PI(settingsNode.GetValue("retirementAgeMin"), 37);
             settings.RetirementAgeMax = PI(settingsNode.GetValue("retirementAgeMax"), 47);
+            settings.MaximumHireAge = PI(settingsNode.GetValue("maximumHireAge"), 45);
             settings.RetiredDeathAgeMin = PI(settingsNode.GetValue("retiredDeathAgeMin"), 50);
+            settings.ExternalDataStorageEnabled = PB(settingsNode.GetValue("externalDataStorageEnabled"), false);
+            settings.ExternalStoragePromptShown = PB(settingsNode.GetValue("externalStoragePromptShown"), false);
+            settings.ExternalRosterArchiveEnabled = PB(settingsNode.GetValue("externalRosterArchiveEnabled"), false);
             settings.AutoCleanupUnreferencedKerbals = PB(settingsNode.GetValue("autoCleanupUnreferencedKerbals"), false);
             settings.VerboseLogging = PB(settingsNode.GetValue("verboseLogging"), false);
             settings.VerboseAgeLogging = PB(settingsNode.GetValue("verboseAgeLogging"), false);
@@ -228,7 +240,11 @@ namespace RosterRotation
             RosterRotationState.BadassNotificationsEnabled = settings.BadassNotificationsEnabled;
             RosterRotationState.RetirementAgeMin = settings.RetirementAgeMin;
             RosterRotationState.RetirementAgeMax = settings.RetirementAgeMax;
+            RosterRotationState.MaximumHireAge = Math.Max(18, Math.Min(120, settings.MaximumHireAge));
             RosterRotationState.RetiredDeathAgeMin = settings.RetiredDeathAgeMin;
+            RosterRotationState.ExternalDataStorageEnabled = settings.ExternalDataStorageEnabled;
+            RosterRotationState.ExternalStoragePromptShown = settings.ExternalStoragePromptShown;
+            RosterRotationState.ExternalRosterArchiveEnabled = settings.ExternalRosterArchiveEnabled;
             RosterRotationState.AutoCleanupUnreferencedKerbals = settings.AutoCleanupUnreferencedKerbals;
             if (!preserveVerboseSettings)
             {
@@ -298,7 +314,11 @@ namespace RosterRotation
             node.AddValue("badassNotificationsEnabled", settings.BadassNotificationsEnabled.ToString(ci));
             node.AddValue("retirementAgeMin", settings.RetirementAgeMin.ToString(ci));
             node.AddValue("retirementAgeMax", settings.RetirementAgeMax.ToString(ci));
+            node.AddValue("maximumHireAge", settings.MaximumHireAge.ToString(ci));
             node.AddValue("retiredDeathAgeMin", settings.RetiredDeathAgeMin.ToString(ci));
+            node.AddValue("externalDataStorageEnabled", settings.ExternalDataStorageEnabled.ToString(ci));
+            node.AddValue("externalStoragePromptShown", settings.ExternalStoragePromptShown.ToString(ci));
+            node.AddValue("externalRosterArchiveEnabled", settings.ExternalRosterArchiveEnabled.ToString(ci));
             node.AddValue("autoCleanupUnreferencedKerbals", settings.AutoCleanupUnreferencedKerbals.ToString(ci));
             node.AddValue("verboseLogging", settings.VerboseLogging.ToString(ci));
             node.AddValue("verboseAgeLogging", settings.VerboseAgeLogging.ToString(ci));
@@ -352,6 +372,7 @@ namespace RosterRotation
                 OriginalType = ParseKerbalType(recordNode.GetValue("originalType"), ProtoCrewMember.KerbalType.Crew),
                 Flights = PI(recordNode.GetValue("flights"), 0),
                 LastFlightUT = PD(recordNode.GetValue("lastFlightUT"), 0),
+                TotalTrackedFlightUT = PD(recordNode.GetValue("totalTrackedFlightUT"), 0),
                 RestUntilUT = PD(recordNode.GetValue("restUntilUT"), 0),
                 Retired = PB(recordNode.GetValue("retired"), false),
                 RetiredUT = PD(recordNode.GetValue("retiredUT"), 0),
@@ -390,6 +411,43 @@ namespace RosterRotation
                 EACBadassAwarded = PB(recordNode.GetValue("eacBadassAwarded"), false),
             };
 
+            foreach (ConfigNode flightNode in recordNode.GetNodes("Flight"))
+            {
+                var flight = new RosterRotationState.FlightRecord
+                {
+                    FlightId = flightNode.GetValue("id") ?? "",
+                    FlightNumber = PI(flightNode.GetValue("number"), 0),
+                    VesselName = flightNode.GetValue("vessel") ?? "",
+                    FlightType = flightNode.GetValue("type") ?? "",
+                    BodyName = flightNode.GetValue("body") ?? "",
+                    StartUT = PD(flightNode.GetValue("startUT"), 0),
+                    EndUT = PD(flightNode.GetValue("endUT"), 0),
+                    DurationUT = PD(flightNode.GetValue("durationUT"), 0)
+                };
+                record.FlightHistory.Add(flight);
+            }
+            if (record.TotalTrackedFlightUT <= 0 && record.FlightHistory.Count > 0)
+            {
+                double tracked = 0;
+                for (int i = 0; i < record.FlightHistory.Count; i++)
+                    tracked += Math.Max(0, record.FlightHistory[i].DurationUT);
+                record.TotalTrackedFlightUT = tracked;
+            }
+
+            foreach (ConfigNode eventNode in recordNode.GetNodes("CareerEvent"))
+            {
+                var careerEvent = new RosterRotationState.CareerEventRecord
+                {
+                    FlightNumber = PI(eventNode.GetValue("flight"), 0),
+                    EventType = eventNode.GetValue("type") ?? "",
+                    BodyName = eventNode.GetValue("body") ?? "",
+                    Source = eventNode.GetValue("source") ?? "",
+                    EventUT = PD(eventNode.GetValue("ut"), 0),
+                    IsProgramFirst = PB(eventNode.GetValue("programFirst"), false)
+                };
+                record.CareerEvents.Add(careerEvent);
+            }
+
             RosterRotationState.EnsureKerbalIdentity(record);
             if (record.HighestLevelEverCertified < record.GrantedLevel)
                 record.HighestLevelEverCertified = record.GrantedLevel;
@@ -407,6 +465,7 @@ namespace RosterRotation
             node.AddValue("originalType", ((int)record.OriginalType).ToString(ci));
             node.AddValue("flights", record.Flights.ToString(ci));
             node.AddValue("lastFlightUT", record.LastFlightUT.ToString("R", ci));
+            if (record.TotalTrackedFlightUT > 0) node.AddValue("totalTrackedFlightUT", record.TotalTrackedFlightUT.ToString("R", ci));
             node.AddValue("restUntilUT", record.RestUntilUT.ToString("R", ci));
             node.AddValue("retired", record.Retired.ToString(ci));
             node.AddValue("retiredUT", record.RetiredUT.ToString("R", ci));
@@ -446,6 +505,34 @@ namespace RosterRotation
             }
             if (!string.IsNullOrEmpty(record.EACBadassRollKey)) node.AddValue("eacBadassRollKey", record.EACBadassRollKey);
             if (record.EACBadassAwarded) node.AddValue("eacBadassAwarded", record.EACBadassAwarded.ToString(ci));
+
+            for (int i = 0; i < record.FlightHistory.Count; i++)
+            {
+                RosterRotationState.FlightRecord flight = record.FlightHistory[i];
+                if (flight == null) continue;
+                ConfigNode flightNode = node.AddNode("Flight");
+                if (!string.IsNullOrEmpty(flight.FlightId)) flightNode.AddValue("id", flight.FlightId);
+                if (flight.FlightNumber > 0) flightNode.AddValue("number", flight.FlightNumber.ToString(ci));
+                if (!string.IsNullOrEmpty(flight.VesselName)) flightNode.AddValue("vessel", flight.VesselName);
+                if (!string.IsNullOrEmpty(flight.FlightType)) flightNode.AddValue("type", flight.FlightType);
+                if (!string.IsNullOrEmpty(flight.BodyName)) flightNode.AddValue("body", flight.BodyName);
+                if (flight.StartUT > 0) flightNode.AddValue("startUT", flight.StartUT.ToString("R", ci));
+                if (flight.EndUT > 0) flightNode.AddValue("endUT", flight.EndUT.ToString("R", ci));
+                if (flight.DurationUT > 0) flightNode.AddValue("durationUT", flight.DurationUT.ToString("R", ci));
+            }
+
+            for (int i = 0; i < record.CareerEvents.Count; i++)
+            {
+                RosterRotationState.CareerEventRecord careerEvent = record.CareerEvents[i];
+                if (careerEvent == null || string.IsNullOrEmpty(careerEvent.EventType)) continue;
+                ConfigNode eventNode = node.AddNode("CareerEvent");
+                if (careerEvent.FlightNumber > 0) eventNode.AddValue("flight", careerEvent.FlightNumber.ToString(ci));
+                eventNode.AddValue("type", careerEvent.EventType);
+                if (!string.IsNullOrEmpty(careerEvent.BodyName)) eventNode.AddValue("body", careerEvent.BodyName);
+                if (!string.IsNullOrEmpty(careerEvent.Source)) eventNode.AddValue("source", careerEvent.Source);
+                if (careerEvent.EventUT > 0) eventNode.AddValue("ut", careerEvent.EventUT.ToString("R", ci));
+                if (careerEvent.IsProgramFirst) eventNode.AddValue("programFirst", bool.TrueString);
+            }
         }
 
         private static int PI(string s, int fb)

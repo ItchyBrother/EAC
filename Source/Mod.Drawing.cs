@@ -61,6 +61,7 @@ namespace RosterRotation
             if (GUILayout.Toggle(_tab == Tab.Applicants, "Applicants", "Button", GUILayout.Width(110))) _tab = Tab.Applicants;
             if (GUILayout.Toggle(_tab == Tab.Active,     "Active",     "Button", GUILayout.Width(80)))  _tab = Tab.Active;
             if (GUILayout.Toggle(_tab == Tab.Assigned,   "Assigned",   "Button", GUILayout.Width(90)))  _tab = Tab.Assigned;
+            if (GUILayout.Toggle(_tab == Tab.Flights,    "Flights",    "Button", GUILayout.Width(75)))  _tab = Tab.Flights;
             if (GUILayout.Toggle(_tab == Tab.Training,   "Training",   "Button", GUILayout.Width(90)))  _tab = Tab.Training;
             if (GUILayout.Toggle(_tab == Tab.RandR,      "R&R",        "Button", GUILayout.Width(60)))  _tab = Tab.RandR;
             if (GUILayout.Toggle(_tab == Tab.Retired,    "Retired",    "Button", GUILayout.Width(90)))  _tab = Tab.Retired;
@@ -82,6 +83,7 @@ namespace RosterRotation
 
             double now = Planetarium.GetUniversalTime();
             if (_tab == Tab.Applicants) DrawApplicantsTab(roster);
+            else if (_tab == Tab.Flights) DrawFlightRosterTab(roster, now);
             else if (_tab == Tab.Training) DrawTrainingTab(roster, now);
             else DrawRosterTab(roster, now);
 
