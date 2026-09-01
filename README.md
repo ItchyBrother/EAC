@@ -192,12 +192,19 @@ For older saves, EAC uses stock historical data conservatively. If the stock sav
 
 ### Performance and Internal Stability
 
-EAC reduces repeated reflection and optional-mod discovery work in frequently refreshed UI paths.
+EAC reduces repeated reflection, optional-mod discovery, UI allocation, and save-time work in frequently refreshed paths.
 
 - `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty` use lock-protected process-lifetime caches keyed by the target type and ordered candidate member names.
 - Both successful reflection lookups and misses are cached, preventing the same unavailable member from being searched repeatedly.
 - Repeated Astronaut Complex row, tooltip, and badge member lookups use the shared reflection cache while preserving the existing lookup order, value-setting logic, event wiring, and fallbacks.
-- A shared optional-mod registry caches assembly and bridge-type discovery for Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and the EAC Contract Configurator bridge.
+- A shared optional-mod registry caches assembly and bridge-type discovery for Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and the EAC Contract Configurator bridge. The registry uses direct main-thread cache access rather than per-lookup locking.
+- Service Records cache sorted Kerbal names, sorted career events, Career Distinctions, and Program First display data instead of rebuilding those collections during every IMGUI repaint.
+- Service Record and Flight Roster flight histories render directly from append-ordered history; the latest flight is read in O(1) instead of scanning or sorting the full history each frame.
+- Flight Roster Kerbal-name lists are cached using the existing UI cache interval.
+- Full-stock `CAREER_LOG` reconstruction no longer runs on every KSP save. Legacy reconstruction remains on load, while recovery-time synchronization handles newly completed missions.
+- External datastore and roster-archive cleanup share one `.sfs` line-scanner utility for reference discovery, reducing duplicated file traversal logic.
+- External-data and roster-archive hashing share a reusable SHA-256 provider instead of creating a new provider for each hash operation.
+- Legacy `RosterRotationScenario` cleanup reuses EAC's existing guarded save callback instead of registering a separate save-event subscriber during startup.
 - Astronaut Complex badge code is separated into dedicated source areas without changing normal tab ownership behavior.
 
 ### Notifications
@@ -478,7 +485,7 @@ Typical EAC record data can include:
 
 EAC 1.4 migrated older save data from the old `RosterRotationScenario` name to `EACScenario`.
 
-If EAC finds legacy data-bearing save information, it backs up the persistent file before cleanup and shows a Space Center notice. Empty legacy scenario stubs are removed silently to avoid future confusion.
+If EAC finds legacy data-bearing save information, it backs up the persistent file before cleanup and shows a Space Center notice. Empty legacy scenario stubs are removed silently to avoid future confusion. In EAC 1.6.0, this legacy cleanup is invoked through EAC's existing guarded save callback rather than a separate startup-time save-event subscription.
 
 If manually editing saves or external EAC data, make a backup first.
 
@@ -517,6 +524,7 @@ If Astronaut Complex UI oddities appear, check for:
 - Suggested Next Crew is advisory-only. It does not auto-populate stock crew slots.
 - Legacy KSP career history is not always complete. EAC imports historical Service Record information conservatively and does not invent Program Firsts when stock data cannot identify them reliably.
 - Program Firsts are currently finalized through EAC's recovery/service-history path. A future enhancement may record major historical events at the exact time they occur.
+- The legacy `RosterRotationScenario` cleanup callback has been hardened and current 1.6.0 saves have been regression-tested without the previous subscription warning. A true legacy-save upgrade test is still recommended before release when an older EAC save is available.
 
 ## Troubleshooting
 

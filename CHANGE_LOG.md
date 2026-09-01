@@ -3,7 +3,7 @@
 
 ### 2026-0901: EAC v1.6.0 — Service Records, External Data, and Career History for KSP >= 1.12.x
 
-This release expands the Hall of History into a lightweight Kerbal career-history system, adds optional external EAC data storage and retired/lost roster archival for long-running careers, and adds a configurable maximum hire age. The 1.6.0 development build has been exercised in KSP 1.12.5 with the Service Records, Program First, migration, rehydration, revision reuse, and cleanup paths verified in-game.
+This release expands the Hall of History into a lightweight Kerbal career-history system, adds optional external EAC data storage and retired/lost roster archival for long-running careers, adds a configurable maximum hire age, and includes an additional performance/persistence hardening pass. The 1.6.0 development build has been exercised in KSP 1.12.5 with Service Records, Program Firsts, embedded/external datastore migration, roster rehydration, revision reuse, archive cleanup, version reporting, and the current-save migration-callback regression path verified in-game.
 
 #### Hall of History Service Records - GitHub issue #46
 - Expanded the Flight Roster Tracker into Hall of History Service Records for each Kerbal.
@@ -36,6 +36,20 @@ This release expands the Hall of History into a lightweight Kerbal career-histor
 - New Kerbal age generation now respects the configured upper limit and persists the setting with the career.
 - Static boundary and persistence checks passed; dedicated in-game hire-age ceiling verification is still recommended before release.
 
+#### Performance and persistence hardening
+- Reduced per-frame Service Records allocations by caching the sorted Service Record name list, sorted career events, Career Distinctions, and Program First display data.
+- Service Record flight history and the Flight Roster now render directly from append-ordered native history instead of allocating and sorting temporary flight lists every frame.
+- Latest-flight lookup in the Flight Roster is now O(1) by reading the final append-ordered flight entry.
+- Cached Flight Roster Kerbal-name lists using the existing UI cache interval.
+- Removed `EACCareerHistory.SyncAllAvailableCrew()` from the normal save path so KSP autosaves/quicksaves/scene saves no longer serialize and parse every Kerbal `CAREER_LOG`; legacy reconstruction remains on load and recovery-time synchronization handles new missions.
+- Added a shared `.sfs` reference scanner used by the external datastore and roster archive cleanup paths.
+- Simplified `EACOptionalModRegistry` main-thread cache access by removing unnecessary per-lookup locks while retaining positive and negative caches.
+- Added a reusable shared SHA-256 provider for external datastore and roster archive hashing.
+- Corrected runtime startup version reporting to EAC v1.6.0 and verified the loaded EAC/EAC_CCBridge assemblies report 1.6.0.0 in KSP 1.12.5.
+- Hardened legacy `RosterRotationScenario` cleanup by routing it through EAC's already-working guarded save callback instead of a separate startup-time `onGameStateSave` subscription.
+- Verified on a current 1.6.0 career that the previous migration-subscription warning is gone and normal external revision reuse/roster archive save processing remains healthy.
+- A true legacy save containing `RosterRotationScenario` is still recommended for final end-to-end upgrade-path verification before release.
+
 #### Persistence and data safety
 - EAC external save references are kept small so long-running career history does not continuously enlarge persistent.sfs.
 - Historical Service Record data is stored with EAC-owned records when external storage is enabled.
@@ -47,6 +61,8 @@ This release expands the Hall of History into a lightweight Kerbal career-histor
 2. **Retired/Lost roster archival is separate from active crew.** Active, Available, and Assigned Kerbals remain in KSP's normal roster. Retired/Lost Kerbals can be archived and rehydrated by EAC when needed.
 3. **Program Firsts are conservative.** EAC only assigns a historical first when the participating crew can be identified reliably; it does not guess from incomplete legacy KSP history.
 4. **Issue #49 is implemented and has passed static boundary/persistence checks.** A focused in-game test that changes the maximum hire age and hires several new Kerbals is still recommended before release.
+5. **Performance/persistence hardening has been exercised on current 1.6.0 saves.** Service/Flight roster caching, external revision reuse, roster archive processing, and the removal of the migration subscription warning have all been observed in KSP 1.12.5.
+6. **Legacy scenario cleanup remains backward-compatibility code.** The callback path is now hardened, but a real older save containing `RosterRotationScenario` is still the best final validation of backup + legacy-node removal.
 
 ### EAC v1.5.1 — Applicant Hiring Funds Hotfix for KSP >= 1.12.x
 
