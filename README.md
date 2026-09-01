@@ -1,8 +1,28 @@
 # Enhanced Astronaut Complex (EAC)
 
-Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to Kerbal Space Program by extending the Astronaut Complex with long-term crew development, aging, retirement, training, career history, and optional Contract Configurator final exams.
+Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to Kerbal Space Program 1.12.x by extending the stock Astronaut Complex with long-term crew development, training, aging, retirement, recovery leave, career history, and optional Contract Configurator final exams supplied through the separate EAC Contract Configuration add-on.
 
-EAC is designed to feel stock-like while adding meaningful career-mode crew management decisions and a long-term historical record of your space program.
+EAC is designed to feel stock-like while making career-mode crew decisions matter. It can run as a self-contained career crew-management mod, while still deferring to supported specialist mods when they are actually installed and loaded.
+
+## What EAC Adds
+
+EAC expands the stock Astronaut Complex into a career-management hub for Kerbals. It tracks training, service history, aging, retirement, recovery/rest time, roster state, and optional recognition systems. It also adds retired/lost roster handling, Hall of History presentation, optional Contract Configurator final-exam support, calendar compatibility, Suggested Next Crew, EAC-native veteran/suit/Badass progression, starting crew setup, and optional external data storage for long-running careers.
+
+## Why Use EAC by Itself Instead of Adding Crew R&R or Earn Your Stripes?
+
+Crew R&R and Earn Your Stripes have always been optional. EAC can run without either of them. EAC 1.5 added EAC-native versions of the major overlapping systems those mods provide, plus additional EAC-specific career-management features.
+
+EAC's advantage is integration:
+
+- One mod can manage aging, training, retirement, recovery leave, veteran recognition, suit presentation, Badass progression, starting crew setup, roster filtering, notifications, and career history.
+- EAC combines these systems inside the Astronaut Complex, Hall of History, Message App categories, and EAC save records instead of splitting related crew-career behavior across multiple mods.
+- EAC adds features beyond the Crew R&R / Earn Your Stripes overlap, including training and final exams, retirement and retired-death handling, retired/lost roster tabs, assignment-duration display, legacy save cleanup, DeepFreeze-aware mission-time handling, Suggested Next Crew, Service Records, and Program First recognition.
+- EAC can work in a lightweight advisory style. Suggested Next Crew recommends Kerbals without enforcing morale, refusal, hard rotation rules, or automatic crew-slot filling.
+- EAC respects existing specialist mods. If Crew R&R or Earn Your Stripes is installed and loaded, EAC defers overlapping behavior to them instead of fighting them.
+
+EAC does not try to copy every design choice from Crew R&R or Earn Your Stripes. Instead, it provides built-in EAC-native alternatives for players who prefer one integrated crew-management experience.
+
+Important: EAC only delegates when the other mod's DLL is actually loaded by KSP.
 
 ## Main Features
 
@@ -13,11 +33,16 @@ EAC is designed to feel stock-like while adding meaningful career-mode crew mana
 - Training costs can use funds, science, or both, depending on difficulty settings.
 - Training notifications can be routed to the HUD, the KSP Message System, or both.
 - Optional final exam support can require Kerbals to complete practical Contract Configurator exams before receiving their next EAC training level.
+- Training state is kept out of the Available roster and stock assignment dialogs.
 
 ### Aging and Retirement
 
-- Kerbals age over time using Kerbin time or Earth time settings.
+- Kerbals age over time using the active game calendar when available, with supported stock Kerbin-time and Earth-time fallback behavior.
 - Retirement age ranges are configurable.
+- Current default retirement values:
+  - Retire minimum: 37
+  - Retire maximum: 47
+  - Retired death minimum: 50
 - The maximum age assigned to newly hired Kerbals is configurable.
   - Default maximum hire age: **45**
   - Supported range: **18–120**
@@ -26,50 +51,133 @@ EAC is designed to feel stock-like while adding meaningful career-mode crew mana
 - Retired Kerbals can lose effective experience over time while retired.
 - Optional retired-death and mission-old-age-death settings are available.
 
+### Calendar Compatibility
+
+EAC supports custom KSP calendars.
+
+- EAC uses the active game's calendar day and year lengths when custom values are available.
+- Stock Kerbin-time and Earth-time behavior remain supported.
+- Custom calendars used by Kronometer, JNSQ, and rescaled Kopernicus/Sigma Dimensions installations can keep EAC age and date displays aligned with the rest of the game.
+- If a custom calendar cannot be resolved, EAC falls back to its supported stock time basis instead of failing.
+- Calendar support affects EAC's calendar-based age/date presentation and related lifecycle timing conversions; it does not alter the save's universal time.
+
 ### Astronaut Complex Roster Management
 
-- Adds EAC roster handling to the Astronaut Complex.
-- Retired Kerbals are kept out of the Available roster.
-- Dead, missing, and EAC-deceased Kerbals are kept out of the Available roster.
-- Available, Assigned, Retired, and Lost tab contents are filtered so Kerbals from one tab do not appear under another tab after switching views or after KSP rebuilds the Astronaut Complex UI.
-- The LOST tab shows useful age-at-death information without showing an unnecessary current-age value for deceased Kerbals.
-- EAC attempts to re-apply roster cleanup after KSP rebuilds Astronaut Complex UI lists.
+- Adds EAC-aware roster handling to the stock Astronaut Complex.
+- Reorders and manages roster tabs for Available, Assigned, Retired, and Lost views.
+- Keeps Assigned, Retired, Lost/KIA/Dead, Training, Recovering, Frozen, and otherwise unavailable Kerbals out of the Available tab.
+- Adds a synthetic Retired tab while safely avoiding unsafe stock UI activation paths for custom tabs.
+- Shows assignment duration in the Assigned tab.
+- Keeps the Recall-button tooltip reliable regardless of which direction the pointer enters the button.
+- Switches cleanly between the Recall tooltip and the normal Kerbal-information popup while moving across a retired crew row.
+- Uses targeted recall and deferred EAC-only retirement refreshes so recalling or retiring a Kerbal does not duplicate or rebuild the native Available list.
+- Rebinds retired-row crew tooltips after UI updates so newly retired Kerbals and surviving rows show their information immediately without closing and reopening the Astronaut Complex.
+- Re-applies tab ownership while the Astronaut Complex is open so KSP list rebuilds do not leak rows into the wrong tab.
+- Keeps the watchdog/filter logic limited to Astronaut Complex use instead of running constantly.
 
 ### Applicant Management
 
 - Applicant rejection is handled through EAC's Astronaut Complex integration.
 - Reject All uses a stable applicant snapshot so applicants are not skipped while the roster is changing.
-- Applicant rejection is guarded so it only acts on valid applicants.
+- Applicant rejection is guarded so it only acts on valid applicant Kerbals.
+
+### Crash, Recovery, and Crew Rest Handling
+
+- Crash severity can apply recovery penalties or force retirement depending on settings.
+- EAC can apply configurable post-mission recovery leave when Crew R&R is not loaded.
+- Recovery leave is based on mission time and the configured recovery percentage, capped by RestDay Max.
+- Very short positive recovery leave is given a minimum visible recovery floor so crew do not appear immediately available after tiny flights when recovery is enabled.
+- Recovery state is persisted using EAC records and rehydrated if KSP clears stock inactive state during scene changes.
+- Space Center, Tracking Station, map-style, and focused-vessel recovery paths are handled consistently.
+- DeepFreeze frozen time is excluded from recovery fatigue. Awake mission time before and after freezing is accumulated and counted.
+- If Crew R&R is installed as a loaded assembly, EAC defers recovery leave handling to Crew R&R.
+
+### Suggested Next Crew Advisor
+
+EAC includes an optional Suggested Next Crew Advisor for the VAB/SPH.
+
+The advisor is intentionally advisory only:
+
+- It does not auto-fill stock crew slots.
+- It does not enforce rotation.
+- It does not add morale or refusal rules.
+- It does not override the player's crew choices.
+
+Recommendation labels include:
+
+1. Needs experience
+2. Due for flight
+3. Long service priority
+4. Recently flew
+
+Suggested Next Crew is disabled/delegated when Crew R&R is installed as a loaded assembly.
+
+### EAC-Native Veteran, Suit, and Badass Progression
+
+When Earn Your Stripes is not loaded, EAC can provide built-in career recognition features:
+
+- Configurable veteran requirements.
+- Veteran eligibility based on flight count, flight hours, optional milestone requirement, and optional class restrictions.
+- Existing-save evaluation so Kerbals who already meet the requirements can be promoted retroactively.
+- Optional default and veteran suit presentation.
+- Optional Badass progression, conservative/off by default.
+- Badass progression can require veteran status and milestone qualification.
+- Badass milestone rolls are tracked so save reloads cannot repeatedly reroll the same milestone.
+- Veteran and Badass recognition notifications can appear through HUD and Message App paths.
+
+When Earn Your Stripes is installed as a loaded assembly, EAC disables/delegates its native veteran, suit, and starting crew logic to avoid conflicts.
+
+### New-Game Starting Crew Setup
+
+When Earn Your Stripes is not loaded, EAC can show a startup crew setup window for new saves.
+
+Options include:
+
+- Keep Default Crew.
+- Replace Default Crew.
+- Male / Female / Both gender filters.
+- Pilot / Engineer / Scientist class filters.
+- Starting crew count.
+- Guaranteed class coverage when enough crew slots are available.
+
+For example, when all three classes are selected and the starting crew count is three or more, EAC guarantees at least one Pilot, one Engineer, and one Scientist.
+
+The startup dialog is centered and can reappear correctly for subsequent new saves created in the same KSP session.
 
 ### Hall of History and Service Records
 
-EAC's Hall of History provides a long-term historical view of the Kerbals who built your space program.
+EAC includes Hall of History presentation for career records, including:
 
-Service Records provide a lightweight career-history system for individual Kerbals without attempting to replace a full ribbon/achievement mod.
+- Memorial-style handling for fallen Kerbals.
+- Portrait support.
+- Career and service history presentation.
+- Veteran/status display where applicable.
+
+EAC 1.6 expands the Hall of History with **Service Records**.
 
 Service Records can include:
 
-- Kerbal portrait, when one has been captured by EAC,
-- recovered flight count,
-- flight type/classification,
-- time since the last flight,
-- total EAC-tracked mission time,
-- vessel name,
-- primary celestial body,
-- recovery date,
-- mission duration,
-- legacy accomplishments imported conservatively from the stock Kerbal `CAREER_LOG`,
-- EAC-recorded career events for new missions,
-- Career Distinctions,
+- Kerbal portrait, when one has been captured by EAC.
+- Recovered flight count.
+- Flight type/classification.
+- Time since the last flight.
+- Total EAC-tracked mission time.
+- Vessel name.
+- Primary celestial body.
+- Recovery date.
+- Mission duration.
+- Legacy accomplishments imported conservatively from the stock Kerbal `CAREER_LOG`.
+- EAC-recorded career events for new missions.
+- Career Distinctions.
 - Program First recognition.
 
 Historic Program Firsts are highlighted with a star:
 
-- `★ FIRST` for a Kerbal with one Program First,
-- `★ ×N` for a Kerbal with multiple Program Firsts,
+- `★ FIRST` for a Kerbal with one Program First.
+- `★ ×N` for a Kerbal with multiple Program Firsts.
 - `★ PROGRAM FIRST` in the detailed Service Record.
 
-Examples include:
+Example distinction wording includes:
 
 - `First Suborbital Flight at Minmus`
 - first orbit of a celestial body,
@@ -82,22 +190,27 @@ Where a Program First belongs to a crew, EAC recognizes the crew members rather 
 
 For older saves, EAC uses stock historical data conservatively. If the stock save does not reliably identify who completed a historical first, EAC does not guess.
 
-### Crash, Recovery, and Crew Rest Handling
+### Performance and Internal Stability
 
-- Crash severity can apply recovery penalties or force retirement depending on settings.
-- Crew rest after flight can be handled by EAC.
-- EAC records native recovery/service-history information used by the Hall of History.
-- EAC can defer to supported external crew-management mods where appropriate.
+EAC reduces repeated reflection and optional-mod discovery work in frequently refreshed UI paths.
+
+- `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty` use lock-protected process-lifetime caches keyed by the target type and ordered candidate member names.
+- Both successful reflection lookups and misses are cached, preventing the same unavailable member from being searched repeatedly.
+- Repeated Astronaut Complex row, tooltip, and badge member lookups use the shared reflection cache while preserving the existing lookup order, value-setting logic, event wiring, and fallbacks.
+- A shared optional-mod registry caches assembly and bridge-type discovery for Earn Your Stripes, Crew R&R / CrewQueueTwo, Contract Configurator, and the EAC Contract Configurator bridge.
+- Astronaut Complex badge code is separated into dedicated source areas without changing normal tab ownership behavior.
 
 ### Notifications
 
-Notification categories can be enabled or disabled independently:
+Notification categories can be enabled or disabled independently, including:
 
-- birthdays,
-- training,
-- retirement,
-- deaths,
-- recovery/rest events.
+- Birthdays.
+- Training.
+- Retirement.
+- Deaths.
+- Recovery/rest events.
+- Veteran recognition.
+- Badass recognition.
 
 Notifications can appear in:
 
@@ -105,57 +218,64 @@ Notifications can appear in:
 - the KSP Message System,
 - or both.
 
-## Required Dependencies
-
-### HarmonyKSP / Harmony2
-
-EAC requires HarmonyKSP, the Kerbal Space Program distribution of the Harmony 2 modding library.
-
-Install HarmonyKSP before starting KSP with EAC enabled.
-
-A correct manual install places the `000_Harmony` folder directly under `GameData/`.
-
-CKAN users should install the `Harmony2` dependency.
-
-EAC should be installed beside HarmonyKSP, not inside the `000_Harmony` folder.
-
-Without HarmonyKSP, EAC will not load correctly.
+Message App categories can be reset when Message App support is re-enabled.
 
 ## Optional Mod Integrations
 
-EAC requires HarmonyKSP/Harmony2. Beyond that required dependency, EAC can integrate with several optional mods.
+EAC is designed to run by itself, but it can integrate with several other mods.
 
-### Contract Configurator
+### HarmonyKSP / Harmony2
 
-Contract Configurator is optional.
+HarmonyKSP is required.
 
-#### IMPORTANT: EAC by default has the bridge that it uses with Contract Configurator disabled.
-
-You must rename the EAC_CCBridge from:
+Manual installs should include:
 
 ```text
-EAC_CCBridge.dll.disabled
+GameData/000_Harmony/
 ```
 
-to:
+CKAN installs should include the Harmony2 dependency.
+
+### Contract Configurator and the EAC Contract Configuration Add-on
+
+Beginning with version 1.5.0, EAC is released as two coordinated packages:
+
+1. **Enhanced Astronaut Complex (EAC Core)** — the required base mod. It contains `EAC.dll` and has no Contract Configurator dependency.
+2. **EAC Contract Configuration** — an optional add-on for players who want Contract Configurator final exams. It contains the active bridge DLL and the exam contracts/content.
+
+For EAC 1.6.0, the optional add-on requires:
+
+- EAC Core 1.6.0,
+- Contract Configurator,
+- and the normal EAC Core dependency on HarmonyKSP / Harmony2.
+
+Install the add-on only when Contract Configurator is installed. The add-on merges into the existing `GameData/EAC/` folder and provides:
 
 ```text
-EAC_CCBridge.dll
+GameData/EAC/Plugins/EAC_CCBridge.dll
+GameData/EAC/Contracts/
+GameData/EAC/Agencies/
+GameData/EAC/Craft/
+GameData/EAC/Scenarios/
 ```
 
-This file is located in the EAC `Plugins` folder.
+**Do not rename any DLL.**
 
-When Contract Configurator and the EAC CC bridge are installed, EAC can use Contract Configurator contracts as final exams for training advancement.
+The old `EAC_CCBridge.dll.disabled` rename workflow is no longer used for 1.5.0 or later releases. EAC Core does not ship the bridge. Players who do not use Contract Configurator install only EAC Core and take no additional action.
+
+When EAC Core, Contract Configurator, and the matching EAC Contract Configuration package are installed, EAC can use Contract Configurator contracts as final exams for training advancement.
 
 EAC tracks which Kerbal needs a final exam, the Kerbal's trait, the target level, and the final exam state. Contract Configurator owns the contract objectives and completion. After the contract completes, EAC reconciles the Kerbal's EAC training level.
 
-If Contract Configurator is not installed, EAC should still load without a hard dependency error. Final exam contract mode will simply be unavailable.
+If final exams are disabled after a Kerbal has entered the final-exam path, or if Contract Configurator/the add-on is later removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
 
-If final exams are disabled after a Kerbal has already entered the final-exam path, or if Contract Configurator is removed, EAC attempts to recover the Kerbal back into the normal EAC training-award path.
+When upgrading from EAC 1.4.x or earlier:
 
-Recent final-exam contract updates defer Contract Configurator XP awards until contract completion and make Level 1/2 Scientist rover-science exams use an explicit final rover/test-article recovery objective after science collection.
+- remove any stale `GameData/EAC/Plugins/EAC_CCBridge.dll.disabled`,
+- install the current EAC Core package,
+- and install the matching EAC Contract Configuration package only if Contract Configurator is present.
 
-For contract authors, see the dedicated final-exam documentation:
+For contract authors, see:
 
 ```text
 README_EAC_CC_Final_Exams.md
@@ -175,95 +295,135 @@ A final exam contract can use EAC's scenario-loading behavior to:
 
 This is separate from normal `.craft` file provisioning. `.craft` files are placed in the hangar for the player to use. Scenario vessels are inserted into the active save for a specific contract flow.
 
-### DeepFreeze
+### Crew R&R
 
-EAC can work alongside DeepFreeze when it is installed.
+Crew R&R is optional.
 
-EAC's crew-state and roster cleanup logic treats frozen/suspended Kerbals as a supported external lifecycle state instead of incorrectly processing them as normal active, missing, or deceased crew.
+When Crew R&R is not installed, EAC can provide its own post-mission recovery leave and Suggested Next Crew recommendations.
 
-When a frozen Kerbal is thawed or otherwise returned from suspended animation, EAC should not mark that Kerbal KIA as part of normal aging, death, or roster-tab cleanup.
-
-### Kerbal Changelog
-
-EAC includes optional Kerbal Changelog support through `Changelog.cfg`.
-
-When Kerbal Changelog is installed, the EAC changelog can be shown in-game after an update.
-
-When Kerbal Changelog is not installed, the config file is only release-note data and EAC should still function normally.
-
-Ship only one Kerbal Changelog config for EAC to avoid duplicate changelog pages.
-
-### CrewRandR
-
-EAC can work alongside CrewRandR by linuxgurugamer. When CrewRandR is installed, EAC gives preference to that mod where appropriate instead of duplicating crew-rest behavior.
+When Crew R&R is installed as a loaded assembly, EAC defers recovery leave behavior to Crew R&R and disables/delegates Suggested Next Crew to avoid conflicting career-rotation systems.
 
 ### Earn Your Stripes and FlightTracker
 
-EAC can also work alongside Earn Your Stripes and FlightTracker by severedsolo.
+Earn Your Stripes and FlightTracker are optional.
 
-When these mods are installed, EAC continues to respect their promotion/flight-tracking roles where appropriate.
+When Earn Your Stripes is not installed, EAC can provide native veteran recognition, suit presentation, and starting crew setup.
 
-EAC's Hall of History Service Records are an EAC-owned career-history feature and remain available independently of the optional FlightTracker integration.
+When Earn Your Stripes is installed as a loaded assembly, EAC defers veteran/suit/starting crew behavior to Earn Your Stripes.
+
+When FlightTracker is installed, EAC can prefer FlightTracker's long-term flight-history data where appropriate.
+
+EAC 1.6 also records its own native Service Record history. This EAC-owned history is available independently of FlightTracker and records richer mission/service information for missions completed after the feature is installed.
+
+For older careers, FlightTracker may still provide useful historical flight-hour information that predates EAC's native Service Record capture.
+
+### DeepFreeze
+
+DeepFreeze is optional.
+
+When DeepFreeze is installed, EAC treats frozen Kerbals as an external lifecycle state. Frozen Kerbals are not treated as normal active, missing, or deceased crew by EAC.
+
+DeepFreeze frozen time does not count toward EAC recovery fatigue. EAC accumulates awake mission time before and after freezing so long-duration cryosleep does not create year-long rest penalties, while meaningful awake mission time still counts.
+
+### Kerbal Changelog
+
+Kerbal Changelog is optional.
+
+`GameData/EAC/Changelog.cfg` provides in-game release notes when Kerbal Changelog is installed. EAC does not require Kerbal Changelog to run.
 
 ## Installation
 
-1. Install HarmonyKSP first. For manual installs, copy `000_Harmony/` into your KSP `GameData/` directory. For CKAN installs, use the `Harmony2` dependency.
-2. Download the EAC release zip.
-3. Copy the `GameData/EAC/` folder into your KSP `GameData/` directory.
+### EAC Core
+
+1. Install HarmonyKSP / Harmony2.
+2. Download the EAC Core 1.6.0 release.
+3. Copy the included `GameData/EAC/` folder into the KSP `GameData/` directory.
 4. Start KSP and open a save.
 5. Review EAC settings under Difficulty Options before starting a long career save.
 
-A typical install should look like this:
+A core-only install should look like this:
 
 ```text
 Kerbal Space Program/
   GameData/
-    000_Harmony/                 # required HarmonyKSP / Harmony2 dependency
+    000_Harmony/
     EAC/
-      Changelog.cfg              # optional Kerbal Changelog release notes
+      Changelog.cfg
       Plugins/
         EAC.dll
-        EAC_CCBridge.dll.disabled # optional Contract Configurator bridge
-      Contracts/                 # optional Contract Configurator exam contracts
-      Agencies/                  # optional agencies for final exam contracts
-      Craft/                     # optional provided craft files
-      Scenarios/                 # optional scenario vessels for selected exams
 ```
 
-Only one copy of EAC should be installed at a time.
+### Optional EAC Contract Configuration
 
-Only one copy of HarmonyKSP should be installed at a time.
+Install this package only when Contract Configurator is installed.
+
+1. Install EAC Core 1.6.0.
+2. Install Contract Configurator.
+3. Copy the EAC Contract Configuration 1.6.0 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
+4. Confirm that `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
+5. **Do not rename any DLL.**
+
+A combined install should look like this:
+
+```text
+Kerbal Space Program/
+  GameData/
+    000_Harmony/
+    ContractConfigurator/
+    EAC/
+      Changelog.cfg
+      Plugins/
+        EAC.dll
+        EAC_CCBridge.dll
+      Contracts/
+      Agencies/
+      Craft/
+      Scenarios/
+```
+
+Only one copy of EAC Core and one copy of the matching EAC Contract Configuration package should be installed at a time.
 
 ## Settings
 
 EAC settings are available at:
 
 ```text
-Space Center → Settings → Difficulty Options → EAC
+Space Center -> Settings -> Difficulty Options -> EAC
 ```
 
-From there, the following can be configured:
+EAC keeps the basic Difficulty Settings screen more compact and moves detailed/low-frequency options into an EAC Advanced Settings window.
 
-- Kerbin time or Earth time,
-- training time and cost rules,
-- funds and science scaling,
-- aging on or off,
-- retirement ages,
-- maximum hire age,
-- retired-death behavior,
-- mission old-age death behavior,
-- crash recovery behavior,
-- notification routing and categories,
-- Contract Configurator final exam behavior,
-- debug and verbose logging.
+Advanced Settings can be opened from the EAC Space Center window.
 
-Additional data-storage controls are available through EAC's Advanced Settings.
+Configurable areas include:
 
-### External Data Storage
+- Calendar/time behavior, including active custom-calendar compatibility.
+- Training time and cost rules.
+- Funds and science scaling.
+- Aging on or off.
+- Retirement ages.
+- Maximum hire age.
+- Retired-death behavior.
+- Mission old-age death behavior.
+- Crash recovery behavior.
+- Recovery leave percentage and RestDay Max.
+- Suggested Next Crew.
+- Message App categories.
+- Veteran recognition.
+- Suit presentation.
+- Badass progression.
+- Starting crew setup.
+- Contract Configurator final exam behavior when the EAC Contract Configuration add-on is installed.
+- External EAC data storage and retired/lost roster archiving.
+- Debug and verbose logging.
 
-EAC can optionally move growing EAC-owned career data out of `persistent.sfs`.
+Settings are persisted with the career and survive reloads.
 
-For new careers, external data storage is **OFF by default**. EAC may display a one-time informational message recommending it for long-running careers.
+### External EAC Data Storage
+
+EAC 1.6 can optionally move growing EAC-owned career data out of `persistent.sfs`.
+
+For new careers, external data storage is **OFF by default**. EAC can show a one-time informational message recommending it for long-running careers.
 
 When enabled, EAC stores its external data under the current save folder, for example:
 
@@ -279,21 +439,21 @@ The external datastore can contain EAC-owned per-Kerbal lifecycle and historical
 
 External retired/lost roster archiving is a separate option. When enabled, eligible retired/lost stock Kerbal roster records can be archived outside `persistent.sfs` and rehydrated when the save is loaded.
 
-The external-storage design includes several safeguards:
+Safeguards include:
 
-- external data is written and validated before EAC relies on it,
-- if a required external write fails, EAC can fall back to embedding EAC records in the KSP save,
-- migration between embedded and external EAC data is reversible,
-- unchanged EAC data reuses the existing revision instead of creating a new revision on every save,
-- EAC protects revisions referenced by existing `.sfs` files,
-- old unreferenced revisions/archive payloads are cleaned up conservatively,
-- additional recent unreferenced safety copies are retained.
+- External data is written and validated before EAC relies on it.
+- If a required external write fails, EAC can fall back to embedding EAC records in the KSP save.
+- Migration between embedded and external EAC data is reversible.
+- Unchanged EAC data reuses the existing revision instead of creating a new revision on every save.
+- EAC protects revisions referenced by existing `.sfs` files.
+- Old unreferenced revisions/archive payloads are cleaned up conservatively.
+- Additional recent unreferenced safety copies are retained.
 
-Because external storage changes where authoritative EAC information is stored, players should include the save's `EAC` folder when backing up or transferring an externally stored career.
+Because external storage changes where authoritative EAC information is stored, include the save's `EAC` folder when backing up or transferring an externally stored career.
 
-## Save Data
+## Save Data and Migration
 
-EAC always stores the settings and references required to associate EAC state with a KSP save.
+EAC stores the settings and references required to associate EAC state with a KSP save.
 
 Depending on the external-storage setting, EAC-owned per-Kerbal records may be:
 
@@ -308,12 +468,17 @@ Typical EAC record data can include:
 - retirement status and retirement time,
 - experience at retirement,
 - death or lost status handled by EAC,
-- flight/service history,
-- historical career events,
+- recovery/rest state,
+- accumulated awake mission time used for DeepFreeze-aware recovery,
+- veteran/suit/Badass tracking,
+- native flight/service history,
+- Program First and career-history information,
 - notification and feature toggles,
 - final exam history used for exam rotation.
 
-Stock KSP remains responsible for active simulation data that KSP itself requires.
+EAC 1.4 migrated older save data from the old `RosterRotationScenario` name to `EACScenario`.
+
+If EAC finds legacy data-bearing save information, it backs up the persistent file before cleanup and shows a Space Center notice. Empty legacy scenario stubs are removed silently to avoid future confusion.
 
 If manually editing saves or external EAC data, make a backup first.
 
@@ -322,22 +487,25 @@ When external storage is enabled, back up both the `.sfs` file and the save's `E
 ## Compatibility Notes
 
 - Built for Kerbal Space Program 1.12.x.
-- Requires HarmonyKSP/Harmony2, installed as `GameData/000_Harmony/`.
+- Requires HarmonyKSP / Harmony2.
 - Intended for the stock Astronaut Complex UI.
 - Other mods that heavily replace or rebuild the Astronaut Complex UI may conflict with EAC roster-tab adjustments.
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
-- Contract Configurator is optional.
-- Final exam contract mode requires Contract Configurator and the EAC CC bridge.
-- DeepFreeze is optional; when installed, EAC avoids treating frozen/suspended Kerbals as normal lost/deceased crew during lifecycle cleanup.
-- Kerbal Changelog is optional; `Changelog.cfg` is used only for in-game changelog display.
-- FlightTracker is optional; EAC Service Records remain available independently of the external FlightTracker mod.
+- Contract Configurator is optional and is not required by EAC Core.
+- Final exam contract mode requires the separate, matching-version EAC Contract Configuration package and Contract Configurator.
+- EAC Core 1.6.0 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
+- The EAC Contract Configuration package ships the active `EAC_CCBridge.dll` and must not be installed without Contract Configurator.
+- Custom calendar support is designed for stock calendars and calendar providers used by setups such as Kronometer, JNSQ, and rescaled Kopernicus systems.
+- Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
+- EAC delegates to Crew R&R or Earn Your Stripes only when those mods are actually loaded as assemblies.
+- EAC Service Records remain available independently of FlightTracker.
 
 If Astronaut Complex UI oddities appear, check for:
 
 - more than one installed copy of EAC,
-- a missing, duplicate, or incorrectly nested `000_Harmony` install,
 - another mod patching Astronaut Complex roster lists or buttons,
 - missing or mismatched EAC plugin files,
+- missing HarmonyKSP,
 - errors in `KSP.log` beginning with `[EAC]`.
 
 ## Known Notes
@@ -346,7 +514,8 @@ If Astronaut Complex UI oddities appear, check for:
 - Some Astronaut Complex UI layouts may not expose every stock list in the same way. EAC handles missing lists as gracefully as possible.
 - Facility upgrades can cause the Astronaut Complex UI to rebuild. EAC attempts to re-sync hiring and roster behavior afterward.
 - Mission old-age death is controlled separately from retired-death behavior. A Kerbal assigned to an unlaunched vessel will only be eligible for mission old-age death when that setting is enabled.
-- Legacy KSP career history is not always complete. EAC imports historical Service Record information conservatively and does not invent Program Firsts when the stock data cannot identify them reliably.
+- Suggested Next Crew is advisory-only. It does not auto-populate stock crew slots.
+- Legacy KSP career history is not always complete. EAC imports historical Service Record information conservatively and does not invent Program Firsts when stock data cannot identify them reliably.
 - Program Firsts are currently finalized through EAC's recovery/service-history path. A future enhancement may record major historical events at the exact time they occur.
 
 ## Troubleshooting
@@ -387,23 +556,22 @@ rehydrat
 
 ### Verbose Logging
 
-Verbose logging can be enabled at:
-
-```text
-Space Center → Settings → Difficulty Options → EAC → Debug
-```
+Verbose logging can be enabled in EAC Advanced Settings.
 
 Use verbose logging only while troubleshooting because it can create more log output.
 
-### EAC Does Not Load or Logs Harmony Errors
+### Contract Configurator Exams Do Not Appear
 
 Check that:
 
-- HarmonyKSP is installed as `GameData/000_Harmony/`,
-- `000_Harmony` is not nested inside `GameData/EAC/` or another mod folder,
-- only one copy of HarmonyKSP is installed,
-- CKAN installs include the `Harmony2` dependency,
-- `KSP.log` does not show missing Harmony assemblies before EAC initializes.
+- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.0.
+- Contract Configurator is installed.
+- `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
+- No stale `EAC_CCBridge.dll.disabled` from an older 1.4.x-or-earlier installation remains.
+- The EAC Contract Configuration `Contracts`, `Agencies`, `Craft`, and `Scenarios` content was copied into `GameData/EAC/`.
+- The contract group exists.
+- The contract uses the expected EAC requirement and behaviour blocks.
+- The contract's trait, target level, and exam ID match the pending Kerbal's final exam state.
 
 ### External EAC Data Does Not Load
 
@@ -417,29 +585,6 @@ Check that:
 
 Do not delete the external EAC directory from a career that currently references external data unless you have a known-good backup.
 
-### Contract Configurator Exams Do Not Appear
-
-Check that:
-
-- Contract Configurator is installed,
-- `EAC_CCBridge.dll.disabled` has been renamed to `EAC_CCBridge.dll`,
-- the contract group exists,
-- the contract uses the expected EAC requirement and behaviour blocks,
-- the contract's trait, target level, and exam ID match the pending Kerbal's final exam state.
-
-### Scientist Rover Exam Does Not Complete
-
-For updated Scientist Level 1/2 rover science contracts, collect the required science first, then recover the rover or test article.
-
-Recovering only the EVA Kerbal should not complete these exams.
-
-Check that:
-
-- the science objective is complete,
-- the rover/test article still contains the required part,
-- the final recovery objective appears in the contract checklist,
-- the rover/test article is recovered after the science objective completes.
-
 ### Scenario Vessel Does Not Load
 
 Check that:
@@ -452,28 +597,68 @@ Check that:
 
 ### A Kerbal Is Stuck in Training or Final Exam State
 
-Check whether final exam mode was disabled or Contract Configurator was removed after the Kerbal entered the exam path.
+Check whether final exam mode was disabled, Contract Configurator was removed, or the EAC Contract Configuration add-on was removed after the Kerbal entered the exam path.
 
 EAC includes recovery handling for this case, but the save may need to be loaded at the Space Center for EAC to reconcile the state.
 
-### A DeepFreeze Kerbal Is Marked KIA After Thawing
+### Crew R&R or Earn Your Stripes Options Are Unavailable
 
-Check that:
+This is expected if the corresponding mod DLL is installed and loaded. EAC disables/delegates overlapping features to avoid conflicts.
 
-- only one copy of EAC is installed,
-- the DeepFreeze version includes the API/wrapper expected by EAC,
-- the Kerbal was frozen and thawed through DeepFreeze rather than manually edited in the save,
-- `KSP.log` contains both DeepFreeze and `[EAC]` entries around the freeze/thaw event.
+A ZIP file in `GameData` should not trigger delegation by itself. The mod assembly must actually be loaded by KSP.
 
-### Kerbal Changelog Does Not Show EAC Notes
+## Packaging Checklist
 
-Check that:
+### EAC Core 1.6.0
 
-- Kerbal Changelog is installed,
-- `GameData/EAC/Changelog.cfg` is present,
-- only one EAC Kerbal Changelog config is installed,
-- the latest `VERSION` block in `Changelog.cfg` has a valid three- or four-part numeric version such as `1.6.0` or `1.6.0.0`,
-- `showChangelog = True` is present.
+The core release should include at least:
+
+```text
+GameData/EAC/Changelog.cfg
+GameData/EAC/Plugins/EAC.dll
+EAC.version
+README.md
+CHANGE_LOG.md
+```
+
+The core release should **not** include:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
+GameData/EAC/Plugins/EAC_CCBridge.dll.disabled
+GameData/EAC/Contracts/
+GameData/EAC/Agencies/
+GameData/EAC/Craft/
+GameData/EAC/Scenarios/
+```
+
+### EAC Contract Configuration 1.6.0
+
+The optional add-on should include its bridge and Contract Configurator content:
+
+```text
+GameData/EAC/Plugins/EAC_CCBridge.dll
+GameData/EAC/Contracts/*.cfg
+GameData/EAC/Agencies/*.cfg
+GameData/EAC/Agencies/*.png
+GameData/EAC/Craft/*.craft
+GameData/EAC/Scenarios/*.cfg
+EAC_CC_README_FIRST.md
+```
+
+Both release packages should identify the same version and should be published together so users do not mix incompatible core and bridge builds.
+
+Do not include development artifacts such as:
+
+```text
+bin/
+obj/
+*.bak.cs
+*.pdb
+*.user
+KSP.log
+temporary patch files
+```
 
 ## License
 
@@ -499,16 +684,15 @@ By downloading or using this mod, you agree that:
 - if you share the mod, you must give appropriate credit to the original author, provide a link to the license, and indicate if any changes were made,
 - you may not remove or alter copyright or license information.
 
-Copyright © 2026 ItchyBrother.
-
-All Rights Reserved except as expressly licensed above.
+Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed above.
 
 ## Credits
 
 - Kerbal Space Program by Squad / Private Division.
 - Thanks to the KSP modding community.
+- Thanks to KSP forum user edgomes27 for beta testing EAC.
 - Thanks to the HarmonyKSP maintainers and the Harmony project for the Harmony library used by EAC.
-- Thanks to KSP forum users edgomes27 and john marley for beta testing EAC.
 - Thanks to the Kerbal Changelog maintainers and contributors for the in-game changelog utility.
 - Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.
 - Thanks to severedsolo for the Earn Your Stripes and FlightTracker mods, which EAC can integrate with when present.
+- Thanks to JPLRepo / DeepFreeze Continued maintainers for the DeepFreeze ecosystem that EAC can detect and respect when present.
