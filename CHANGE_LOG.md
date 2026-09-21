@@ -1,6 +1,27 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-0921: EAC v1.6.1 — Lost/Retired Roster Archive Performance Hotfix for KSP >= 1.12.x
+
+This hotfix addresses severe post-save and facility-transition pauses caused by the EAC 1.6.0 Lost/Retired external roster archive path. Testing on KSP 1.12.5 isolated recurring 10–16 second stalls to the post-save archive pass.
+
+#### Lost/Retired roster archive hotfix
+- Disabled external Lost/Retired stock-roster archival in EAC 1.6.1.
+- Retired and Lost Kerbals now remain in KSP's normal `persistent.sfs` roster instead of being stripped and rewritten after every save.
+- Removed the normal post-save `persistent.sfs` reload/strip/rewrite cycle that caused the long stalls.
+- Existing 1.6.0 legacy roster archive references are rehydrated back into the stock roster once during migration.
+- After a successful migration, subsequent KSP starts do not repeatedly rehydrate those Kerbals and normal saves no longer run the roster archive pass.
+- Migration and subsequent cold-start behavior were verified in KSP 1.12.5.
+
+#### External EAC History/Record storage
+- External storage for EAC-owned History/Record data remains supported and unchanged.
+- Unchanged external History/Record data continues to reuse the current external revision.
+- Updated EAC load logging to describe external EAC history data without implying that Lost/Retired roster archiving is still active.
+
+#### Packaging
+- Updated EAC and EAC_CCBridge version reporting to 1.6.1.
+- EAC Core and EAC Contract Configuration should use matching 1.6.1 versions.
+
 ### 2026-0901: EAC v1.6.0 — Service Records, External Data, and Career History for KSP >= 1.12.x
 
 This release expands the Hall of History into a lightweight Kerbal career-history system, adds optional external EAC data storage and retired/lost roster archival for long-running careers, adds a configurable maximum hire age, and includes an additional performance/persistence hardening pass. The 1.6.0 development build has been exercised in KSP 1.12.5 with Service Records, Program Firsts, embedded/external datastore migration, roster rehydration, revision reuse, archive cleanup, version reporting, and the current-save migration-callback regression path verified in-game.

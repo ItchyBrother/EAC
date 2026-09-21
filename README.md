@@ -202,8 +202,8 @@ EAC reduces repeated reflection, optional-mod discovery, UI allocation, and save
 - Service Record and Flight Roster flight histories render directly from append-ordered history; the latest flight is read in O(1) instead of scanning or sorting the full history each frame.
 - Flight Roster Kerbal-name lists are cached using the existing UI cache interval.
 - Full-stock `CAREER_LOG` reconstruction no longer runs on every KSP save. Legacy reconstruction remains on load, while recovery-time synchronization handles newly completed missions.
-- External datastore and roster-archive cleanup share one `.sfs` line-scanner utility for reference discovery, reducing duplicated file traversal logic.
-- External-data and roster-archive hashing share a reusable SHA-256 provider instead of creating a new provider for each hash operation.
+- External EAC History/Record storage uses shared `.sfs` reference scanning and hashing helpers to reduce duplicated file traversal and allocation work.
+- The EAC 1.6.0 Lost/Retired external roster archive path is disabled in 1.6.1 because its post-save rewrite could cause severe stalls on larger careers.
 - Legacy `RosterRotationScenario` cleanup reuses EAC's existing guarded save callback instead of registering a separate save-event subscriber during startup.
 - Astronaut Complex badge code is separated into dedicated source areas without changing normal tab ownership behavior.
 
@@ -250,9 +250,9 @@ Beginning with version 1.5.0, EAC is released as two coordinated packages:
 1. **Enhanced Astronaut Complex (EAC Core)** — the required base mod. It contains `EAC.dll` and has no Contract Configurator dependency.
 2. **EAC Contract Configuration** — an optional add-on for players who want Contract Configurator final exams. It contains the active bridge DLL and the exam contracts/content.
 
-For EAC 1.6.0, the optional add-on requires:
+For EAC 1.6.1, the optional add-on requires:
 
-- EAC Core 1.6.0,
+- EAC Core 1.6.1,
 - Contract Configurator,
 - and the normal EAC Core dependency on HarmonyKSP / Harmony2.
 
@@ -343,7 +343,7 @@ Kerbal Changelog is optional.
 ### EAC Core
 
 1. Install HarmonyKSP / Harmony2.
-2. Download the EAC Core 1.6.0 release.
+2. Download the EAC Core 1.6.1 release.
 3. Copy the included `GameData/EAC/` folder into the KSP `GameData/` directory.
 4. Start KSP and open a save.
 5. Review EAC settings under Difficulty Options before starting a long career save.
@@ -364,9 +364,9 @@ Kerbal Space Program/
 
 Install this package only when Contract Configurator is installed.
 
-1. Install EAC Core 1.6.0.
+1. Install EAC Core 1.6.1.
 2. Install Contract Configurator.
-3. Copy the EAC Contract Configuration 1.6.0 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
+3. Copy the EAC Contract Configuration 1.6.1 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
 4. Confirm that `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 5. **Do not rename any DLL.**
 
@@ -421,42 +421,43 @@ Configurable areas include:
 - Badass progression.
 - Starting crew setup.
 - Contract Configurator final exam behavior when the EAC Contract Configuration add-on is installed.
-- External EAC data storage and retired/lost roster archiving.
+- External EAC History/Record data storage. Lost/Retired external roster archiving is disabled in 1.6.1.
 - Debug and verbose logging.
 
 Settings are persisted with the career and survive reloads.
 
 ### External EAC Data Storage
 
-EAC 1.6 can optionally move growing EAC-owned career data out of `persistent.sfs`.
+EAC 1.6.1 can optionally move growing **EAC-owned History/Record data** out of `persistent.sfs`.
 
-For new careers, external data storage is **OFF by default**. EAC can show a one-time informational message recommending it for long-running careers.
+For new careers, external History/Record storage is **OFF by default**. EAC can show a one-time informational message recommending it for long-running careers.
 
-When enabled, EAC stores its external data under the current save folder, for example:
+When enabled, EAC stores its external History/Record data under the current save folder, for example:
 
 ```text
 saves/<save>/EAC/
   data/
     revisions/
-  roster-archive.cfg
   HallPortraits/
 ```
 
 The external datastore can contain EAC-owned per-Kerbal lifecycle and historical information, while the KSP save retains a small revision reference.
 
-External retired/lost roster archiving is a separate option. When enabled, eligible retired/lost stock Kerbal roster records can be archived outside `persistent.sfs` and rehydrated when the save is loaded.
+**EAC 1.6.1 disables external Lost/Retired stock-roster archiving.** Retired and Lost Kerbals remain in KSP's normal `persistent.sfs` roster. This avoids the 1.6.0 post-save path that reloaded, stripped, and rewrote the entire save after KSP had already saved it.
 
-Safeguards include:
+When upgrading a 1.6.0 career that used Lost/Retired external archiving, EAC 1.6.1 restores the legacy archived Kerbals to the stock roster once. After the migration is saved, later starts use the normal stock roster and do not repeat the old archive/rehydration cycle.
+
+Safeguards for EAC-owned external History/Record data include:
 
 - External data is written and validated before EAC relies on it.
 - If a required external write fails, EAC can fall back to embedding EAC records in the KSP save.
-- Migration between embedded and external EAC data is reversible.
+- Migration between embedded and external EAC History/Record data is reversible.
 - Unchanged EAC data reuses the existing revision instead of creating a new revision on every save.
 - EAC protects revisions referenced by existing `.sfs` files.
-- Old unreferenced revisions/archive payloads are cleaned up conservatively.
+- Old unreferenced History/Record revisions are cleaned up conservatively.
 - Additional recent unreferenced safety copies are retained.
 
-Because external storage changes where authoritative EAC information is stored, include the save's `EAC` folder when backing up or transferring an externally stored career.
+Because external History/Record storage changes where authoritative EAC information is stored, include the save's `EAC` folder when backing up or transferring an externally stored career.
 
 ## Save Data and Migration
 
@@ -485,7 +486,9 @@ Typical EAC record data can include:
 
 EAC 1.4 migrated older save data from the old `RosterRotationScenario` name to `EACScenario`.
 
-If EAC finds legacy data-bearing save information, it backs up the persistent file before cleanup and shows a Space Center notice. Empty legacy scenario stubs are removed silently to avoid future confusion. In EAC 1.6.0, this legacy cleanup is invoked through EAC's existing guarded save callback rather than a separate startup-time save-event subscription.
+If EAC finds legacy data-bearing save information, it backs up the persistent file before cleanup and shows a Space Center notice. Empty legacy scenario stubs are removed silently to avoid future confusion. The legacy cleanup uses EAC's existing guarded save callback rather than a separate startup-time save-event subscription.
+
+EAC 1.6.1 also migrates any Lost/Retired roster archive references created by 1.6.0 back into the stock KSP roster. This is a one-time compatibility migration; 1.6.1 does not create new external Lost/Retired roster archives.
 
 If manually editing saves or external EAC data, make a backup first.
 
@@ -500,7 +503,7 @@ When external storage is enabled, back up both the `.sfs` file and the save's `E
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
 - Contract Configurator is optional and is not required by EAC Core.
 - Final exam contract mode requires the separate, matching-version EAC Contract Configuration package and Contract Configurator.
-- EAC Core 1.6.0 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
+- EAC Core 1.6.1 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
 - The EAC Contract Configuration package ships the active `EAC_CCBridge.dll` and must not be installed without Contract Configurator.
 - Custom calendar support is designed for stock calendars and calendar providers used by setups such as Kronometer, JNSQ, and rescaled Kopernicus systems.
 - Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
@@ -524,7 +527,7 @@ If Astronaut Complex UI oddities appear, check for:
 - Suggested Next Crew is advisory-only. It does not auto-populate stock crew slots.
 - Legacy KSP career history is not always complete. EAC imports historical Service Record information conservatively and does not invent Program Firsts when stock data cannot identify them reliably.
 - Program Firsts are currently finalized through EAC's recovery/service-history path. A future enhancement may record major historical events at the exact time they occur.
-- The legacy `RosterRotationScenario` cleanup callback has been hardened and current 1.6.0 saves have been regression-tested without the previous subscription warning. A true legacy-save upgrade test is still recommended before release when an older EAC save is available.
+- The legacy `RosterRotationScenario` cleanup callback remains backward-compatibility code. EAC 1.6.1 also includes a one-time migration for Lost/Retired roster archive references created by 1.6.0.
 
 ## Troubleshooting
 
@@ -552,14 +555,13 @@ NullReferenceException
 Exception
 ```
 
-Useful external-data search terms include:
+Useful external-data and 1.6.1 migration search terms include:
 
 ```text
 external data revision
 Reused external data revision
-RosterArchive
-Archive cleanup
-rehydrat
+1.6.1 migration
+legacy archive
 ```
 
 ### Verbose Logging
@@ -572,7 +574,7 @@ Use verbose logging only while troubleshooting because it can create more log ou
 
 Check that:
 
-- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.0.
+- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.1.
 - Contract Configurator is installed.
 - `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 - No stale `EAC_CCBridge.dll.disabled` from an older 1.4.x-or-earlier installation remains.
@@ -586,10 +588,11 @@ Check that:
 Check that:
 
 - the career's `saves/<save>/EAC/` folder was copied along with the `.sfs`,
-- the referenced revision still exists under `EAC/data/revisions/`,
-- `roster-archive.cfg` is present when retired/lost roster archiving is enabled,
+- the referenced History/Record revision still exists under `EAC/data/revisions/`,
 - the EAC data-storage setting matches the intended configuration,
 - `KSP.log` does not show external-data validation or load errors.
+
+Lost/Retired external roster archiving is not used by EAC 1.6.1. If upgrading from 1.6.0, check the log for the one-time 1.6.1 legacy archive migration instead of requiring `roster-archive.cfg` for continued operation.
 
 Do not delete the external EAC directory from a career that currently references external data unless you have a known-good backup.
 
@@ -617,7 +620,7 @@ A ZIP file in `GameData` should not trigger delegation by itself. The mod assemb
 
 ## Packaging Checklist
 
-### EAC Core 1.6.0
+### EAC Core 1.6.1
 
 The core release should include at least:
 
@@ -640,7 +643,7 @@ GameData/EAC/Craft/
 GameData/EAC/Scenarios/
 ```
 
-### EAC Contract Configuration 1.6.0
+### EAC Contract Configuration 1.6.1
 
 The optional add-on should include its bridge and Contract Configurator content:
 
