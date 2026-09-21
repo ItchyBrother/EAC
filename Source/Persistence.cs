@@ -191,7 +191,7 @@ namespace RosterRotation
                 // unknown rather than being fabricated.
                 EACCareerHistory.SyncAllAvailableCrew();
                 RosterRotationState.InvalidateRetiredCache();
-                RRLog.Info($"Loaded {RosterRotationState.Records.Count} kerbal records (including external EAC data/roster archive).");
+                RRLog.Info($"Loaded {RosterRotationState.Records.Count} kerbal records (including external EAC history data).");
             }
             catch (Exception ex) { RRLog.Error($"LoadFromScenarioNode failed ({source}): {ex}"); }
         }

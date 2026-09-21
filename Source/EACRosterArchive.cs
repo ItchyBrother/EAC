@@ -78,9 +78,36 @@ namespace RosterRotation
             return ActiveReferences.Count;
         }
 
+        internal static int ActiveReferenceCount
+        {
+            get { return ActiveReferences.Count; }
+        }
+
+        internal static bool ActiveReferencesResolvedInLiveRoster()
+        {
+            if (ActiveReferences.Count == 0) return true;
+
+            Game game = HighLogic.CurrentGame;
+            KerbalRoster roster = game != null ? game.CrewRoster : null;
+            if (roster == null) return false;
+
+            foreach (KeyValuePair<string, string> reference in ActiveReferences)
+                if (FindRosterKerbal(roster, reference.Value) == null)
+                    return false;
+
+            return true;
+        }
+
+        internal static void ClearActiveReferences()
+        {
+            ActiveReferences.Clear();
+        }
+
         internal static int MergeArchivedRecordsIntoState(ConfigNode referenceSource = null)
         {
-            if (!RosterRotationState.ExternalRosterArchiveEnabled) return 0;
+            // 1.6.1 hotfix: legacy archive references must still be readable so saves
+            // created by 1.6.0 can migrate their retired/lost Kerbals back into the
+            // stock roster. Do not gate restoration on the now-disabled archive option.
             if (referenceSource != null) CaptureActiveReferences(referenceSource);
             if (ActiveReferences.Count == 0) return 0;
 
@@ -121,7 +148,9 @@ namespace RosterRotation
 
         internal static int RestoreArchivedKerbalsToRoster()
         {
-            if (!RosterRotationState.ExternalRosterArchiveEnabled || ActiveReferences.Count == 0) return 0;
+            // 1.6.1 hotfix: restore any legacy 1.6.0 archive references regardless of
+            // the current setting. The archive feature is no longer used for new saves.
+            if (ActiveReferences.Count == 0) return 0;
 
             Game game = HighLogic.CurrentGame;
             KerbalRoster roster = game != null ? game.CrewRoster : null;
@@ -314,6 +343,16 @@ namespace RosterRotation
                 changed = true;
             }
             return changed;
+        }
+
+        internal static bool DisableArchiveSettingInSaveTree(ConfigNode saveRoot)
+        {
+            ConfigNode eacRoot = FindEacDataRoot(saveRoot);
+            ConfigNode settings = eacRoot != null ? eacRoot.GetNode("Settings") : null;
+            if (settings == null) return false;
+
+            SetOrAddValue(settings, "externalRosterArchiveEnabled", bool.FalseString);
+            return true;
         }
 
         internal static bool SaveRootLooksComplete(ConfigNode root)
@@ -843,10 +882,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.MainMenu, true)]
     internal class EACRosterArchiveService : MonoBehaviour
     {
-        private bool _postSavePersistentPassQueued;
-        private string _postSavePersistentPath;
-        private long _preSavePersistentTicks;
-        private long _preSavePersistentLength;
+        private bool _legacyArchiveMigrationReady;
 
         private void Awake()
         {
@@ -863,7 +899,8 @@ namespace RosterRotation
 
         private void OnGameStateLoad(ConfigNode root)
         {
-            EACRosterArchive.CaptureActiveReferences(root);
+            int references = EACRosterArchive.CaptureActiveReferences(root);
+            _legacyArchiveMigrationReady = references == 0;
             StartCoroutine(RestoreAfterLoad());
         }
 
@@ -876,10 +913,42 @@ namespace RosterRotation
                 yield return null;
                 if (HighLogic.CurrentGame != null && HighLogic.CurrentGame.CrewRoster != null)
                 {
-                    EACRosterArchive.MergeArchivedRecordsIntoState();
-                    EACRosterArchive.RestoreArchivedKerbalsToRoster();
+                    int references = EACRosterArchive.ActiveReferenceCount;
+                    int merged = EACRosterArchive.MergeArchivedRecordsIntoState();
+                    int restored = EACRosterArchive.RestoreArchivedKerbalsToRoster();
+                    _legacyArchiveMigrationReady = EACRosterArchive.ActiveReferencesResolvedInLiveRoster();
+
+                    if (references > 0)
+                    {
+                        if (_legacyArchiveMigrationReady)
+                        {
+                            // Once every referenced Kerbal is back in the stock roster,
+                            // normal KSP saves can carry them permanently. The next save
+                            // removes the tiny archive reference nodes and turns the old
+                            // option off without touching persistent.sfs a second time.
+                            RosterRotationState.ExternalRosterArchiveEnabled = false;
+                            RRLog.Info("[RosterArchive] 1.6.1 migration restored legacy archive references to the stock roster. "
+                                + "MergedRecords=" + merged + ", RehydratedKerbals=" + restored
+                                + ". Retired/lost external roster storage is now disabled.");
+                        }
+                        else
+                        {
+                            RRLog.Warn("[RosterArchive] 1.6.1 could not fully restore all legacy archive references. "
+                                + "Archive references will be preserved for safety; no persistent.sfs rewrite will run.");
+                        }
+                    }
+                    else
+                    {
+                        RosterRotationState.ExternalRosterArchiveEnabled = false;
+                    }
                     yield break;
                 }
+            }
+
+            if (EACRosterArchive.ActiveReferenceCount > 0)
+            {
+                RRLog.Warn("[RosterArchive] 1.6.1 migration could not access CrewRoster during load. "
+                    + "Legacy archive references will be preserved for safety.");
             }
         }
 
@@ -888,114 +957,32 @@ namespace RosterRotation
             if (root == null) return;
 
             // Reuse this already-established save callback for one-time migration of
-            // pre-EACScenario saves.  A separate migration subscriber proved unreliable
-            // in some KSP startup/scene-order combinations even though this service's
-            // MainMenu subscription is stable.
+            // pre-EACScenario saves.
             EACScenarioMigrationCleaner.OnGameStateSave(root);
 
-            if (!RosterRotationState.ExternalRosterArchiveEnabled)
+            int references = EACRosterArchive.ActiveReferenceCount;
+            bool safeToEmbed = references == 0
+                || _legacyArchiveMigrationReady
+                || EACRosterArchive.ActiveReferencesResolvedInLiveRoster();
+
+            if (!safeToEmbed)
             {
-                EACRosterArchive.ClearSaveReferences(root);
+                // Do not strip, reload, or rewrite persistent.sfs. Keep the legacy refs
+                // until a later load can successfully rehydrate every archived Kerbal.
+                RRLog.Warn("[RosterArchive] 1.6.1 preserved legacy archive references because not all archived Kerbals "
+                    + "are present in the live stock roster. No post-save persistent.sfs pass was performed.");
                 return;
             }
 
-            if (EACRosterArchive.SaveRootLooksComplete(root))
+            EACRosterArchive.ClearSaveReferences(root);
+            EACRosterArchive.DisableArchiveSettingInSaveTree(root);
+            RosterRotationState.ExternalRosterArchiveEnabled = false;
+
+            if (references > 0)
             {
-                int archived;
-                EACRosterArchive.ArchiveAndStrip(root, "save", out archived);
-                return;
-            }
-
-            // KSP can fire onGameStateSave with a partial tree. The old cleanup code
-            // worked around this by editing persistent.sfs after the save, but doing that
-            // unconditionally can target the wrong file for quicksaves/named saves. Capture
-            // the current persistent file stamp and only run the fallback if persistent.sfs
-            // itself demonstrably changed after this callback.
-            QueuePostSavePersistentPass();
-            RRLog.Verbose("[RosterArchive] Save callback tree incomplete; queued a guarded persistent.sfs archive pass.");
-        }
-
-        private void QueuePostSavePersistentPass()
-        {
-            string path = EACRosterArchive.PersistentSavePath;
-            if (string.IsNullOrEmpty(path)) return;
-
-            _postSavePersistentPath = path;
-            CaptureFileStamp(path, out _preSavePersistentTicks, out _preSavePersistentLength);
-            if (_postSavePersistentPassQueued) return;
-
-            _postSavePersistentPassQueued = true;
-            StartCoroutine(PostSavePersistentPass());
-        }
-
-        private IEnumerator PostSavePersistentPass()
-        {
-            // Give KSP time to finish writing the target file. A persistent save normally
-            // changes its mtime immediately; quicksaves/named saves leave persistent.sfs
-            // untouched and therefore fail the guard below.
-            yield return null;
-            yield return null;
-            yield return new WaitForSecondsRealtime(0.25f);
-
-            try
-            {
-                RunPostSavePersistentPass();
-            }
-            catch (Exception ex)
-            {
-                RRLog.Error("[RosterArchive] Post-save persistent archive pass failed: " + ex);
-            }
-
-            _postSavePersistentPassQueued = false;
-        }
-
-        private void RunPostSavePersistentPass()
-        {
-            if (!RosterRotationState.ExternalRosterArchiveEnabled) return;
-            string path = _postSavePersistentPath;
-            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
-
-            long afterTicks;
-            long afterLength;
-            CaptureFileStamp(path, out afterTicks, out afterLength);
-            if (afterTicks == _preSavePersistentTicks && afterLength == _preSavePersistentLength)
-            {
-                RRLog.Verbose("[RosterArchive] persistent.sfs did not change; post-save fallback skipped (likely quicksave/named save).");
-                return;
-            }
-
-            ConfigNode diskRoot = ConfigNode.Load(path);
-            if (diskRoot == null || !EACRosterArchive.SaveRootLooksComplete(diskRoot))
-            {
-                RRLog.Warn("[RosterArchive] Changed persistent.sfs could not be loaded as a complete save; post-save archival skipped.");
-                return;
-            }
-
-            int archived;
-            bool changed = EACRosterArchive.ArchiveAndStrip(diskRoot, "post-save-persistent", out archived);
-            if (!changed) return;
-
-            if (EACRosterArchive.SavePersistentTreeSafely(diskRoot, path))
-                RRLog.Info("[RosterArchive] Post-save persistent.sfs archive pass wrote " + archived + " archived Kerbal(s).");
-            else
-                RRLog.Error("[RosterArchive] Post-save archival prepared changes but persistent.sfs rewrite failed; the original file was left in place when possible.");
-        }
-
-        private static void CaptureFileStamp(string path, out long ticks, out long length)
-        {
-            ticks = 0;
-            length = -1;
-            try
-            {
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
-                var info = new FileInfo(path);
-                ticks = info.LastWriteTimeUtc.Ticks;
-                length = info.Length;
-            }
-            catch
-            {
-                ticks = 0;
-                length = -1;
+                RRLog.Info("[RosterArchive] 1.6.1 migrated " + references
+                    + " legacy roster archive reference(s) back to persistent.sfs; future saves keep retired/lost Kerbals in the stock roster.");
+                EACRosterArchive.ClearActiveReferences();
             }
         }
     }

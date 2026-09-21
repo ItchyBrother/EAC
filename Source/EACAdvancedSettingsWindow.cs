@@ -21,7 +21,6 @@ namespace RosterRotation
         private bool _notifyBadass;
         private bool _autoCleanup;
         private bool _externalDataStorage;
-        private bool _externalRosterArchive;
         private bool _verboseUi;
         private bool _verboseAging;
 
@@ -107,7 +106,6 @@ namespace RosterRotation
             _notifyBadass = RosterRotationState.BadassNotificationsEnabled;
             _autoCleanup = RosterRotationState.AutoCleanupUnreferencedKerbals;
             _externalDataStorage = RosterRotationState.ExternalDataStorageEnabled;
-            _externalRosterArchive = RosterRotationState.ExternalRosterArchiveEnabled;
             _verboseUi = RosterRotationState.VerboseLogging;
             _verboseAging = RosterRotationState.VerboseAgeLogging;
 
@@ -162,10 +160,9 @@ namespace RosterRotation
             // as the user's visible indication that the command was accepted/run.
             RosterRotationState.ExternalDataStorageEnabled = _externalDataStorage;
             if (_externalDataStorage) RosterRotationState.ExternalStoragePromptShown = true;
-            RosterRotationState.ExternalRosterArchiveEnabled = _externalRosterArchive;
             RosterRotationState.AutoCleanupUnreferencedKerbals = false;
             _autoCleanup = false;
-            if (runAutoCleanupNow && !_externalRosterArchive)
+            if (runAutoCleanupNow && !RosterRotationState.ExternalRosterArchiveEnabled)
                 RetiredKerbalCleanupService.RequestOneShotCleanup("advanced settings Apply");
             RosterRotationState.VerboseLogging = _verboseUi;
             RosterRotationState.VerboseAgeLogging = _verboseAging;
@@ -235,15 +232,16 @@ namespace RosterRotation
             GUILayout.Label("External storage is opt-in. Disabling it is reversible: the next save embeds the EAC records back into the .sfs.");
 
             GUILayout.Space(4f);
-            _externalRosterArchive = GUILayout.Toggle(_externalRosterArchive, "Also store retired/lost stock roster outside persistent.sfs");
-            GUILayout.Label("When enabled, eligible retired/lost KERBAL nodes move to saves/<save>/EAC/roster-archive.cfg and are rehydrated when a referenced save loads.");
+            GUILayout.Label("Retired/lost stock roster external archive: disabled in EAC 1.6.1");
+            GUILayout.Label("Retired/lost KERBAL nodes now remain in persistent.sfs. Existing EAC 1.6 archive references are rehydrated once and migrated back into the stock roster, avoiding the post-save persistent.sfs rewrite that caused long scene-transition stalls.");
 
             bool cleanupGuiEnabled = GUI.enabled;
-            GUI.enabled = cleanupGuiEnabled && !_externalRosterArchive;
+            bool legacyArchiveMigrationPending = RosterRotationState.ExternalRosterArchiveEnabled;
+            GUI.enabled = cleanupGuiEnabled && !legacyArchiveMigrationPending;
             _autoCleanup = GUILayout.Toggle(_autoCleanup, "Legacy destructive cleanup now");
             GUI.enabled = cleanupGuiEnabled;
-            GUILayout.Label(_externalRosterArchive
-                ? "Legacy deletion is disabled while external roster storage is enabled."
+            GUILayout.Label(legacyArchiveMigrationPending
+                ? "Legacy roster-archive migration is still pending; destructive cleanup is disabled until all archived Kerbals are safely restored."
                 : "One-shot legacy cleanup permanently deletes eligible unreferenced retired/dead Kerbals. Back up persistent.sfs first.");
 
             DrawHeading("Veterans, suits, and starting crew");
