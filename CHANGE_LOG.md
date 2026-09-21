@@ -1,6 +1,27 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-0921: EAC v1.6.2 — Time Warp / External History Storage Performance Hotfix for KSP >= 1.12.x
+
+This hotfix addresses a second performance issue found after the 1.6.1 release. During long high-rate time warps, changing EAC History/Record data could create new external revisions frequently. EAC then performed a full reference scan of the save folder immediately after each new revision, producing repeated multi-second pauses.
+
+#### External History/Record cleanup hotfix
+- New external History/Record revisions are still written immediately when EAC data changes.
+- Removed synchronous external-revision cleanup from the save callback.
+- Revision cleanup is now deferred until save activity has been idle for 15 real-time seconds.
+- Cleanup does not run while KSP time warp is active.
+- Full revision cleanup is throttled to no more than once every five real-time minutes.
+- Pending cleanup is cleared when changing careers so housekeeping from one save cannot carry into another.
+- The conservative reference scan and safety-copy rules are otherwise unchanged.
+
+#### Applicant slot display
+- When KSP does not expose a finite Astronaut Complex crew cap and EAC uses `Int32.MaxValue` as its internal fallback, the Applicants display now shows `Unlimited` instead of `2147483647`.
+- This is a display-only change; hiring/capacity logic is unchanged.
+
+#### Packaging
+- Updated EAC and EAC_CCBridge version reporting to 1.6.2.
+- EAC Core and EAC Contract Configuration should use matching 1.6.2 versions.
+
 ### 2026-0921: EAC v1.6.1 — Lost/Retired Roster Archive Performance Hotfix for KSP >= 1.12.x
 
 This hotfix addresses severe post-save and facility-transition pauses caused by the EAC 1.6.0 Lost/Retired external roster archive path. Testing on KSP 1.12.5 isolated recurring 10–16 second stalls to the post-save archive pass.
