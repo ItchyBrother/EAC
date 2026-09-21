@@ -1,4 +1,4 @@
-// EAC - Enhanced Astronaut Complex - Mod.Drawing.cs
+﻿// EAC - Enhanced Astronaut Complex - Mod.Drawing.cs
 // Partial class: all OnGUI drawing methods for the KSC window and AC overlay.
 
 using System;
@@ -150,7 +150,7 @@ namespace RosterRotation
             GUILayout.Space(6);
             DrawHRule();
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Slots: {activeCount} / {maxCrew}{(atCap ? " FULL" : "")}", GUILayout.Width(260));
+            GUILayout.Label($"Slots: {activeCount} / {(maxCrew == int.MaxValue ? "Unlimited" : maxCrew.ToString())}{(atCap ? " FULL" : "")}", GUILayout.Width(260));
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Reject All Applicants", GUILayout.Width(180)))
             {
@@ -470,7 +470,7 @@ namespace RosterRotation
             GUILayout.Space(6);
             DrawHRule();
             GUILayout.BeginHorizontal();
-            GUILayout.Label($"Slots: {activeCount} / {maxCrew}{(atCap ? " FULL" : "")}", GUILayout.Width(260));
+            GUILayout.Label($"Slots: {activeCount} / {(maxCrew == int.MaxValue ? "Unlimited" : maxCrew.ToString())}{(atCap ? " FULL" : "")}", GUILayout.Width(260));
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("Reject All Applicants", GUILayout.Width(180)))
             {
