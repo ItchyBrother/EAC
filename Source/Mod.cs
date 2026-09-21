@@ -1,4 +1,4 @@
-// EAC - Enhanced Astronaut Complex - Mod.cs
+﻿// EAC - Enhanced Astronaut Complex - Mod.cs
 // Core shared state, enums, flight tracker, and KSC addon lifecycle.
 // Large sections of RosterRotationKSCUI live in companion partial-class files:
 //   Mod.FlightTracker.cs  — FlightTracker reflection bridge
@@ -604,7 +604,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.6.1";
+        private const string ModVersion  = "1.6.2";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;

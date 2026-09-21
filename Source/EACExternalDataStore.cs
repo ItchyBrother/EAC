@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -24,6 +24,18 @@ namespace RosterRotation
         private const string RevisionValue = "externalDataRevision";
         private const string ContentHashValue = "contentHash";
         private const int UnreferencedSafetyRevisions = 3;
+
+        // Revision files are tiny compared with persistent.sfs, so cleanup does not
+        // need to happen in the save callback.  Large careers can contain many/large
+        // .sfs files and scanning all of them synchronously caused multi-second stalls,
+        // especially while high-rate time warp generated frequent EAC record changes.
+        private const float DeferredCleanupIdleSeconds = 15f;
+        private const float DeferredCleanupMinimumIntervalSeconds = 300f;
+
+        private static bool _cleanupPending;
+        private static long _cleanupPendingRevision;
+        private static float _cleanupNotBeforeRealtime;
+        private static float _lastCleanupRealtime = -100000f;
 
         // ScenarioModule save nodes are sometimes reconstructed without carrying the
         // previous pointer. Keep the loaded/written revision in memory as a dedupe hint;
@@ -185,7 +197,7 @@ namespace RosterRotation
                 _runtimeContentHash = contentHash;
                 RRLog.Info("[EAC] Wrote external data revision " + revision + " (" + RosterRotationState.Records.Count + " Kerbal records).");
 
-                CleanupUnreferencedRevisions(revision);
+                RequestDeferredCleanup(revision);
                 return true;
             }
             catch (Exception ex)
@@ -203,6 +215,66 @@ namespace RosterRotation
             if (scenarioRoot == null) return;
             scenarioRoot.RemoveValue(VersionValue);
             scenarioRoot.RemoveValue(RevisionValue);
+        }
+
+        private static void RequestDeferredCleanup(long currentRevision)
+        {
+            if (currentRevision <= 0) return;
+
+            _cleanupPending = true;
+            _cleanupPendingRevision = currentRevision;
+
+            // Every new revision restarts the quiet-period timer.  During accelerated
+            // time warp this means cleanup naturally waits until revision churn stops.
+            _cleanupNotBeforeRealtime = Time.realtimeSinceStartup + DeferredCleanupIdleSeconds;
+
+            RRLog.Verbose("[EAC] External revision cleanup deferred until save activity is idle.");
+        }
+
+        /// <summary>
+        /// Called by a lightweight per-scene pump. Cleanup is intentionally kept out
+        /// of save callbacks and is never run while KSP time warp is active.
+        /// </summary>
+        internal static void PumpDeferredCleanup()
+        {
+            if (!_cleanupPending) return;
+
+            float now = Time.realtimeSinceStartup;
+            if (now < _cleanupNotBeforeRealtime) return;
+
+            // Do not interrupt accelerated time progression.  Keep pushing the quiet
+            // window forward until the player has returned to 1x time.
+            try
+            {
+                if (TimeWarp.CurrentRateIndex > 0)
+                {
+                    _cleanupNotBeforeRealtime = now + DeferredCleanupIdleSeconds;
+                    return;
+                }
+            }
+            catch
+            {
+                // If the TimeWarp singleton is unavailable during a scene transition,
+                // defer rather than risk doing filesystem housekeeping at that moment.
+                _cleanupNotBeforeRealtime = now + DeferredCleanupIdleSeconds;
+                return;
+            }
+
+            // Cleanup is housekeeping, not gameplay-critical.  At most one full .sfs
+            // reference scan is allowed every five real-time minutes.
+            float nextAllowed = _lastCleanupRealtime + DeferredCleanupMinimumIntervalSeconds;
+            if (now < nextAllowed)
+            {
+                _cleanupNotBeforeRealtime = nextAllowed;
+                return;
+            }
+
+            long revision = _cleanupPendingRevision;
+            _cleanupPending = false;
+            _lastCleanupRealtime = now;
+
+            RRLog.Verbose("[EAC] Running deferred external revision cleanup after save activity settled.");
+            CleanupUnreferencedRevisions(revision);
         }
 
         /// <summary>
@@ -356,6 +428,12 @@ namespace RosterRotation
             _runtimeSaveKey = key;
             _runtimeRevision = 0;
             _runtimeContentHash = null;
+
+            // Never carry housekeeping queued for one career into another save.
+            _cleanupPending = false;
+            _cleanupPendingRevision = 0;
+            _cleanupNotBeforeRealtime = 0f;
+            _lastCleanupRealtime = -100000f;
         }
 
         private static string GetRevisionPath(long revision)
@@ -381,6 +459,19 @@ namespace RosterRotation
         {
             long parsed;
             return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed) ? parsed : fallback;
+        }
+    }
+
+    /// <summary>
+    /// Lightweight main-thread housekeeping pump for deferred external revision cleanup.
+    /// The datastore itself decides whether cleanup is due and whether time warp permits it.
+    /// </summary>
+    [KSPAddon(KSPAddon.Startup.EveryScene, false)]
+    internal sealed class EACExternalDataCleanupPump : MonoBehaviour
+    {
+        private void Update()
+        {
+            EACExternalDataStore.PumpDeferredCleanup();
         }
     }
 
