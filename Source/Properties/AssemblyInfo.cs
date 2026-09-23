@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 
@@ -14,9 +14,9 @@ using System.Runtime.CompilerServices;
 [assembly: ComVisible(false)]
 [assembly: Guid("7f0c632f-0d4e-4f76-b767-b6b9fbbca0de")]
 
-[assembly: AssemblyVersion("1.5.0")]
-[assembly: AssemblyFileVersion("1.5.0")]
-[assembly: AssemblyInformationalVersion("1.5.0")]
+[assembly: AssemblyVersion("1.6.3")]
+[assembly: AssemblyFileVersion("1.6.3")]
+[assembly: AssemblyInformationalVersion("1.6.3")]
 
 [assembly: InternalsVisibleTo("EAC.Tests")]
 [assembly: InternalsVisibleTo("RosterRotation.Tests")]
