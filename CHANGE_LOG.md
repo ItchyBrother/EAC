@@ -1,6 +1,45 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-0922: EAC v1.6.3 — Time-Warp Save Coalescing and Hybrid Cold Roster Archive for KSP >= 1.12.x
+
+This update addresses the smaller periodic hitches that could remain during long high-rate time warps after the 1.6.2 external-revision cleanup fix and introduces a redesigned Lost/Retired cold archive that avoids the 1.6.0 rehydrate/strip/rewrite cycle.
+
+#### Time-warp save coalescing
+- Normal deferred EAC saves are now held while KSP is above 1x time warp.
+- Multiple EAC state changes during a warp are coalesced into the same pending save.
+- The pending save flushes after KSP returns to 1x, avoiding repeated full `persistent.sfs` writes during long warps.
+- Critical `RequestImmediateSave()` paths are unchanged and still save immediately during time warp, including assigned mission deaths and DeepFreeze thaw fatalities.
+- Added verbose logging when a normal EAC save is first deferred by active time warp so the behavior can be verified from `KSP.log`.
+- The 1.6.2 deferred/throttled external History/Record revision cleanup remains unchanged.
+
+#### Hybrid Lost/Retired cold roster archive
+- Fixed the EAC Space Center Retired/Lost tabs so they merge cold-roster index entries as display-only `(Archive)` rows instead of showing only Kerbals still present in the live stock roster.
+- Added a new **opt-in, default-OFF, reversible** cold-roster archive under `saves/<save>/EAC/cold-roster` without restoring the 1.6.0 post-save rewrite design.
+- Enabling the cold archive now creates `cold-roster/index.cfg` immediately, even when no Kerbal is currently eligible, so the enabled state is visible on disk.
+- Cold-archive save scans now emit an aggregate diagnostic summary (stock/retired/dead/eligible/deferred/failure/archive counts) when the result changes.
+- Fixed cold-archive candidate discovery when KSP's `onGameStateSave` callback tree does not yet contain `ROSTER`: EAC now enumerates the live `CrewRoster` and serializes candidates with `ProtoCrewMember.Save()`.
+- After one or more Kerbals are cold-archived, EAC requests one ordinary follow-up save so the pruned live roster is guaranteed to be persisted without any post-save `persistent.sfs` rewrite.
+- Cold-archived retirees continue through EAC aging: each new birthday advances `LastAgedYears` and uses the same retired old-age death probabilities as live retirees.
+- When a cold retiree dies, EAC atomically updates the archived KERBAL to `Dead`, refreshes its archived EAC record, and moves the cold index entry from `retired` to `lost` so reversal cannot resurrect the Kerbal.
+- On load, cold death lifecycle data is reconciled back into EAC records so a death remains durable even if time-warp save coalescing delayed the normal persistent/history save before an interrupted session.
+- A stock `Dead` KERBAL is sufficient for permanent-Lost eligibility; an EAC `DeathUT` is retained when available but is no longer required.
+- Recallable retired Kerbals remain in KSP's normal stock `CrewRoster` and `persistent.sfs`, preserving normal EAC Recall behavior.
+- Retired Kerbals are cold-archive eligible only after their effective recall stars reach 0.
+- Permanently `Dead` Kerbals can be cold-archived; `Missing` Kerbals are deliberately kept in the stock roster because stock KSP can use that state for respawnable crew.
+- DeepFreeze crew, Crew R&R vacation crew, assigned/live-vessel crew, and Kerbals still referenced by an active stock contract are kept in the stock roster.
+- EAC writes and verifies an immutable per-Kerbal payload and cold-roster index before removing the stock KERBAL record during the normal KSP save callback.
+- While enabled, the new cold archive never reloads/re-writes `persistent.sfs` after KSP saves and does not globally rehydrate archived Kerbals during normal loads.
+- The Astronaut Complex Lost and Retired tabs can render archived Kerbals as display-only rows from the small cold-roster index; archived retirees do not expose Recall controls.
+- EAC History/Record data remains available for archived Kerbals so Hall of History and historical career information are preserved.
+- Disabling the option restores cold-archived Kerbals to the live stock roster and requests a normal save so they are embedded back into `persistent.sfs`.
+- Cold files are retained as safety copies until a later game load verifies those Kerbals were actually restored by the stock save; only then are the external cold-archive files removed.
+- The legacy 1.6.0 `roster-archive.cfg` path remains migration-only; existing legacy references still use the one-time 1.6.1 compatibility restoration before the new archive can take over.
+
+#### Packaging
+- Updated EAC and EAC_CCBridge version reporting to 1.6.3.
+- EAC Core and EAC Contract Configuration should use matching 1.6.3 versions.
+
 ### 2026-0921: EAC v1.6.2 — Time Warp / External History Storage Performance Hotfix for KSP >= 1.12.x
 
 This hotfix addresses a second performance issue found after the 1.6.1 release. During long high-rate time warps, changing EAC History/Record data could create new external revisions frequently. EAC then performed a full reference scan of the save folder immediately after each new revision, producing repeated multi-second pauses.
