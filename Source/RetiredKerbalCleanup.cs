@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -32,12 +32,13 @@ namespace RosterRotation
 
         private static bool CleanupRequested
         {
-            // The external roster archive supersedes destructive cleanup. Keeping
-            // the legacy purge available only when archive storage is disabled
-            // prevents an event-order race from deleting a Kerbal before it is archived.
+            // Both the legacy 1.6.0 migration and the 1.6.3 cold archive supersede
+            // destructive cleanup. Never delete an eligible Kerbal while either archive
+            // path may need to preserve that Kerbal's stock payload.
             get
             {
                 return !RosterRotationState.ExternalRosterArchiveEnabled
+                    && !RosterRotationState.ColdRosterArchiveEnabled
                     && (RosterRotationState.AutoCleanupUnreferencedKerbals || _oneShotCleanupRequested);
             }
         }

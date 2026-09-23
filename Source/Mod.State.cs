@@ -1,4 +1,4 @@
-// EAC - Mod.State
+﻿// EAC - Mod.State
 // Extracted shared state and AC open cache from Mod.cs.
 
 using System;
@@ -176,9 +176,14 @@ namespace RosterRotation
         public static bool ExternalDataStorageEnabled = false;
         public static bool ExternalStoragePromptShown = false;
 
-        // Stock roster archival is a separate opt-in. It moves only eligible retired/lost
-        // KERBAL nodes outside persistent.sfs and rehydrates them when a save is loaded.
+        // Legacy 1.6.0 roster-archive flag. This is retained only so old save references
+        // can be migrated safely; new cold-archive storage never rehydrates globally.
         public static bool ExternalRosterArchiveEnabled = false;
+
+        // Hybrid cold roster archive. Recallable retired Kerbals remain in the stock roster.
+        // Permanently dead Kerbals and retired Kerbals whose effective recall stars reach 0
+        // may be archived once and removed from the live roster/save after safety checks.
+        public static bool ColdRosterArchiveEnabled = false;
         public static bool AutoCleanupUnreferencedKerbals = false;
         public static bool VerboseLogging    = false;
         public static bool VerboseAgeLogging = false;

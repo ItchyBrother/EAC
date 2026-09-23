@@ -604,7 +604,7 @@ namespace RosterRotation
     [KSPAddon(KSPAddon.Startup.SpaceCentre, false)]
     public partial class RosterRotationKSCUI : MonoBehaviour
     {
-        private const string ModVersion  = "1.6.2";
+        private const string ModVersion  = "1.6.3";
         private const string WindowTitle = "Enhanced Astronaut Complex v" + ModVersion;
 
         public static bool RetiredTabSelected;
@@ -673,6 +673,14 @@ namespace RosterRotation
         {
             public ProtoCrewMember Kerbal;
             public RosterRotationState.KerbalRecord Record;
+
+            // Cold-roster rows are display-only and deliberately do not create a
+            // ProtoCrewMember just to render the EAC Space Center window.
+            public bool ColdArchived;
+            public string DisplayName;
+            public string DisplayTrait;
+            public int DisplayLevel;
+
             public bool Retired;
             public bool HasFlown;
             public bool IsLost;

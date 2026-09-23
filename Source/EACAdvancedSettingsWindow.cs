@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 
 namespace RosterRotation
@@ -21,6 +21,7 @@ namespace RosterRotation
         private bool _notifyBadass;
         private bool _autoCleanup;
         private bool _externalDataStorage;
+        private bool _coldRosterArchive;
         private bool _verboseUi;
         private bool _verboseAging;
 
@@ -106,6 +107,7 @@ namespace RosterRotation
             _notifyBadass = RosterRotationState.BadassNotificationsEnabled;
             _autoCleanup = RosterRotationState.AutoCleanupUnreferencedKerbals;
             _externalDataStorage = RosterRotationState.ExternalDataStorageEnabled;
+            _coldRosterArchive = RosterRotationState.ColdRosterArchiveEnabled;
             _verboseUi = RosterRotationState.VerboseLogging;
             _verboseAging = RosterRotationState.VerboseAgeLogging;
 
@@ -147,6 +149,7 @@ namespace RosterRotation
 
             bool oldVerboseUi = RosterRotationState.VerboseLogging;
             bool oldVerboseAging = RosterRotationState.VerboseAgeLogging;
+            bool oldColdRosterArchive = RosterRotationState.ColdRosterArchiveEnabled;
             bool runAutoCleanupNow = _autoCleanup;
 
             RosterRotationState.BirthdayNotificationsEnabled = _notifyBirthdays;
@@ -160,9 +163,28 @@ namespace RosterRotation
             // as the user's visible indication that the command was accepted/run.
             RosterRotationState.ExternalDataStorageEnabled = _externalDataStorage;
             if (_externalDataStorage) RosterRotationState.ExternalStoragePromptShown = true;
+            RosterRotationState.ColdRosterArchiveEnabled = _coldRosterArchive;
+
+            // The cold archive is opt-in and reversible. Enabling creates the empty
+            // index immediately so the user has a visible confirmation of the feature
+            // even when no Kerbal is currently eligible. Disabling restores archived
+            // Kerbals before the normal save embeds them back into persistent.sfs.
+            if (_coldRosterArchive)
+            {
+                EACRosterArchive.EnsureColdArchiveInitialized(oldColdRosterArchive
+                    ? "advanced settings Apply"
+                    : "advanced settings enable");
+            }
+            else if (oldColdRosterArchive || EACRosterArchive.HasColdArchivedEntries())
+            {
+                EACRosterArchive.RestoreColdArchivedKerbalsToRoster("advanced settings disable");
+                if (!EACRosterArchive.HasColdArchivedEntries())
+                    EACRosterArchive.RemoveEmptyColdArchiveArtifacts("advanced settings disable");
+            }
+
             RosterRotationState.AutoCleanupUnreferencedKerbals = false;
             _autoCleanup = false;
-            if (runAutoCleanupNow && !RosterRotationState.ExternalRosterArchiveEnabled)
+            if (runAutoCleanupNow && !RosterRotationState.ExternalRosterArchiveEnabled && !RosterRotationState.ColdRosterArchiveEnabled)
                 RetiredKerbalCleanupService.RequestOneShotCleanup("advanced settings Apply");
             RosterRotationState.VerboseLogging = _verboseUi;
             RosterRotationState.VerboseAgeLogging = _verboseAging;
@@ -232,17 +254,22 @@ namespace RosterRotation
             GUILayout.Label("External storage is opt-in. Disabling it is reversible: the next save embeds the EAC records back into the .sfs.");
 
             GUILayout.Space(4f);
-            GUILayout.Label("Retired/lost stock roster external archive: disabled in EAC 1.6.1");
-            GUILayout.Label("Retired/lost KERBAL nodes now remain in persistent.sfs. Existing EAC 1.6 archive references are rehydrated once and migrated back into the stock roster, avoiding the post-save persistent.sfs rewrite that caused long scene-transition stalls.");
+            _coldRosterArchive = GUILayout.Toggle(_coldRosterArchive, "Cold-archive permanently lost and non-recallable retired Kerbals (opt-in)");
+            GUILayout.Label(_coldRosterArchive
+                ? "Cold roster archive is ON. EAC creates saves/<save>/EAC/cold-roster/index.cfg immediately. Recallable retirees remain in the stock roster. Stock Dead Kerbals and retirees whose effective recall stars reach 0 are archived once and removed from the live roster on a normal save after safety checks."
+                : "Cold roster archive is OFF. This option defaults OFF. If it was previously enabled, Apply restores archived Kerbals to the stock CrewRoster and the next normal save embeds them back into persistent.sfs.");
+            GUILayout.Label("Disabling is reversible and conservative: cold files are kept as safety copies until a later game load confirms the restored Kerbals are present in the stock save, then EAC removes those cold-archive files. Missing/respawnable Kerbals, DeepFreeze Kerbals, active vessel crew, and Kerbals referenced by an active stock contract are never cold-archived.");
 
             bool cleanupGuiEnabled = GUI.enabled;
             bool legacyArchiveMigrationPending = RosterRotationState.ExternalRosterArchiveEnabled;
-            GUI.enabled = cleanupGuiEnabled && !legacyArchiveMigrationPending;
+            GUI.enabled = cleanupGuiEnabled && !legacyArchiveMigrationPending && !_coldRosterArchive;
             _autoCleanup = GUILayout.Toggle(_autoCleanup, "Legacy destructive cleanup now");
             GUI.enabled = cleanupGuiEnabled;
             GUILayout.Label(legacyArchiveMigrationPending
-                ? "Legacy roster-archive migration is still pending; destructive cleanup is disabled until all archived Kerbals are safely restored."
-                : "One-shot legacy cleanup permanently deletes eligible unreferenced retired/dead Kerbals. Back up persistent.sfs first.");
+                ? "Legacy 1.6.0 roster-archive migration is still pending; destructive cleanup is disabled until all old archived Kerbals are safely restored."
+                : _coldRosterArchive
+                    ? "Legacy destructive cleanup is disabled while the cold archive is enabled; eligible Kerbals are archived instead of deleted."
+                    : "One-shot legacy cleanup permanently deletes eligible unreferenced retired/dead Kerbals. Back up persistent.sfs first.");
 
             DrawHeading("Veterans, suits, and starting crew");
             bool eysInstalled = EACExternalModDetector.IsEarnYourStripesInstalled();

@@ -1,4 +1,4 @@
-// EAC - AstronautComplexRetiredTab
+﻿// EAC - AstronautComplexRetiredTab
 // Adds a "Retired" tab to the Astronaut Complex between Assigned and Lost.
 // PERF FIX: FastHideWorker throttled to 1s (was every frame with heavy reflection).
 // PERF FIX: Root discovery results cached (was scanning all Transforms every 0.4s).
@@ -137,14 +137,21 @@ namespace RosterRotation
                 ACPatches.NeuterUIHoverPanel(row.gameObject);
                 neutered++;
 
-                // Force Button GO active in case a stock hover transition already hid it
+                bool coldArchived = row.name != null && row.name.StartsWith("EAC_ColdRetired_", StringComparison.Ordinal);
+                // Live retirees keep their Recall button visible. Cold-archive retirees
+                // are display-only and must never expose a Recall action.
                 foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                 {
-                    if (ch.name == "Button" && !ch.gameObject.activeSelf)
+                    if (ch.name != "Button") continue;
+                    if (coldArchived)
+                    {
+                        if (ch.gameObject.activeSelf) ch.gameObject.SetActive(false);
+                    }
+                    else if (!ch.gameObject.activeSelf)
                     {
                         ch.gameObject.SetActive(true);
-                        break;
                     }
+                    break;
                 }
             }
             if (neutered > 0)

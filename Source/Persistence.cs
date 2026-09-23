@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using UnityEngine;
@@ -153,6 +153,7 @@ namespace RosterRotation
                     RosterRotationState.ExternalDataStorageEnabled = false;
                     RosterRotationState.ExternalStoragePromptShown = false;
                     RosterRotationState.ExternalRosterArchiveEnabled = false;
+                    RosterRotationState.ColdRosterArchiveEnabled = false;
                     EACGameSettings.TryApplyToStateFromGameParams();
                     RRLog.Verbose($"[EAC] Settings node missing; applied GameParameters defaults: VerboseLogging={RosterRotationState.VerboseLogging}, SyncFlightTrackerFromEacOnce={RosterRotationState.SyncFlightTrackerFromEacOnce}, TraitGrowthEnabled={RosterRotationState.TraitGrowthEnabled}");
                 }
@@ -181,9 +182,9 @@ namespace RosterRotation
                 if (EACExternalDataStore.TryLoadReferencedSnapshot(root, true, out externalRevision))
                     _recordNodesLoadedForSave = true;
 
-                // Archived retired/lost stock roster records remain a separate concern:
-                // merge their EAC records after the main datastore so archived people
-                // are still available to the Hall/Astronaut Complex.
+                // Legacy 1.6.0 archive references are still readable so they can migrate
+                // back into the stock roster once. New 1.6.3 cold-archive entries do not
+                // require global rehydration and their live EAC records stay in this state.
                 EACRosterArchive.MergeArchivedRecordsIntoState(root);
 
                 // CAREER_LOG is evidence for legacy accomplishments. Import what KSP
@@ -213,10 +214,9 @@ namespace RosterRotation
 
                 RecoveryLeaveService.SavePendingCrewRandRExtensions(root);
 
-                // ScenarioModule save nodes can be rebuilt from scratch. Carry forward the
-                // exact external archive references loaded with this save; the later
-                // onGameStateSave archive pass removes stale refs for Kerbals now present in
-                // the stock roster and adds fresh refs for newly archived Kerbals.
+                // ScenarioModule save nodes can be rebuilt from scratch. Carry forward only
+                // legacy 1.6.0 archive references until their one-time migration completes.
+                // The 1.6.3 cold archive deliberately stores no save-side reference nodes.
                 if (RosterRotationState.ExternalRosterArchiveEnabled)
                     EACRosterArchive.PreserveActiveReferences(root);
                 else

@@ -1,4 +1,4 @@
-// EAC - AstronautComplexACPatch.Tooltips
+﻿// EAC - AstronautComplexACPatch.Tooltips
 // Extracted tooltip and row-layout helpers for the Astronaut Complex UI.
 
 using System;
@@ -25,6 +25,11 @@ namespace RosterRotation
                 foreach (Transform row in retiredList)
                 {
                     if (row == null) continue;
+                    if (IsColdArchivedRetiredRow(row.gameObject))
+                    {
+                        DisableColdArchiveRowBinding(row.gameObject, true);
+                        continue;
+                    }
                     // Find Button GO (for UIStateButton and Button)
                     Transform btnT = null;
                     foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
@@ -371,12 +376,13 @@ namespace RosterRotation
                     // events from firing at all. Removing the button from both lists means neither
                     // pointer enter nor pointer exit can hide the always-visible recall control.
                     GameObject recallButton = null;
+                    bool coldArchivedRetired = IsColdArchivedRetiredRow(row);
                     foreach (Transform child in row.GetComponentsInChildren<Transform>(true))
                     {
                         if (child != null && child.name == "Button")
                         {
                             recallButton = child.gameObject;
-                            recallButton.SetActive(true);
+                            recallButton.SetActive(!coldArchivedRetired);
                             break;
                         }
                     }

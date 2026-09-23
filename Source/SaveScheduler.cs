@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 using KSP;
@@ -29,6 +29,7 @@ namespace RosterRotation
         private static int _framesUntilSave;
         private static float _earliestRealtime;
         private static bool _syncStateFromGameParams;
+        private static bool _warpDeferralLogged;
         private static readonly HashSet<string> _pendingReasons = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         public static void EnsureRunner()
@@ -86,6 +87,23 @@ namespace RosterRotation
             if (!_savePending)
                 return;
 
+            // Normal EAC state changes are safe to coalesce while accelerated time
+            // warp is active. Writing persistent.sfs every few real-time seconds
+            // during long warps caused visible periodic hitches on large careers.
+            //
+            // RequestImmediateSave() bypasses Tick() entirely, so critical events
+            // such as assigned mission deaths and DeepFreeze thaw fatalities still
+            // persist immediately even during time warp.
+            if (TimeWarp.CurrentRateIndex > 0)
+            {
+                if (!_warpDeferralLogged)
+                {
+                    RRLog.Verbose("[EAC] Deferring pending persistent save until time warp returns to 1x.");
+                    _warpDeferralLogged = true;
+                }
+                return;
+            }
+
             if (_framesUntilSave > 0)
             {
                 _framesUntilSave--;
@@ -116,6 +134,7 @@ namespace RosterRotation
             _framesUntilSave = 0;
             _earliestRealtime = 0f;
             _syncStateFromGameParams = false;
+            _warpDeferralLogged = false;
             _pendingReasons.Clear();
 
             try

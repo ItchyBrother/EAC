@@ -1,4 +1,4 @@
-// EAC - Enhanced Astronaut Complex - Mod.Roster.cs
+﻿// EAC - Enhanced Astronaut Complex - Mod.Roster.cs
 // Partial class: roster row building, status strings, crew list caches,
 // and vessel-name lookup (with cached proto-vessel reflection).
 
@@ -165,6 +165,9 @@ namespace RosterRotation
                 {
                     Kerbal            = k,
                     Record            = r,
+                    DisplayName       = k.name,
+                    DisplayTrait      = k.trait,
+                    DisplayLevel      = (int)k.experienceLevel,
                     Retired           = retired,
                     HasFlown          = hasFlown || displayFlights > 0,
                     IsLost            = isLost,
@@ -180,8 +183,100 @@ namespace RosterRotation
                 });
             }
 
-            rows.Sort((a, b) => string.Compare(a.Kerbal.name, b.Kerbal.name, StringComparison.Ordinal));
+            // The stock Astronaut Complex integration already injects cold rows,
+            // but the EAC Space Center window is built independently here. Merge
+            // the small cold index directly so archived Kerbals remain visible
+            // without recreating live ProtoCrewMember objects.
+            if (tab == Tab.Retired || tab == Tab.Lost)
+            {
+                string coldReason = tab == Tab.Retired ? "retired" : "lost";
+                var liveNames = new HashSet<string>(
+                    rows.Where(x => x != null && !string.IsNullOrEmpty(x.DisplayName))
+                        .Select(x => x.DisplayName),
+                    StringComparer.Ordinal);
+
+                foreach (var archived in EACRosterArchive.GetColdArchivedEntries(coldReason))
+                {
+                    if (archived == null || string.IsNullOrEmpty(archived.Name)) continue;
+                    if (liveNames.Contains(archived.Name)) continue;
+
+                    RosterRotationState.KerbalRecord archivedRecord;
+                    RosterRotationState.Records.TryGetValue(archived.Name, out archivedRecord);
+
+                    bool archivedLost = string.Equals(coldReason, "lost", StringComparison.OrdinalIgnoreCase);
+                    int archivedFlights = GetDisplayedFlights(null, archivedRecord);
+
+                    rows.Add(new RosterRowData
+                    {
+                        Kerbal            = null,
+                        Record            = archivedRecord,
+                        ColdArchived      = true,
+                        DisplayName       = archived.Name,
+                        DisplayTrait      = string.IsNullOrEmpty(archived.Trait) ? "Unknown" : archived.Trait,
+                        DisplayLevel      = Math.Max(0, archived.ExperienceLevel),
+                        Retired           = !archivedLost,
+                        HasFlown          = archivedFlights > 0 || (archivedRecord != null && archivedRecord.LastFlightUT > 0),
+                        IsLost            = archivedLost,
+                        IsAssigned        = false,
+                        Status            = BuildColdArchivedStatus(archived, archivedRecord, now),
+                        AgeText           = archivedLost ? "" : GetAgeDisplay(archivedRecord, now),
+                        DisplayFlights    = archivedFlights,
+                        EffectiveStars    = 0,
+                        InTrainingLockout = false
+                    });
+                }
+            }
+
+            rows.Sort((a, b) => string.Compare(
+                a != null ? a.DisplayName : null,
+                b != null ? b.DisplayName : null,
+                StringComparison.Ordinal));
             return rows;
+        }
+
+        private static string BuildColdArchivedStatus(
+            EACRosterArchive.ColdRosterEntrySummary archived,
+            RosterRotationState.KerbalRecord record,
+            double now)
+        {
+            if (archived == null) return "ARCHIVED";
+
+            if (string.Equals(archived.Reason, "lost", StringComparison.OrdinalIgnoreCase))
+            {
+                double deathUT = record != null && record.DeathUT > 0
+                    ? record.DeathUT
+                    : archived.DeathUT;
+
+                if (deathUT > 0)
+                {
+                    int age = record != null ? RosterRotationState.GetKerbalAge(record, deathUT) : -1;
+                    string ageStr = age >= 0 ? $"Age {age}, " : "";
+                    string dateStr = RosterRotationState.FormatGameDateYD(deathUT);
+                    bool diedOnMission = record != null ? record.DiedOnMission : archived.DiedOnMission;
+
+                    if (diedOnMission)
+                        return $"Died on mission {ageStr}{dateStr} (Archive)";
+
+                    bool retiredDeath =
+                        (record != null && record.RetiredUT > 0 && deathUT >= record.RetiredUT - 1)
+                        || (record == null && archived.RetiredUT > 0 && deathUT >= archived.RetiredUT - 1);
+
+                    return retiredDeath
+                        ? $"Died {ageStr}{dateStr} (Archive)"
+                        : $"K.I.A. {ageStr}{dateStr} (Archive)";
+                }
+
+                return "LOST (Archive)";
+            }
+
+            double retiredUT = record != null && record.RetiredUT > 0
+                ? record.RetiredUT
+                : archived.RetiredUT;
+            string ago = retiredUT > 0
+                ? RosterRotationState.FormatTimeAgo(retiredUT, now)
+                : "date unknown";
+
+            return $"RETIRED L0 ({ago}) — No Recall (Archive)";
         }
 
         private List<ProtoCrewMember> BuildTrainingCandidates(KerbalRoster roster)

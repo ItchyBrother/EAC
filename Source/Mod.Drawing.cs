@@ -188,14 +188,28 @@ namespace RosterRotation
                 var k = row.Kerbal;
                 var r = row.Record;
 
+                string displayName = !string.IsNullOrEmpty(row.DisplayName)
+                    ? row.DisplayName
+                    : (k != null ? k.name : "<unknown>");
+                string displayTrait = !string.IsNullOrEmpty(row.DisplayTrait)
+                    ? row.DisplayTrait
+                    : (k != null ? k.trait : "");
+                int displayLevel = row.ColdArchived
+                    ? row.DisplayLevel
+                    : (k != null ? (int)k.experienceLevel : row.DisplayLevel);
+
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"{k.name} — {k.trait} — L{(int)k.experienceLevel}", GUILayout.Width(nameWidth));
+                GUILayout.Label(
+                    $"{displayName} — {displayTrait} — L{displayLevel}{(row.ColdArchived ? " (Archive)" : "")}",
+                    GUILayout.Width(nameWidth));
                 GUILayout.Label($"Flights:{row.DisplayFlights}", GUILayout.Width(flightsWidth));
                 GUILayout.Label(row.AgeText, GUILayout.Width(ageWidth));
                 GUILayout.Label(row.Status,  GUILayout.Width(statusWidth));
                 GUILayout.FlexibleSpace();
 
-                if (row.IsLost || row.IsAssigned)
+                // Cold rows are display-only. Do not rehydrate a ProtoCrewMember or
+                // expose Recall/Retire/Training actions from the Space Center window.
+                if (row.ColdArchived || row.IsLost || row.IsAssigned)
                 {
                     GUILayout.Space(actionAreaWidth);
                 }

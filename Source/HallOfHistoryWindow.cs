@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -1290,6 +1290,41 @@ namespace RosterRotation
             catch (Exception ex)
             {
                 Debug.LogWarning("[EAC.HallOfHistory] Live crew roster merge failed: " + ex.Message);
+            }
+
+            // Cold-roster entries are not rehydrated into CrewRoster. Merge their small
+            // index snapshot only when Hall of History is building its display cache so
+            // memorial/service UI can retain trait, stars, and vitals without loading the
+            // full archived KERBAL payload.
+            try
+            {
+                foreach (var archived in EACRosterArchive.GetColdArchivedEntries())
+                {
+                    if (archived == null || string.IsNullOrEmpty(archived.Name)) continue;
+                    var snap = new ProtoCrewSnapshot
+                    {
+                        Name = archived.Name,
+                        TraitTitle = archived.Trait,
+                        IsDead = string.Equals(archived.Reason, "lost", StringComparison.OrdinalIgnoreCase),
+                        ExperienceLevel = Math.Max(0, archived.ExperienceLevel),
+                        Courage = archived.Courage,
+                        Stupidity = archived.Stupidity,
+                        UT = archived.DeathUT > 0d ? archived.DeathUT
+                            : archived.RetiredUT > 0d ? archived.RetiredUT
+                            : archived.ArchivedUT,
+                        FlagUrl = HighLogic.CurrentGame != null ? HighLogic.CurrentGame.flagURL : null
+                    };
+
+                    ProtoCrewSnapshot existing;
+                    if (map.TryGetValue(archived.Name, out existing))
+                        map[archived.Name] = MergeRosterSnapshots(existing, snap);
+                    else
+                        map[archived.Name] = snap;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[EAC.HallOfHistory] Cold roster index merge failed: " + ex.Message);
             }
 
             if (saveRoot == null) return map;

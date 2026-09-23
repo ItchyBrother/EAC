@@ -1,4 +1,4 @@
-// EAC - Enhanced Astronaut Complex - Mod.Aging.cs
+﻿// EAC - Enhanced Astronaut Complex - Mod.Aging.cs
 // Partial class: kerbal aging, natural/morale retirement, in-mission death,
 // and vessel crew detachment for death processing.
 
@@ -197,6 +197,9 @@ namespace RosterRotation
                 }
             }
 
+            if (CheckColdArchivedRetireeAging(nowUT))
+                anyDirty = true;
+
             if (anyDirty)
                 SaveScheduler.RequestSave("aging and retirement");
         }
@@ -235,20 +238,90 @@ namespace RosterRotation
             _pendingRetirementUiRefreshKerbal = k;
         }
 
+        private static double RetiredDeathProbability(int currentAge)
+        {
+            int minAge = RosterRotationState.RetiredDeathAgeMin;
+            if      (currentAge >= minAge + 30) return 0.30;
+            else if (currentAge >= minAge + 20) return 0.14;
+            else if (currentAge >= minAge + 10) return 0.06;
+            else if (currentAge >= minAge)      return 0.02;
+            return 0.0;
+        }
+
+        private bool CheckColdArchivedRetireeAging(double nowUT)
+        {
+            if (!RosterRotationState.ColdRosterArchiveEnabled) return false;
+
+            bool anyDirty = false;
+            List<EACRosterArchive.ColdRosterEntrySummary> entries =
+                EACRosterArchive.GetColdArchivedEntries("retired");
+
+            for (int i = 0; i < entries.Count; i++)
+            {
+                EACRosterArchive.ColdRosterEntrySummary entry = entries[i];
+                if (entry == null || string.IsNullOrEmpty(entry.Name)) continue;
+
+                RosterRotationState.KerbalRecord rec;
+                if (!RosterRotationState.Records.TryGetValue(entry.Name, out rec) || rec == null) continue;
+                if (!rec.Retired) continue;
+
+                // If the cold payload already committed a death but an interrupted save
+                // left the EAC record/index behind, reconcile it instead of rolling again.
+                if (rec.DeathUT > 0)
+                {
+                    if (EACRosterArchive.SyncColdArchivedRetireeDeath(entry.Name, rec, rec.DeathUT))
+                        anyDirty = true;
+                    continue;
+                }
+
+                if (rec.LastAgedYears < 0) continue;
+                int currentAge = RosterRotationState.GetKerbalAge(rec, nowUT);
+                if (currentAge < 0 || currentAge <= rec.LastAgedYears) continue;
+
+                rec.LastAgedYears = currentAge;
+                anyDirty = true;
+
+                double pDeath = RetiredDeathProbability(currentAge);
+                if (pDeath <= 0 || UnityEngine.Random.value >= pDeath) continue;
+
+                // Make the cold payload safe for later reversal before we leave the
+                // in-memory EAC record permanently deceased. If this write fails, keep
+                // the Kerbal retired; the next birthday remains another opportunity.
+                rec.DeathUT = nowUT;
+                rec.DiedOnMission = false;
+                rec.PendingMissionDeath = false;
+
+                if (!EACRosterArchive.SyncColdArchivedRetireeDeath(entry.Name, rec, nowUT))
+                {
+                    rec.DeathUT = 0;
+                    rec.DiedOnMission = false;
+                    rec.PendingMissionDeath = false;
+                    RRLog.Warn("[EAC] Cold-retired death transition could not be persisted for "
+                        + entry.Name + "; keeping the Kerbal retired.");
+                    continue;
+                }
+
+                if (RosterRotationState.DeathNotificationsEnabled)
+                    RosterRotationState.PostNotification(EACNotificationType.Death,
+                        $"Deceased — {entry.Name}",
+                        $"{entry.Name} has passed away at age {currentAge}. ({RosterRotationState.FormatGameDate(nowUT)})",
+                        MessageSystemButton.MessageButtonColor.RED, MessageSystemButton.ButtonIcons.ALERT, 12f);
+
+                InvalidateUICaches();
+                _pendingForceRefresh = true;
+            }
+
+            return anyDirty;
+        }
+
         private bool CheckRetiredDeath(ProtoCrewMember k, RosterRotationState.KerbalRecord rec,
             double nowUT, int currentAge)
         {
             if (currentAge <= rec.LastAgedYears) return false;
             rec.LastAgedYears = currentAge;
 
-            int    minAge = RosterRotationState.RetiredDeathAgeMin;
-            double pDeath;
-            if      (currentAge >= minAge + 30) pDeath = 0.30;
-            else if (currentAge >= minAge + 20) pDeath = 0.14;
-            else if (currentAge >= minAge + 10) pDeath = 0.06;
-            else if (currentAge >= minAge)      pDeath = 0.02;
-            else                                return true;
-
+            double pDeath = RetiredDeathProbability(currentAge);
+            if (pDeath <= 0) return true;
             if (UnityEngine.Random.value >= pDeath) return true;
 
             rec.DeathUT          = nowUT;

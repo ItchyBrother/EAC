@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 
 namespace RosterRotation
@@ -30,6 +30,7 @@ namespace RosterRotation
         public bool ExternalDataStorageEnabled = false;
         public bool ExternalStoragePromptShown = false;
         public bool ExternalRosterArchiveEnabled = false;
+        public bool ColdRosterArchiveEnabled = false;
         public bool AutoCleanupUnreferencedKerbals = false;
         public bool VerboseLogging = false;
         public bool VerboseAgeLogging = false;
@@ -101,6 +102,7 @@ namespace RosterRotation
                 ExternalDataStorageEnabled = RosterRotationState.ExternalDataStorageEnabled,
                 ExternalStoragePromptShown = RosterRotationState.ExternalStoragePromptShown,
                 ExternalRosterArchiveEnabled = RosterRotationState.ExternalRosterArchiveEnabled,
+                ColdRosterArchiveEnabled = RosterRotationState.ColdRosterArchiveEnabled,
                 AutoCleanupUnreferencedKerbals = RosterRotationState.AutoCleanupUnreferencedKerbals,
                 VerboseLogging = RosterRotationState.VerboseLogging,
                 VerboseAgeLogging = RosterRotationState.VerboseAgeLogging,
@@ -175,6 +177,7 @@ namespace RosterRotation
             settings.ExternalDataStorageEnabled = PB(settingsNode.GetValue("externalDataStorageEnabled"), false);
             settings.ExternalStoragePromptShown = PB(settingsNode.GetValue("externalStoragePromptShown"), false);
             settings.ExternalRosterArchiveEnabled = PB(settingsNode.GetValue("externalRosterArchiveEnabled"), false);
+            settings.ColdRosterArchiveEnabled = PB(settingsNode.GetValue("coldRosterArchiveEnabled"), false);
             settings.AutoCleanupUnreferencedKerbals = PB(settingsNode.GetValue("autoCleanupUnreferencedKerbals"), false);
             settings.VerboseLogging = PB(settingsNode.GetValue("verboseLogging"), false);
             settings.VerboseAgeLogging = PB(settingsNode.GetValue("verboseAgeLogging"), false);
@@ -245,6 +248,7 @@ namespace RosterRotation
             RosterRotationState.ExternalDataStorageEnabled = settings.ExternalDataStorageEnabled;
             RosterRotationState.ExternalStoragePromptShown = settings.ExternalStoragePromptShown;
             RosterRotationState.ExternalRosterArchiveEnabled = settings.ExternalRosterArchiveEnabled;
+            RosterRotationState.ColdRosterArchiveEnabled = settings.ColdRosterArchiveEnabled;
             RosterRotationState.AutoCleanupUnreferencedKerbals = settings.AutoCleanupUnreferencedKerbals;
             if (!preserveVerboseSettings)
             {
@@ -319,6 +323,7 @@ namespace RosterRotation
             node.AddValue("externalDataStorageEnabled", settings.ExternalDataStorageEnabled.ToString(ci));
             node.AddValue("externalStoragePromptShown", settings.ExternalStoragePromptShown.ToString(ci));
             node.AddValue("externalRosterArchiveEnabled", settings.ExternalRosterArchiveEnabled.ToString(ci));
+            node.AddValue("coldRosterArchiveEnabled", settings.ColdRosterArchiveEnabled.ToString(ci));
             node.AddValue("autoCleanupUnreferencedKerbals", settings.AutoCleanupUnreferencedKerbals.ToString(ci));
             node.AddValue("verboseLogging", settings.VerboseLogging.ToString(ci));
             node.AddValue("verboseAgeLogging", settings.VerboseAgeLogging.ToString(ci));

@@ -1,4 +1,4 @@
-// EAC - AstronautComplexACPatch.Rows
+﻿// EAC - AstronautComplexACPatch.Rows
 // Extracted row-cloning, recall-button, and synthetic-row helpers for the Astronaut Complex UI.
 
 using System;
@@ -2060,6 +2060,227 @@ namespace RosterRotation
             }
         }
 
+        private static bool IsColdArchivedRetiredRow(GameObject row)
+        {
+            return row != null
+                && !string.IsNullOrEmpty(row.name)
+                && row.name.StartsWith("EAC_ColdRetired_", StringComparison.Ordinal);
+        }
+
+        private static void DisableColdArchiveRowBinding(GameObject row, bool hideButton)
+        {
+            if (row == null) return;
+
+            // A cold-archive row is deliberately display-only. It must never retain the
+            // donor CrewListItem binding because that would point at an unrelated live
+            // ProtoCrewMember and could overwrite the archived metadata on Update().
+            foreach (Component c in row.GetComponentsInChildren<Component>(true))
+            {
+                if (c == null) continue;
+                string typeName = c.GetType().Name;
+                if (typeName == "CrewListItem" || typeName == "UIHoverPanel" || typeName == "EventTriggerForwarder")
+                {
+                    try
+                    {
+                        var enabled = ReflectionUtils.FindProperty(c.GetType(), "enabled");
+                        if (enabled != null && enabled.CanWrite) enabled.SetValue(c, false, null);
+                    }
+                    catch (global::System.Exception ex)
+                    {
+                        RRLog.VerboseExceptionOnce("ac.coldrow.disable." + typeName,
+                            "Unable to disable " + typeName + " on cold-archive row", ex);
+                    }
+                }
+            }
+
+            DisableSyntheticRowTooltips(row);
+
+            if (!hideButton) return;
+            foreach (Transform child in row.GetComponentsInChildren<Transform>(true))
+            {
+                if (child == null || child.name != "Button") continue;
+                child.gameObject.SetActive(false);
+                break;
+            }
+        }
+
+        private static bool IsInsideColdArchivedLostRow(Transform child)
+        {
+            Transform current = child;
+            int depth = 0;
+            while (current != null && depth < 8)
+            {
+                if (!string.IsNullOrEmpty(current.name)
+                    && current.name.StartsWith("EAC_ColdLost_", StringComparison.Ordinal))
+                    return true;
+                current = current.parent;
+                depth++;
+            }
+            return false;
+        }
+
+        private static string BuildColdLostStatus(EACRosterArchive.ColdRosterEntrySummary entry, double nowUT)
+        {
+            if (entry == null) return "Archived record";
+
+            RosterRotationState.KerbalRecord rec = null;
+            if (!string.IsNullOrEmpty(entry.Name))
+                RosterRotationState.Records.TryGetValue(entry.Name, out rec);
+
+            double deathUT = rec != null && rec.DeathUT > 0 ? rec.DeathUT : entry.DeathUT;
+            double retiredUT = rec != null && rec.RetiredUT > 0 ? rec.RetiredUT : entry.RetiredUT;
+            bool diedOnMission = rec != null ? rec.DiedOnMission : entry.DiedOnMission;
+
+            int age = -1;
+            if (rec != null && RosterRotationState.AgingEnabled && rec.LastAgedYears >= 0 && deathUT > 0)
+                age = RosterRotationState.GetKerbalAge(rec, deathUT);
+
+            string dateStr = deathUT > 0 ? RosterRotationState.FormatGameDateYD(deathUT) : "";
+            bool retiredDeath = retiredUT > 0 && deathUT > 0 && deathUT >= retiredUT - 1;
+            string status;
+            if (diedOnMission)
+                status = age >= 0 ? "Died on mission Age " + age + ", " + dateStr : "Died on mission " + dateStr;
+            else if (retiredDeath)
+                status = age >= 0 ? "Died Age " + age + ", " + dateStr : "Died " + dateStr;
+            else
+                status = age >= 0 ? "K.I.A. Age " + age + ", " + dateStr : "K.I.A. " + dateStr;
+
+            return status.TrimEnd() + "\nArchived record";
+        }
+
+        private static void InjectColdArchivedLostRows()
+        {
+            if (LostListTransform == null) return;
+
+            // Remove only EAC synthetic cold rows. Stock Lost rows are left untouched.
+            for (int i = LostListTransform.childCount - 1; i >= 0; i--)
+            {
+                Transform child = LostListTransform.GetChild(i);
+                if (child != null && child.name != null
+                    && child.name.StartsWith("EAC_ColdLost_", StringComparison.Ordinal))
+                    UnityEngine.Object.DestroyImmediate(child.gameObject);
+            }
+
+            List<EACRosterArchive.ColdRosterEntrySummary> archived = EACRosterArchive.GetColdArchivedEntries("lost");
+            if (archived == null || archived.Count == 0) return;
+
+            var archivedNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in archived)
+                if (entry != null && !string.IsNullOrEmpty(entry.Name)) archivedNames.Add(entry.Name);
+
+            // Avoid duplicating a native row if KSP is still displaying a stale live row
+            // during the same UI refresh in which the Kerbal entered cold storage.
+            var visibleNames = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < LostListTransform.childCount; i++)
+            {
+                Transform row = LostListTransform.GetChild(i);
+                if (row == null) continue;
+                foreach (Component c in row.GetComponentsInChildren<Component>(true))
+                {
+                    if (c == null) continue;
+                    string text;
+                    if (TryGetText(c, out text) && !string.IsNullOrEmpty(text) && archivedNames.Contains(text))
+                        visibleNames.Add(text);
+                }
+            }
+
+            Transform template = FindAnyCrewRowTemplate(LostListTransform);
+            if (template == null)
+            {
+                RRLog.WarnOnce("ac.coldlost.notemplate",
+                    "[RosterRotation] ACPatch LostTab: no crew-row template was available for cold-archive rows.");
+                return;
+            }
+
+            double nowUT = Planetarium.GetUniversalTime();
+            int added = 0;
+            foreach (var entry in archived)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.Name) || visibleNames.Contains(entry.Name)) continue;
+
+                GameObject clone = UnityEngine.Object.Instantiate(template.gameObject, LostListTransform);
+                clone.name = "EAC_ColdLost_" + (string.IsNullOrEmpty(entry.Id) ? entry.Name : entry.Id);
+                clone.SetActive(true);
+                DisableColdArchiveRowBinding(clone, true);
+
+                SetTextOnGO(clone, "name", entry.Name);
+                SetTextOnGO(clone, "stats", entry.Trait ?? string.Empty);
+                SetTextOnGO(clone, "label", BuildColdLostStatus(entry, nowUT));
+                SetNamedSliderValue(clone, "courage", Mathf.Clamp01(entry.Courage));
+                SetNamedSliderValue(clone, "stupidity", Mathf.Clamp01(entry.Stupidity));
+                SetStarsState(clone, Math.Max(0, entry.ExperienceLevel));
+                added++;
+            }
+
+            if (added > 0)
+                RRLog.Verbose("[EAC] Lost tab added " + added + " display-only cold-archive row(s).");
+        }
+
+        private static int InjectColdArchivedRetiredRows(
+            Transform retiredList,
+            Transform templateList,
+            float rowH,
+            ref float yOffset,
+            HashSet<string> clonedNames)
+        {
+            if (retiredList == null) return 0;
+
+            List<EACRosterArchive.ColdRosterEntrySummary> archived = EACRosterArchive.GetColdArchivedEntries("retired");
+            if (archived == null || archived.Count == 0) return 0;
+
+            Transform template = FindAnyCrewRowTemplate(templateList);
+            if (template == null)
+            {
+                RRLog.WarnOnce("ac.coldretired.notemplate",
+                    "[RosterRotation] ACPatch RetiredTab: no crew-row template was available for cold-archive rows.");
+                return 0;
+            }
+
+            double nowUT = Planetarium.GetUniversalTime();
+            int added = 0;
+            foreach (var entry in archived)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.Name)) continue;
+                if (clonedNames != null && !clonedNames.Add(entry.Name)) continue;
+
+                GameObject clone = UnityEngine.Object.Instantiate(template.gameObject, retiredList);
+                clone.name = "EAC_ColdRetired_" + (string.IsNullOrEmpty(entry.Id) ? entry.Name : entry.Id);
+                clone.SetActive(true);
+                DisableColdArchiveRowBinding(clone, true);
+
+                SetTextOnGO(clone, "name", entry.Name);
+                SetTextOnGO(clone, "stats", entry.Trait ?? string.Empty);
+                SetNamedSliderValue(clone, "courage", Mathf.Clamp01(entry.Courage));
+                SetNamedSliderValue(clone, "stupidity", Mathf.Clamp01(entry.Stupidity));
+                SetStarsState(clone, 0);
+
+                RosterRotationState.KerbalRecord rec = null;
+                RosterRotationState.Records.TryGetValue(entry.Name, out rec);
+                double retiredUT = rec != null && rec.RetiredUT > 0 ? rec.RetiredUT : entry.RetiredUT;
+                string status = retiredUT > 0 ? "Retired " + FormatTimeAgoStatic(retiredUT, nowUT) : "Retired";
+                if (rec != null && rec.LastAgedYears >= 0 && RosterRotationState.AgingEnabled)
+                    status = "Age " + RosterRotationState.GetKerbalAge(rec, nowUT) + "  " + status;
+                status += "\nNot Eligible for Recall (Archived)";
+                SetTextOnGO(clone, "label", status);
+
+                RectTransform cloneRT = clone.GetComponent<RectTransform>();
+                if (cloneRT != null)
+                {
+                    cloneRT.anchorMin = new Vector2(0, 1);
+                    cloneRT.anchorMax = new Vector2(1, 1);
+                    cloneRT.pivot = new Vector2(0.5f, 1f);
+                    cloneRT.sizeDelta = new Vector2(0, rowH);
+                    cloneRT.anchoredPosition = new Vector2(0, yOffset);
+                    yOffset -= rowH;
+                }
+                added++;
+            }
+
+            if (added > 0)
+                RRLog.Verbose("[EAC] Retired tab added " + added + " display-only cold-archive row(s).");
+            return added;
+        }
+
         private static void InjectUnavailableVisibleRows(Transform availList, float rowH)
         {
             if (availList == null) return;
@@ -2501,6 +2722,10 @@ namespace RosterRotation
             if (!LostListTransform.gameObject.activeInHierarchy)
                 return;
 
+            // Cold-archive rows are sourced from the tiny external index and are never
+            // rehydrated into CrewRoster just to populate the Lost tab.
+            InjectColdArchivedLostRows();
+
             // Build lookup of all dead/missing kerbals that have DeathUT records
             var deadKerbals = new System.Collections.Generic.Dictionary<string, RosterRotationState.KerbalRecord>();
             foreach (var kvp in RosterRotationState.Records)
@@ -2539,6 +2764,7 @@ namespace RosterRotation
             foreach (Component c in allComponents)
             {
                 if (c == null) continue;
+                if (IsInsideColdArchivedLostRow(c.transform)) continue;
                 string textVal;
                 if (!TryGetText(c, out textVal)) continue;
                 if (string.IsNullOrEmpty(textVal)) continue;

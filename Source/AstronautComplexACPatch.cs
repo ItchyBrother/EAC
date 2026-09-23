@@ -1,4 +1,4 @@
-// EAC - AstronautComplexACPatch
+﻿// EAC - AstronautComplexACPatch
 // Harmony patches for the KSP Astronaut Complex UI.
 // PERF: Uses cached retired names and crew name sets to avoid per-frame allocations.
 
@@ -1207,6 +1207,12 @@ private static void EnsureMaxCrewCached()
                             moved++;
                         }
                     }
+
+                    // Retirees whose effective recall stars have decayed to zero are stored
+                    // outside CrewRoster. Add display-only rows from the cold index without
+                    // rehydrating ProtoCrewMember objects or exposing a Recall button.
+                    moved += InjectColdArchivedRetiredRows(retiredList, availList, ROW_H, ref yOffset, clonedNames);
+
                     // Disable any layout group on the retired list — it fights manual row positions
                     foreach (Component c in retiredList.GetComponents<Component>())
                     {
@@ -1606,10 +1612,15 @@ private static void EnsureMaxCrewCached()
                 {
                     Transform row = retiredList.GetChild(ri);
                     if (row == null || !row.gameObject.activeSelf) continue;
+                    bool coldArchived = row.name != null && row.name.StartsWith("EAC_ColdRetired_", StringComparison.Ordinal);
                     foreach (Transform ch in row.GetComponentsInChildren<Transform>(true))
                     {
                         if (ch.name != "Button") continue;
-                        if (!ch.gameObject.activeSelf)
+                        if (coldArchived)
+                        {
+                            if (ch.gameObject.activeSelf) ch.gameObject.SetActive(false);
+                        }
+                        else if (!ch.gameObject.activeSelf)
                         {
                             ch.gameObject.SetActive(true);
                         }
