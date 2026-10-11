@@ -45,7 +45,10 @@ namespace RosterRotation
             _nextEnforce = Time.time + ENFORCE_INTERVAL;
 
             HideRetiredKerbals();
-            ScrubCrewDialog();
+            // No retired records means there is nothing to remove from the crew dialog.
+            // Keep the roster enforcement cadence unchanged for compatibility.
+            if (HasRetiredRecords())
+                ScrubCrewDialog();
         }
 
         private void OnDestroy()
@@ -134,6 +137,13 @@ namespace RosterRotation
 
             _hiddenKerbals.Clear();
             return count;
+        }
+
+        private static bool HasRetiredRecords()
+        {
+            foreach (var rec in RosterRotationState.Records.Values)
+                if (rec != null && rec.Retired) return true;
+            return false;
         }
 
         // ─── Secondary: Dialog list scrubbing ────────────────────────────────
@@ -242,13 +252,25 @@ namespace RosterRotation
         private static Type _cachedDialogType;
         private static FieldInfo _cachedInstanceField;
         private static PropertyInfo _cachedInstanceProp;
+        private static PropertyInfo[] _candidateInstanceProps;
+        private static FieldInfo[] _candidateInstanceFields;
+
+        // A failed discovery should not trigger expensive reflection / Unity searches
+        // every second. Retry periodically so delayed dialogs and mod interactions work.
+        private const float DISCOVERY_RETRY_INTERVAL = 5.0f;
+        private static float _nextTypeSearch;
+        private static float _nextObjectSearch;
 
         private static object FindCrewDialogInstance()
         {
             try
             {
                 if (_cachedDialogType == null)
+                {
+                    if (Time.time < _nextTypeSearch) return null;
+                    _nextTypeSearch = Time.time + DISCOVERY_RETRY_INTERVAL;
                     _cachedDialogType = FindCrewDialogType();
+                }
                 if (_cachedDialogType == null) return null;
 
                 if (_cachedInstanceProp != null)
@@ -265,7 +287,17 @@ namespace RosterRotation
 
                 const BindingFlags sf = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
-                foreach (var prop in _cachedDialogType.GetProperties(sf))
+                if (_candidateInstanceProps == null)
+                {
+                    var candidates = new List<PropertyInfo>();
+                    foreach (var prop in _cachedDialogType.GetProperties(sf))
+                        if (prop.CanRead && (prop.PropertyType == typeof(object) ||
+                            _cachedDialogType.IsAssignableFrom(prop.PropertyType)))
+                            candidates.Add(prop);
+                    _candidateInstanceProps = candidates.ToArray();
+                }
+
+                foreach (var prop in _candidateInstanceProps)
                 {
                     if (!prop.CanRead) continue;
                     if (!_cachedDialogType.IsAssignableFrom(prop.PropertyType) &&
@@ -278,7 +310,17 @@ namespace RosterRotation
                     catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:237", "Suppressed exception in EditorCrewRetiredHider.cs:237", ex); }
                 }
 
-                foreach (var field in _cachedDialogType.GetFields(sf))
+                if (_candidateInstanceFields == null)
+                {
+                    var candidates = new List<FieldInfo>();
+                    foreach (var field in _cachedDialogType.GetFields(sf))
+                        if (field.FieldType == typeof(object) ||
+                            _cachedDialogType.IsAssignableFrom(field.FieldType))
+                            candidates.Add(field);
+                    _candidateInstanceFields = candidates.ToArray();
+                }
+
+                foreach (var field in _candidateInstanceFields)
                 {
                     if (!_cachedDialogType.IsAssignableFrom(field.FieldType) &&
                         field.FieldType != typeof(object)) continue;
@@ -290,8 +332,10 @@ namespace RosterRotation
                     catch (global::System.Exception ex) { RRLog.VerboseExceptionOnce("EditorCrewRetiredHider.cs:249", "Suppressed exception in EditorCrewRetiredHider.cs:249", ex); }
                 }
 
-                if (typeof(UnityEngine.Object).IsAssignableFrom(_cachedDialogType))
+                if (typeof(UnityEngine.Object).IsAssignableFrom(_cachedDialogType) &&
+                    Time.time >= _nextObjectSearch)
                 {
+                    _nextObjectSearch = Time.time + DISCOVERY_RETRY_INTERVAL;
                     var obj = UnityEngine.Object.FindObjectOfType(_cachedDialogType);
                     if (obj != null) return obj;
                 }
