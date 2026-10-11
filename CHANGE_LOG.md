@@ -15,7 +15,7 @@ This maintenance release addresses [GitHub issue #54](https://github.com/ItchyBr
 #### Testing and compatibility
 - KSP 1.12.5 testing by the reporting user and maintainer showed substantially lower steady-state `EditorCrewRetiredHider.Update()` overhead and improvement in the originally reported stutter. Peak timings vary with scene and test conditions.
 - The change is confined to editor crew-hider performance. No intended changes to retirement eligibility, save/load callbacks, EAC history/revisions, or the optional hybrid cold roster archive; no save-format migration is required by this patch.
-- Thanks to [Chaotic Protocol](https://forum.kerbalspaceprogram.com/profile/185023-chaotic-protocol/ "Go to Chaotic Protocol's profile") for EAC testing.
+- Thanks to Chaotic Protocol for EAC testing.
 
 #### Packaging
 - Updated EAC and EAC_CCBridge version reporting to 1.6.4.
