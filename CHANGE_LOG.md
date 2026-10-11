@@ -1,6 +1,26 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-1011: EAC v1.6.4 — VAB/SPH Retired-Crew Microstutter Performance Fix for KSP >= 1.12.x
+
+This maintenance release addresses [GitHub issue #54](https://github.com/ItchyBrother/EAC/issues/54): periodic VAB microstutter associated with `EditorCrewRetiredHider.Update()` in KSP Performance Profiler. The change reduces repeated crew-dialog discovery work while keeping the editor's retirement-enforcement behavior intact.
+
+#### Editor crew-dialog performance
+- Cached reflection metadata for fields and properties used to locate the stock crew assignment dialog, avoiding repeated member enumeration.
+- Throttled unsuccessful crew-dialog type resolution and fallback Unity object discovery to a retry interval of five seconds.
+- Skipped crew-dialog list scrubbing when EAC has no retired records. Scrubbing removes retired entries that might still be present in the stock crew-assignment UI.
+- Retained the one-second `HideRetiredKerbals()` roster-enforcement cycle. **Roster polling and the Unity `FindObjectOfType()` fallback have not been removed.**
+- Preserved retired-crew exclusion in the VAB/SPH crew selector and existing crew-dialog compatibility fallbacks.
+
+#### Testing and compatibility
+- KSP 1.12.5 testing by the reporting user and maintainer showed substantially lower steady-state `EditorCrewRetiredHider.Update()` overhead and improvement in the originally reported stutter. Peak timings vary with scene and test conditions.
+- The change is confined to editor crew-hider performance. No intended changes to retirement eligibility, save/load callbacks, EAC history/revisions, or the optional hybrid cold roster archive; no save-format migration is required by this patch.
+- Thanks to [Chaotic Protocol](https://forum.kerbalspaceprogram.com/profile/185023-chaotic-protocol/ "Go to Chaotic Protocol's profile") for EAC testing.
+
+#### Packaging
+- Updated EAC and EAC_CCBridge version reporting to 1.6.4.
+- EAC Core and EAC Contract Configuration should use matching 1.6.4 releases.
+
 ### 2026-0922: EAC v1.6.3 — Time-Warp Save Coalescing and Hybrid Cold Roster Archive for KSP >= 1.12.x
 
 This update addresses the smaller periodic hitches that could remain during long high-rate time warps after the 1.6.2 external-revision cleanup fix and introduces a redesigned Lost/Retired cold archive that avoids the 1.6.0 rehydrate/strip/rewrite cycle.

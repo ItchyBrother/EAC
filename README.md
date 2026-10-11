@@ -4,6 +4,12 @@ Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to K
 
 EAC is designed to feel stock-like while making career-mode crew decisions matter. It can run as a self-contained career crew-management mod, while still deferring to supported specialist mods when they are actually installed and loaded.
 
+## What's New in EAC 1.6.4
+
+**Issue #54 — VAB/SPH crew-selection microstutter fix:** EAC 1.6.4 reduces the overhead of periodic retired-crew filtering in the editors. It caches crew-dialog reflection metadata, retries unsuccessful dialog discovery less often, and skips dialog scrubbing when there are no retired EAC records. It **retains the one-second roster-enforcement cycle** and the Unity-object fallback for compatibility.
+
+The targeted fix does not intentionally alter retirement rules, crew-selection eligibility, save/load behavior, EAC external History/Record storage, or the opt-in cold roster archive. See [CHANGE_LOG.md](CHANGE_LOG.md) for the full 1.6.4 notes and [GitHub issue #54](https://github.com/ItchyBrother/EAC/issues/54) for the original performance report.
+
 ## What EAC Adds
 
 EAC expands the stock Astronaut Complex into a career-management hub for Kerbals. It tracks training, service history, aging, retirement, recovery/rest time, roster state, and optional recognition systems. It also adds retired/lost roster handling, Hall of History presentation, optional Contract Configurator final-exam support, calendar compatibility, Suggested Next Crew, EAC-native veteran/suit/Badass progression, starting crew setup, and optional external data storage for long-running careers.
@@ -194,6 +200,7 @@ For older saves, EAC uses stock historical data conservatively. If the stock sav
 
 EAC reduces repeated reflection, optional-mod discovery, UI allocation, and save-time work in frequently refreshed paths.
 
+- In 1.6.4, the VAB/SPH `EditorCrewRetiredHider` caches crew-dialog reflection member discovery, throttles unsuccessful type/Unity-object searches to five-second retries, and skips UI dialog scrubbing when EAC has no retired records. The one-second roster enforcement and Unity `FindObjectOfType()` fallback remain available.
 - `ReflectionUtils.FindField` and `ReflectionUtils.FindProperty` use lock-protected process-lifetime caches keyed by the target type and ordered candidate member names.
 - Both successful reflection lookups and misses are cached, preventing the same unavailable member from being searched repeatedly.
 - Repeated Astronaut Complex row, tooltip, and badge member lookups use the shared reflection cache while preserving the existing lookup order, value-setting logic, event wiring, and fallbacks.
@@ -257,9 +264,9 @@ Beginning with version 1.5.0, EAC is released as two coordinated packages:
 1. **Enhanced Astronaut Complex (EAC Core)** — the required base mod. It contains `EAC.dll` and has no Contract Configurator dependency.
 2. **EAC Contract Configuration** — an optional add-on for players who want Contract Configurator final exams. It contains the active bridge DLL and the exam contracts/content.
 
-For EAC 1.6.3, the optional add-on requires:
+For EAC 1.6.4, the optional add-on requires:
 
-- EAC Core 1.6.3,
+- EAC Core 1.6.4,
 - Contract Configurator,
 - and the normal EAC Core dependency on HarmonyKSP / Harmony2.
 
@@ -350,7 +357,7 @@ Kerbal Changelog is optional.
 ### EAC Core
 
 1. Install HarmonyKSP / Harmony2.
-2. Download the EAC Core 1.6.3 release.
+2. Download the EAC Core 1.6.4 release.
 3. Copy the included `GameData/EAC/` folder into the KSP `GameData/` directory.
 4. Start KSP and open a save.
 5. Review EAC settings under Difficulty Options before starting a long career save.
@@ -371,9 +378,9 @@ Kerbal Space Program/
 
 Install this package only when Contract Configurator is installed.
 
-1. Install EAC Core 1.6.3.
+1. Install EAC Core 1.6.4.
 2. Install Contract Configurator.
-3. Copy the EAC Contract Configuration 1.6.3 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
+3. Copy the EAC Contract Configuration 1.6.4 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
 4. Confirm that `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 5. **Do not rename any DLL.**
 
@@ -435,7 +442,7 @@ Settings are persisted with the career and survive reloads.
 
 ### External EAC Data Storage
 
-EAC 1.6.3 can optionally move growing **EAC-owned History/Record data** out of `persistent.sfs`.
+EAC 1.6.4 continues to support moving growing **EAC-owned History/Record data** out of `persistent.sfs`.
 
 For new careers, external History/Record storage is **OFF by default**. EAC can show a one-time informational message recommending it for long-running careers.
 
@@ -528,7 +535,7 @@ When external storage is enabled, back up both the `.sfs` file and the save's `E
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
 - Contract Configurator is optional and is not required by EAC Core.
 - Final exam contract mode requires the separate, matching-version EAC Contract Configuration package and Contract Configurator.
-- EAC Core 1.6.3 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
+- EAC Core 1.6.4 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
 - The EAC Contract Configuration package ships the active `EAC_CCBridge.dll` and must not be installed without Contract Configurator.
 - Custom calendar support is designed for stock calendars and calendar providers used by setups such as Kronometer, JNSQ, and rescaled Kopernicus systems.
 - Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
@@ -602,7 +609,7 @@ Use verbose logging only while troubleshooting because it can create more log ou
 
 Check that:
 
-- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.3.
+- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.4.
 - Contract Configurator is installed.
 - `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 - No stale `EAC_CCBridge.dll.disabled` from an older 1.4.x-or-earlier installation remains.
@@ -648,7 +655,7 @@ A ZIP file in `GameData` should not trigger delegation by itself. The mod assemb
 
 ## Packaging Checklist
 
-### EAC Core 1.6.3
+### EAC Core 1.6.4
 
 The core release should include at least:
 
@@ -671,7 +678,7 @@ GameData/EAC/Craft/
 GameData/EAC/Scenarios/
 ```
 
-### EAC Contract Configuration 1.6.3
+### EAC Contract Configuration 1.6.4
 
 The optional add-on should include its bridge and Contract Configurator content:
 
@@ -729,7 +736,7 @@ Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed
 
 - Kerbal Space Program by Squad / Private Division.
 - Thanks to the KSP modding community.
-- Thanks to KSP forum user edgomes27 and John Marley for beta testing EAC.
+- Thanks to KSP forum user edgomes27, John Marley, and Chaoatic Protocol for beta testing EAC.
 - Thanks to the HarmonyKSP maintainers and the Harmony project for the Harmony library used by EAC.
 - Thanks to the Kerbal Changelog maintainers and contributors for the in-game changelog utility.
 - Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.
