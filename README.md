@@ -4,11 +4,17 @@ Enhanced Astronaut Complex (EAC) adds deeper Kerbonaut lifecycle management to K
 
 EAC is designed to feel stock-like while making career-mode crew decisions matter. It can run as a self-contained career crew-management mod, while still deferring to supported specialist mods when they are actually installed and loaded.
 
-## What's New in EAC 1.6.4
+## What's New in EAC 1.6.5
 
-**Issue #54 — VAB/SPH crew-selection microstutter fix:** EAC 1.6.4 reduces the overhead of periodic retired-crew filtering in the editors. It caches crew-dialog reflection metadata, retries unsuccessful dialog discovery less often, and skips dialog scrubbing when there are no retired EAC records. It **retains the one-second roster-enforcement cycle** and the Unity-object fallback for compatibility.
+**Issue #50 — Kronometer custom calendar date displays:** EAC 1.6.5 uses the active Kronometer date formatter, when available, so calendar dates in EAC can match the player's configured custom calendar instead of always displaying stock-style year/day labels. For example, a birthday date can follow a configuration showing `7th Feb, 1961` rather than `Yr 2, Day 38`.
 
-The targeted fix does not intentionally alter retirement rules, crew-selection eligibility, save/load behavior, EAC external History/Record storage, or the opt-in cold roster archive. See [CHANGE_LOG.md](CHANGE_LOG.md) for the full 1.6.4 notes and [GitHub issue #54](https://github.com/ItchyBrother/EAC/issues/54) for the original performance report.
+The formatting update covers birthday, retirement, death, training, and other lifecycle notifications; applicable Astronaut Complex and EAC roster dates; Hall of History memorials and milestones; Service Records; and Flight Roster date labels. Full and compact date presentations use Kronometer's formatter where appropriate, falling back to the existing EAC format when it is unavailable. **Kronometer remains optional.**
+
+This is a **date-display-only compatibility release**. It does not intentionally change universal-time timestamps, age calculations, birthdays, retirement/death eligibility, training durations, saved data, or the existing 1.6.4 VAB/SPH performance fix. An external tester using KSP 1.12.5 reported all nine Kronometer TC2 checklist items passing, including save/reload and month/year boundary checks. See [CHANGE_LOG.md](CHANGE_LOG.md) and [GitHub issue #50](https://github.com/ItchyBrother/EAC/issues/50).
+
+### Previous release: EAC 1.6.4
+
+**Issue #54 — VAB/SPH crew-selection microstutter fix:** EAC 1.6.4 reduced the overhead of periodic retired-crew filtering in the editors. It caches crew-dialog reflection metadata, retries unsuccessful dialog discovery less often, and skips dialog scrubbing when there are no retired EAC records. It **retains the one-second roster-enforcement cycle** and the Unity-object fallback for compatibility. See [GitHub issue #54](https://github.com/ItchyBrother/EAC/issues/54) for the original performance report.
 
 ## What EAC Adds
 
@@ -64,6 +70,8 @@ EAC supports custom KSP calendars.
 - EAC uses the active game's calendar day and year lengths when custom values are available.
 - Stock Kerbin-time and Earth-time behavior remain supported.
 - Custom calendars used by Kronometer, JNSQ, and rescaled Kopernicus/Sigma Dimensions installations can keep EAC age and date displays aligned with the rest of the game.
+- Beginning with 1.6.5, when a compatible Kronometer formatter is active, EAC can use its configured full/compact calendar dates in lifecycle notifications and historical displays instead of constructing year/day text itself.
+- Kronometer is not required: EAC continues to use its previous date presentation when that formatter is unavailable. The 1.6.5 change affects **formatting only**, not event timing or stored universal-time values.
 - If a custom calendar cannot be resolved, EAC falls back to its supported stock time basis instead of failing.
 - Calendar support affects EAC's calendar-based age/date presentation and related lifecycle timing conversions; it does not alter the save's universal time.
 
@@ -264,9 +272,9 @@ Beginning with version 1.5.0, EAC is released as two coordinated packages:
 1. **Enhanced Astronaut Complex (EAC Core)** — the required base mod. It contains `EAC.dll` and has no Contract Configurator dependency.
 2. **EAC Contract Configuration** — an optional add-on for players who want Contract Configurator final exams. It contains the active bridge DLL and the exam contracts/content.
 
-For EAC 1.6.4, the optional add-on requires:
+For EAC 1.6.5, the optional add-on requires:
 
-- EAC Core 1.6.4,
+- EAC Core 1.6.5,
 - Contract Configurator,
 - and the normal EAC Core dependency on HarmonyKSP / Harmony2.
 
@@ -346,6 +354,10 @@ When DeepFreeze is installed, EAC treats frozen Kerbals as an external lifecycle
 
 DeepFreeze frozen time does not count toward EAC recovery fatigue. EAC accumulates awake mission time before and after freezing so long-duration cryosleep does not create year-long rest penalties, while meaningful awake mission time still counts.
 
+### Kronometer
+
+Kronometer is optional. EAC 1.6.5 uses a compatible active Kronometer formatter for calendar date labels in birthday/retirement/death/training notifications and the applicable roster and historical screens. When no compatible Kronometer formatter is available, EAC retains its previous date-display formatting. This integration does not change underlying universal-time values or lifecycle rules.
+
 ### Kerbal Changelog
 
 Kerbal Changelog is optional.
@@ -357,7 +369,7 @@ Kerbal Changelog is optional.
 ### EAC Core
 
 1. Install HarmonyKSP / Harmony2.
-2. Download the EAC Core 1.6.4 release.
+2. Download the EAC Core 1.6.5 release.
 3. Copy the included `GameData/EAC/` folder into the KSP `GameData/` directory.
 4. Start KSP and open a save.
 5. Review EAC settings under Difficulty Options before starting a long career save.
@@ -378,9 +390,9 @@ Kerbal Space Program/
 
 Install this package only when Contract Configurator is installed.
 
-1. Install EAC Core 1.6.4.
+1. Install EAC Core 1.6.5.
 2. Install Contract Configurator.
-3. Copy the EAC Contract Configuration 1.6.4 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
+3. Copy the EAC Contract Configuration 1.6.5 `GameData/EAC/` folder into `GameData/`, merging it with the core EAC folder.
 4. Confirm that `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 5. **Do not rename any DLL.**
 
@@ -442,7 +454,7 @@ Settings are persisted with the career and survive reloads.
 
 ### External EAC Data Storage
 
-EAC 1.6.4 continues to support moving growing **EAC-owned History/Record data** out of `persistent.sfs`.
+EAC 1.6.5 continues to support moving growing **EAC-owned History/Record data** out of `persistent.sfs`.
 
 For new careers, external History/Record storage is **OFF by default**. EAC can show a one-time informational message recommending it for long-running careers.
 
@@ -535,7 +547,7 @@ When external storage is enabled, back up both the `.sfs` file and the save's `E
 - EAC attempts to re-sync roster rows after KSP rebuilds Astronaut Complex lists.
 - Contract Configurator is optional and is not required by EAC Core.
 - Final exam contract mode requires the separate, matching-version EAC Contract Configuration package and Contract Configurator.
-- EAC Core 1.6.4 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
+- EAC Core 1.6.5 does **not** ship `EAC_CCBridge.dll` or `EAC_CCBridge.dll.disabled`.
 - The EAC Contract Configuration package ships the active `EAC_CCBridge.dll` and must not be installed without Contract Configurator.
 - Custom calendar support is designed for stock calendars and calendar providers used by setups such as Kronometer, JNSQ, and rescaled Kopernicus systems.
 - Crew R&R, Earn Your Stripes, FlightTracker, DeepFreeze, and Kerbal Changelog are optional.
@@ -609,7 +621,7 @@ Use verbose logging only while troubleshooting because it can create more log ou
 
 Check that:
 
-- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.4.
+- EAC Core and EAC Contract Configuration are both the same release version, such as 1.6.5.
 - Contract Configurator is installed.
 - `GameData/EAC/Plugins/EAC_CCBridge.dll` exists.
 - No stale `EAC_CCBridge.dll.disabled` from an older 1.4.x-or-earlier installation remains.
@@ -630,6 +642,10 @@ Check that:
 The old 1.6.0 rehydrating Lost/Retired archive is not used for new entries. If upgrading from 1.6.0, check the log for the one-time 1.6.1 legacy archive migration. If the 1.6.3 hybrid cold archive is enabled, new permanent entries are stored separately under `saves/<save>/EAC/cold-roster/`.
 
 Do not delete the external EAC directory from a career that currently references external data unless you have a known-good backup.
+
+### Kronometer Dates Still Show Stock Year/Day Labels
+
+Check that Kronometer is installed, loaded, and that its custom calendar is active in the current save. EAC uses the active compatible date formatter when available and otherwise falls back to its normal stock-style labels. If a specific EAC notification, roster row, or historical date differs from the in-game Kronometer calendar, please include the Kronometer configuration, the EAC screen/date in question, and `KSP.log` in the report.
 
 ### Scenario Vessel Does Not Load
 
@@ -655,7 +671,7 @@ A ZIP file in `GameData` should not trigger delegation by itself. The mod assemb
 
 ## Packaging Checklist
 
-### EAC Core 1.6.4
+### EAC Core 1.6.5
 
 The core release should include at least:
 
@@ -678,7 +694,7 @@ GameData/EAC/Craft/
 GameData/EAC/Scenarios/
 ```
 
-### EAC Contract Configuration 1.6.4
+### EAC Contract Configuration 1.6.5
 
 The optional add-on should include its bridge and Contract Configurator content:
 
@@ -736,7 +752,7 @@ Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed
 
 - Kerbal Space Program by Squad / Private Division.
 - Thanks to the KSP modding community.
-- Thanks to KSP forum user edgomes27, John Marley, and Chaoatic Protocol for beta testing EAC.
+- Thanks to KSP forum user edgomes27, John Marley, Chaotic Protocol and green_stalk for beta testing EAC.
 - Thanks to the HarmonyKSP maintainers and the Harmony project for the Harmony library used by EAC.
 - Thanks to the Kerbal Changelog maintainers and contributors for the in-game changelog utility.
 - Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.

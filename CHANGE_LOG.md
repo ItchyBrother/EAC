@@ -1,6 +1,25 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-1015: EAC v1.6.5 — Kronometer Custom Calendar Date Display Compatibility for KSP >= 1.12.x
+
+This maintenance release addresses [GitHub issue #50](https://github.com/ItchyBrother/EAC/issues/50): EAC birthday notifications and other dated UI text previously showed stock-style year/day labels (for example, `Yr 2, Day 38`) rather than the player's active Kronometer calendar (for example, `7th Feb, 1961`). EAC now uses the compatible active Kronometer formatter where available instead of attempting to reconstruct custom month names, date offsets, or leap-year display rules.
+
+#### Kronometer date presentation
+- Added optional full and compact date formatting through the active Kronometer calendar formatter, while retaining existing EAC formatting as a fallback when Kronometer is absent or its formatter cannot be used.
+- Updated shared date formatting used by birthday, retirement, death, training, and other lifecycle notifications.
+- Extended the compatible date presentation to applicable Astronaut Complex and EAC Lost/Retired roster dates, Hall of History memorials/milestones, Service Records, and Flight Roster labels.
+- Compact formatting is used where UI space is limited; Kronometer's configured formatter determines the actual calendar wording and date offsets.
+
+#### Compatibility and testing
+- Kronometer remains **optional**; it is not a new dependency for EAC Core or the Contract Configurator add-on.
+- The change is limited to display formatting. No intended changes to stored universal-time timestamps, Kerbal age progression, birthday/retirement/death timing, training duration, external EAC history storage, save formats, or the 1.6.4 editor performance improvements.
+- A Kronometer tester on KSP 1.12.5 reported **all nine test-checklist items passed** in the 1.6.5 TC2 evaluation, including notifications, roster/history dates, save/reload behavior, and month/year boundary checks. The maintainer accepted the tester's report without requesting additional screenshots or independent reproduction.
+
+#### Packaging
+- Updated final EAC and EAC_CCBridge version reporting to **1.6.5**.
+- EAC Core and EAC Contract Configuration should be installed at matching 1.6.5 versions.
+
 ### 2026-1011: EAC v1.6.4 — VAB/SPH Retired-Crew Microstutter Performance Fix for KSP >= 1.12.x
 
 This maintenance release addresses [GitHub issue #54](https://github.com/ItchyBrother/EAC/issues/54): periodic VAB microstutter associated with `EditorCrewRetiredHider.Update()` in KSP Performance Profiler. The change reduces repeated crew-dialog discovery work while keeping the editor's retirement-enforcement behavior intact.
