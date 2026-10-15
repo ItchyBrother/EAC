@@ -1593,6 +1593,11 @@ namespace RosterRotation
             int year;
             int day;
             GetKspYearDay(when, out year, out day);
+            // Generate display labels from the recorded UT, not from EAC's
+            // synthetic year/day pair, so Kronometer can apply its own leap
+            // rules and date offsets without altering milestone sorting.
+            string dayGroupLabel = BuildDayGroupLabel(when, year, day);
+            string compactDayLabel = BuildCompactDayLabel(when, year, day);
 
             entry = new MilestoneEntry
             {
@@ -1600,10 +1605,10 @@ namespace RosterRotation
                 Title = title,
                 Subtitle = BuildMilestoneSubtitle(resolvedBody, vessel, crew, crewCount),
                 Description = desc,
-                DateText = BuildDayGroupLabel(year, day),
+                DateText = dayGroupLabel,
                 TimeText = null,
                 RecordValueText = recordValueText,
-                SecondaryPillText = !string.IsNullOrEmpty(recordValueText) ? recordValueText : BuildCompactDayLabel(year, day),
+                SecondaryPillText = !string.IsNullOrEmpty(recordValueText) ? recordValueText : compactDayLabel,
                 SortValue = when,
                 BodyText = string.IsNullOrEmpty(resolvedBody) ? "Kerbol system" : resolvedBody,
                 VesselText = string.IsNullOrEmpty(vessel) ? "Unknown" : vessel,
@@ -1614,7 +1619,7 @@ namespace RosterRotation
                 KindText = HumanizeMilestoneName(FirstNonEmpty(kind, nodeName, "Milestone"), null, null),
                 CategoryText = category,
                 SourcePathText = BuildMilestoneSourcePath(path),
-                DayGroupLabel = BuildDayGroupLabel(year, day)
+                DayGroupLabel = dayGroupLabel
             };
             return true;
         }
@@ -2049,6 +2054,11 @@ namespace RosterRotation
 
         private static string FormatDate(double ut)
         {
+            // Memorial recorded dates include time when the active Kronometer
+            // PrintDate configuration provides it. Fall back unchanged in stock.
+            if (KspTimeMath.TryFormatKronometerDate(ut, true, false, out string kronometerDate))
+                return kronometerDate;
+
             try
             {
                 int year, day, hour, minute;
@@ -2085,13 +2095,17 @@ namespace RosterRotation
             return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}", hour, minute);
         }
 
-        private static string BuildDayGroupLabel(int year, int day)
+        private static string BuildDayGroupLabel(double ut, int year, int day)
         {
+            if (KspTimeMath.TryFormatKronometerDate(ut, false, false, out string kronometerDate))
+                return kronometerDate;
             return string.Format(CultureInfo.InvariantCulture, "Year {0}, Day {1}", year, day);
         }
 
-        private static string BuildCompactDayLabel(int year, int day)
+        private static string BuildCompactDayLabel(double ut, int year, int day)
         {
+            if (KspTimeMath.TryFormatKronometerDate(ut, false, true, out string kronometerDate))
+                return kronometerDate;
             return string.Format(CultureInfo.InvariantCulture, "Y{0} D{1}", year, day);
         }
 

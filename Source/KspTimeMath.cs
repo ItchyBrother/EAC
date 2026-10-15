@@ -19,6 +19,13 @@ namespace RosterRotation
         private static CalendarValues _cachedCustomCalendar;
         private static bool _cachedFormatterWasCustom;
 
+        // Optional Kronometer DATE PRESENTATION only. Discovery is cached for
+        // the active formatter object; no Kronometer compile-time dependency.
+        private static object _cachedDateFormatter;
+        private static MethodInfo _cachedPrintDateMethod;
+        private static MethodInfo _cachedPrintDateCompactMethod;
+        private static bool _cachedDateFormatterIsKronometer;
+
         internal struct CalendarValues
         {
             public readonly double SecondsPerDay;
@@ -195,6 +202,114 @@ namespace RosterRotation
                 "KspTimeMath: using Kronometer calendar (day=" + daySeconds.ToString("0.###")
                 + "s, year=" + yearSeconds.ToString("0.###") + "s)." );
             return true;
+        }
+
+        /// <summary>
+        /// Ask the ACTIVE Kronometer formatter to present an absolute UT.
+        /// It alone applies its month definitions, offsets and leap-year rules.
+        /// For other calendars, or any reflection/formatting failure, callers
+        /// keep their original EAC year/day fallback. No lifecycle math changes.
+        /// </summary>
+        public static bool TryFormatKronometerDate(double ut, bool includeTime, bool compact, out string formatted)
+        {
+            formatted = null;
+            object formatter;
+            try
+            {
+                formatter = KSPUtil.dateTimeFormatter;
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (formatter == null)
+                return false;
+
+            if (!ReferenceEquals(formatter, _cachedDateFormatter))
+            {
+                _cachedDateFormatter = formatter;
+                _cachedPrintDateMethod = null;
+                _cachedPrintDateCompactMethod = null;
+                _cachedDateFormatterIsKronometer = false;
+
+                Type type = formatter.GetType();
+                string typeName = type.FullName ?? type.Name ?? string.Empty;
+                if (typeName.IndexOf("Kronometer", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    _cachedDateFormatterIsKronometer = true;
+                    try
+                    {
+                        // Kronometer implements PrintDate and PrintDateCompact
+                        // with (double, bool, [bool]); accept older variants.
+                        foreach (MethodInfo candidate in type.GetMethods(
+                            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                        {
+                            if (candidate.ReturnType != typeof(string))
+                                continue;
+                            bool full = candidate.Name == "PrintDate";
+                            bool shortDate = candidate.Name == "PrintDateCompact";
+                            if (!full && !shortDate)
+                                continue;
+
+                            ParameterInfo[] args = candidate.GetParameters();
+                            if (args.Length < 1 || args.Length > 3 || args[0].ParameterType != typeof(double))
+                                continue;
+                            bool compatible = true;
+                            for (int i = 1; i < args.Length; i++)
+                                if (args[i].ParameterType != typeof(bool))
+                                    compatible = false;
+                            if (!compatible)
+                                continue;
+
+                            if (full && (_cachedPrintDateMethod == null || args.Length > _cachedPrintDateMethod.GetParameters().Length))
+                                _cachedPrintDateMethod = candidate;
+                            if (shortDate && (_cachedPrintDateCompactMethod == null || args.Length > _cachedPrintDateCompactMethod.GetParameters().Length))
+                                _cachedPrintDateCompactMethod = candidate;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        RRLog.WarnOnce("KspTimeMath:KronometerDateDiscoveryFailed",
+                            "KspTimeMath: failed to discover Kronometer date-format methods; using EAC dates. " + ex.Message);
+                    }
+                    if (_cachedPrintDateMethod == null)
+                        RRLog.WarnOnce("KspTimeMath:KronometerDateUnavailable",
+                            "KspTimeMath: Kronometer PrintDate is unavailable; using EAC dates where needed.");
+                }
+            }
+
+            if (!_cachedDateFormatterIsKronometer)
+                return false;
+
+            MethodInfo method = compact
+                ? (_cachedPrintDateCompactMethod ?? _cachedPrintDateMethod)
+                : _cachedPrintDateMethod;
+            if (method == null)
+                return false;
+
+            try
+            {
+                int count = method.GetParameters().Length;
+                double safeUT = Math.Max(0d, ut);
+                object[] args = count == 3 ? new object[] { safeUT, includeTime, false }
+                    : count == 2 ? new object[] { safeUT, includeTime }
+                    : new object[] { safeUT };
+                string value = method.Invoke(formatter, args) as string;
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    formatted = value.Trim();
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Exception reason = ex is TargetInvocationException && ex.InnerException != null
+                    ? ex.InnerException : ex;
+                RRLog.WarnOnce("KspTimeMath:KronometerDateFormatFailed",
+                    "KspTimeMath: Kronometer date formatting failed; using EAC date display. " + reason.Message);
+            }
+            return false;
         }
 
         private static bool TryReadPositiveNumber(object instance, Type type, string propertyName, out double value)

@@ -311,12 +311,22 @@ namespace RosterRotation
 
         public static string FormatGameDate(double ut)
         {
+            // Shared notifications: birthdays, retirement, deaths, training,
+            // graduation, trait growth and DeepFreeze lifecycle messages.
+            if (KspTimeMath.TryFormatKronometerDate(ut, false, false, out string kronometerDate))
+                return kronometerDate;
+
             KspTimeMath.GetYearDayHourMinute(Math.Max(0d, ut), UseKerbinDays, out int year, out int day, out int hour, out int minute);
             return $"Yr {year}, Day {day}";
         }
 
         public static string FormatGameDateYM(double ut)
         {
+            // The stock approximation assumes twelve equal-length months.
+            // A custom Kronometer month layout must be formatted by Kronometer.
+            if (KspTimeMath.TryFormatKronometerDate(ut, false, true, out string kronometerDate))
+                return kronometerDate;
+
             if (ut < 0) ut = 0;
             double yearSec = KspTimeMath.GetDisplayYearSeconds(UseKerbinDays);
             if (yearSec <= 0) return "0Y 0M";
@@ -328,6 +338,10 @@ namespace RosterRotation
 
         public static string FormatGameDateYD(double ut)
         {
+            // Compact roster, Service Record and flight-roster date labels.
+            if (KspTimeMath.TryFormatKronometerDate(ut, false, true, out string kronometerDate))
+                return kronometerDate;
+
             KspTimeMath.GetYearDayHourMinute(Math.Max(0d, ut), UseKerbinDays, out int year, out int day, out int hour, out int minute);
             return $"Y{year} D{day}";
         }
