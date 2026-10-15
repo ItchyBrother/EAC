@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 
 [assembly: AssemblyTitle("EAC")]
 [assembly: AssemblyDescription("Enhanced Astronaut Complex")]
-[assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("EAC")]
 [assembly: AssemblyCopyright("")]
@@ -14,9 +13,9 @@ using System.Runtime.CompilerServices;
 [assembly: ComVisible(false)]
 [assembly: Guid("7f0c632f-0d4e-4f76-b767-b6b9fbbca0de")]
 
-[assembly: AssemblyVersion("1.6.4.0")]
-[assembly: AssemblyFileVersion("1.6.4.0")]
-[assembly: AssemblyInformationalVersion("1.6.4.0")]
+[assembly: AssemblyVersion("1.6.5.0")]
+[assembly: AssemblyFileVersion("1.6.5.0")]
+[assembly: AssemblyInformationalVersion("1.6.5.0")]
 
 [assembly: InternalsVisibleTo("EAC.Tests")]
 [assembly: InternalsVisibleTo("RosterRotation.Tests")]
