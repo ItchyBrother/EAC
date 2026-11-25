@@ -1,6 +1,97 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### EAC v1.7.0 — Mission History, Graduation Examinations, Performance and Persistence for KSP >= 1.12.x
+
+EAC 1.7 builds on the 1.6 career-history system with a Mission Archive, richer Service Records and crew recommendations, revised practical graduation examinations, substantial performance improvements and safer external save-data handling. The release also consolidates Contract Configurator integration into the main EAC package. Development testing was conducted on KSP 1.12.5.
+
+#### Mission Archive, Service Records and crew recommendations — [#50](https://github.com/ItchyBrother/EAC/issues/50)
+
+- Added the Mission Archive and Mission Timeline to the Hall of History, linking crew participation to mission events and preserving event-time context for major achievements.
+- Expanded the historical record beyond recovery-time summaries to include significant events during a mission and associated Program First recognition where supported by recorded evidence.
+- Added Service Record search, filtering, sorting and mission cross-links. Service Records now require confirmed flight evidence rather than hiring or training alone; underlying career data is retained.
+- Improved Suggested Next Crew using native career experience and added collapsible recommendation details. Recommendations remain advisory only.
+- Retained conservative interpretation of legacy stock history rather than fabricating missing mission or crew information.
+
+#### Performance and architecture — [#50](https://github.com/ItchyBrother/EAC/issues/50), [#53](https://github.com/ItchyBrother/EAC/issues/53), [#60](https://github.com/ItchyBrother/EAC/issues/60)
+
+- Removed unnecessary stock CAREER_LOG flight recounts from routine saves and reduced duplicate mission-time synchronization and roster passes.
+- Added or refined roster, assigned-vessel, portrait, reflection and UI lookup caches; reduced repeated Astronaut Complex watchdog, tooltip, badge, Recall-button and native-row work.
+- Added persistence-generation groundwork and improved reuse of unchanged external history revisions.
+- Moved external revision-reference scanning to a background worker with conservative validation before cleanup; retained idle, time-warp and save-change safeguards.
+- Introduced background Hall of History save-file projection and reusable history caching. Debug validation compares projected historical data with the full parser and can fall back to the full tree on a mismatch.
+- In development tests, projected parsing input was approximately 63–66% smaller, with cached main-thread refreshes of about 11–12 ms. These measurements are examples from tested careers, not guaranteed timings for every installation.
+- Replaced repeated cold archive record cloning in roster watchdog paths with a reusable ownership index.
+- Reduced idle processing, legacy migration polling and verbose logging allocations; consolidated diagnostics through the normal EAC logging infrastructure.
+- Reorganized graduation, Contract Configurator bridge and Astronaut Complex row responsibilities into focused source areas, and removed redundant development/watchdog code where appropriate.
+- Marked the older destructive retired-roster cleanup as legacy/advanced; reversible archival is preferred.
+
+#### Save integrity, external data and career recovery — [#53](https://github.com/ItchyBrother/EAC/issues/53), [#60](https://github.com/ItchyBrother/EAC/issues/60)
+
+- Hardened external file writing, validation, identity checks and archive recovery; retained normal KSP save operations rather than the obsolete routine post-save rewrite of persistent.sfs.
+- Strengthened revision retention and cleanup checks so unverifiable references do not trigger destructive housekeeping.
+- Reworked cold roster membership to follow the loaded save, using immutable archived payload versions and identity/lifecycle verification rather than indiscriminately merging a folder-wide archive index.
+- Added protection against cross-career contamination and retirement/death events leaking into earlier save timelines.
+- Added validated legacy archive migration and missing-index recovery handling; retained safety copies and avoided deletion of unverified archived payloads.
+- Corrected DeepFreeze death detachment at the vessel and part levels and cleared pending mission-death flags only after the recorded stock death was confirmed.
+- Added automatic warnings for missing or unverifiable required data. EAC suspends normal writes and archive changes while allowing read-only inspection of available roster data.
+- Added confirmed recovery options with verified backups: Repair Current Career or Create Recovered Career Copy. Recovery reconstructs available data without guessing historical records that are no longer present.
+- Current-career repair prepares a verified snapshot and activates it at the main menu, preserving the existing career folder and leaving named saves, saved craft and unrelated mod data in place. Reload the original career after activation to resume normal access.
+- Added explicit repair-prepared/reload-required instructions and recovery diagnostics. The repair flow was exercised successfully in the RC5.3c development test.
+- Repaired saves start with embedded data and external storage, cold archival and automatic roster cleanup disabled until the player has verified the restored career.
+- External data remains optional. Back up the complete career folder, including its EAC subdirectory. Missing files containing unique historical records cannot be reconstructed from a stock save alone.
+
+#### Astronaut Complex, retirement and recovery — [#53](https://github.com/ItchyBrother/EAC/issues/53), [#57](https://github.com/ItchyBrother/EAC/issues/57), [#60](https://github.com/ItchyBrother/EAC/issues/60)
+
+- Corrected permanent recall eligibility so ineligible retirees cannot become recallable through later reloads or archival.
+- Fixed archived K.I.A./Lost entries appearing in Available and corrected Lost/Retired ownership and counts. Added a Lost-list fallback when the native container cannot be located reliably.
+- Preserved roster hiding during facility refreshes to avoid archived crew briefly appearing in Available.
+- Corrected Space Center R&R population for both EAC recovery leave and Crew R&R vacations; removed management actions from the informational recovery tab.
+- Improved retirement/recall handling, including cost and eligibility corrections.
+- Retained duplicate EAC recovery-processing protection and strengthened the save barrier so deferred persistent saves do not interrupt stock recovery or its dialog/vessel-removal sequence.
+- Retained DeepFreeze and FlightTracker integrations and compatibility handling for legacy career data.
+- Targeted recovery regression tests passed; intermittent duplicate stock recovery has been observed during development and remains an area for monitoring.
+
+#### Recruitment and profession compatibility — [#58](https://github.com/ItchyBrother/EAC/issues/58), [#59](https://github.com/ItchyBrother/EAC/issues/59)
+
+- Fixed hiring cost incorrectly falling back to 62,000 funds on KSP 1.12.5. EAC now uses `GameVariables.Instance.GetRecruitHireCost(recruitCount)`.
+- Introduced a centralized applicant eligibility check based on Kerbal type and trait. Pilot, Engineer and Scientist remain eligible by default; Tourist-type Kerbals and the Tourist trait are excluded.
+- Added `GameData/EAC/Config/ApplicantTraits.cfg` with configurable `allowedTrait` entries for additional astronaut professions and ModuleManager patch support. Restart KSP after changing the allowlist.
+- Applied eligibility consistently to applicant lists, counts, hiring, rejection, Reject All and identifiable native applicant rows.
+- Kept existing hired crew and excluded third-party applicants intact rather than deleting or modifying potential contract participants.
+- Added hiring cost and available funds to the Space Center Applicants view.
+- Added Reload Applicants to both the Space Center and Astronaut Management interfaces, with eligible applicant counts and consistent filtering.
+- Standard recruitment regression tests passed. Kerbin-Side Remastered GAP and third-party profession extensions remain subject to external compatibility testing.
+
+#### Graduation examinations and Contract Configurator — [#57](https://github.com/ItchyBrother/EAC/issues/57), [#61](https://github.com/ItchyBrother/EAC/issues/61)
+
+- Retained the complete set of 40 graduation examination scenarios; revised objectives, descriptions, mission briefings and examination availability diagnostics.
+- Corrected exam assignment and Surface Research Package completion handling, active exam persistence, duplicate graduation awards and recovery from failed or cancelled exams.
+- Restricted graduation credit to the assigned trainee and improved scenario initialization, crew deployment and practical objective tracking.
+- Redesigned six Level 3 Engineer/Scientist field laboratory examinations. Automatically deploy the trainee and support engineer; select the laboratory in the Tracking Station to begin without a mandatory transportation flight. Prevent overlapping advanced laboratory exams.
+  - Engineer: Operation Cold Start (power), Operation Silent Station (communications), Operation Night Shift (exterior access and lighting).
+  - Scientist: Operation Weather Watch (environmental observations), Operation Strange Goo (experiments, data retrieval and instrument restoration), Operation Deep Ground (geological, gravity and seismic research).
+- Corrected Level 1 Abort Takeoff so becoming airborne is not required.
+- Revised Level 3 Scientist Island Airlift passenger exchange and Engineer Island Airlift delivery/return requirements.
+- Improved temporary Academy personnel registration, persistence and safe cleanup, scoped to EAC-generated exam assistants/passengers rather than ordinary recruits or unrelated contracts.
+- Extended protection against false crash injuries during intentional EVA construction to Level 2 and Level 3 Engineer exams; genuine accidents retain normal crash handling.
+
+#### Installation and packaging — [#57](https://github.com/ItchyBrother/EAC/issues/57), [#60](https://github.com/ItchyBrother/EAC/issues/60), [#61](https://github.com/ItchyBrother/EAC/issues/61)
+
+- Unified the distribution into one EAC package, with the Contract Configurator bridge embedded in `EAC.dll` and all required examination assets included. Contract Configurator remains optional; no changes to Contract Configurator itself are required.
+- Added a legacy-bridge safety interlock. Remove obsolete `EAC_CCBridge.dll` and `.disabled` copies and do not install the old EAC Contract Configuration companion package alongside 1.7.0.
+- Implemented release-package automation, embedded-bridge and asset validation, and SHA-256 distribution checksum generation.
+- Reviewed the CKAN transition from separate packages to the unified distribution. Updated metadata is a separate publication step; do not assume it is already indexed.
+
+#### Known limitations and validation notes
+
+- Temporary examination personnel may remain briefly visible after recovery; dropped-off personnel on EVA may require separate recovery. Third-party flight tracking mods may retain their historical entries.
+- Classroom trainees are not yet consistently included in the Assigned roster category.
+- Five of the six redesigned field laboratory examinations were successfully completed during development. Operation Strange Goo and the final Island Airlift revisions require additional validation; only one advanced laboratory examination may be offered or active at a time.
+- GAP-specific compatibility and custom-trait expansion have not yet received comprehensive external testing.
+- Comprehensive older-timeline, first-time-installation and final Release/package qualification were listed as outstanding in the RC5 review. This entry does not assert completion beyond the documented testing.
+- Report exam objective, assigned Kerbal, profession, target level, reproduction steps and KSP.log for examination problems; include complete relevant save/backup context for persistence problems.
+
 ### 2026-1015: EAC v1.6.5 — Kronometer Custom Calendar Date Display Compatibility for KSP >= 1.12.x
 
 This maintenance release addresses [GitHub issue #50](https://github.com/ItchyBrother/EAC/issues/50): EAC birthday notifications and other dated UI text previously showed stock-style year/day labels (for example, `Yr 2, Day 38`) rather than the player's active Kronometer calendar (for example, `7th Feb, 1961`). EAC now uses the compatible active Kronometer formatter where available instead of attempting to reconstruct custom month names, date offsets, or leap-year display rules.
