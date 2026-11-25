@@ -243,8 +243,39 @@ EAC 1.7 consolidates the core and embedded Contract Configurator integration int
 
 Development history: [#50](https://github.com/ItchyBrother/EAC/issues/50), [#53](https://github.com/ItchyBrother/EAC/issues/53), [#57](https://github.com/ItchyBrother/EAC/issues/57), [#58](https://github.com/ItchyBrother/EAC/issues/58), [#59](https://github.com/ItchyBrother/EAC/issues/59), [#60](https://github.com/ItchyBrother/EAC/issues/60), [#61](https://github.com/ItchyBrother/EAC/issues/61).
 
-## License and credits
+## License
 
-Copyright © 2026 ItchyBrother. Licensed under [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International](https://creativecommons.org/licenses/by-nc-nd/4.0/). See [LICENSE.md](https://github.com/ItchyBrother/EAC/blob/main/LICENSE.md) for the full terms. Use at your own risk. Preserve attribution and license notices when redistributing the unmodified mod for noncommercial purposes.
+This mod is licensed under a [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License](https://creativecommons.org/licenses/by-nc-nd/4.0/).
 
-Thanks to Squad / Private Division and the KSP modding community; beta testers edgomes27, John Marley, Chaotic Protocol and green_stalk; celino for recruitment and compatibility reports; the HarmonyKSP and Harmony projects; the Contract Configurator and Kerbal Changelog maintainers; linuxgurugamer; severedsolo (Earn Your Stripes and FlightTracker); and JPLRepo and the DeepFreeze Continued maintainers. Thanks also to everyone who has supplied logs, testing feedback and suggestions throughout EAC's development.
+[![CC BY-NC-ND 4.0](https://licensebuttons.net/l/by-nc-nd/4.0/88x31.png)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
+
+You are free to:
+
+- download and use this mod personally,
+- share or redistribute the original mod unchanged for non-commercial purposes.
+
+You are not allowed to:
+
+- modify, adapt, or create derivative works from the code or assets,
+- use any part of this mod for commercial purposes.
+
+By downloading or using this mod, you agree that:
+
+- you use this mod at your own risk,
+- the author is not liable for issues, damages, or problems that may occur from using it,
+- you agree to hold the author harmless from claims or liability,
+- if you share the mod, you must give appropriate credit to the original author, provide a link to the license, and indicate if any changes were made,
+- you may not remove or alter copyright or license information.
+
+Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed above.
+
+## Credits
+
+- Kerbal Space Program by Squad / Private Division.
+- Thanks to the KSP modding community.
+- Thanks to KSP forum user edgomes27, John Marley, Chaotic Protocol and green_stalk for beta testing EAC.
+- Thanks to the HarmonyKSP maintainers and the Harmony project for the Harmony library used by EAC.
+- Thanks to the Kerbal Changelog maintainers and contributors for the in-game changelog utility.
+- Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.
+- Thanks to severedsolo for the Earn Your Stripes and FlightTracker mods, which EAC can integrate with when present.
+- Thanks to JPLRepo / DeepFreeze Continued maintainers for the DeepFreeze ecosystem that EAC can detect and respect when present.
