@@ -22,6 +22,18 @@ EAC 1.7 completes and extends the career-history features introduced in 1.6, imp
 
 See the [detailed change log](https://github.com/ItchyBrother/EAC/blob/main/CHANGE_LOG.md) for the complete 1.7 release notes and earlier versions.
 
+## The future of EAC — Bringing the Journey Full Circle
+
+EAC 1.7 represents the culmination of the original vision for Enhanced Astronaut Complex: giving Kerbals meaningful careers, from recruitment and training through active service, recognition, retirement and remembrance.
+
+This release is intended to conclude EAC's major planned feature-development cycle. The emphasis moving forward will be on stability, performance, compatibility, save-game integrity and maintaining the functionality already available.
+
+This does not mean EAC is being abandoned. Bug fixes, compatibility updates and necessary improvements may continue as issues are identified.
+
+Much of what EAC has become is the result of community suggestions, bug reports, testing and feedback. Thank you to everyone who has contributed to the journey.
+
+*Fly safe, and remember the Kerbals who made your space program possible.*
+
 ## Requirements and installation
 
 | Component | Requirement |

@@ -1,7 +1,9 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
-### EAC v1.7.0 — Mission History, Graduation Examinations, Performance and Persistence for KSP >= 1.12.x
+### EAC v1.7.0 — Bringing the Journey Full Circle for KSP >= 1.12.x
+
+EAC 1.7 is intended to conclude the major planned feature-development cycle and bring the original Kerbonaut career-management vision to completion. Building on community feedback, this release prioritizes performance, save-data integrity, career and mission history, and maintainability. Ongoing support is not ending: bug fixes, compatibility updates and necessary improvements may continue as issues are identified.
 
 EAC 1.7 builds on the 1.6 career-history system with a Mission Archive, richer Service Records and crew recommendations, revised practical graduation examinations, substantial performance improvements and safer external save-data handling. The release also consolidates Contract Configurator integration into the main EAC package. Development testing was conducted on KSP 1.12.5.
 
