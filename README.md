@@ -291,3 +291,9 @@ Copyright © 2026 ItchyBrother. All Rights Reserved except as expressly licensed
 - Thanks to linuxgurugamer, whose work indirectly inspired parts of EAC's crew-management direction.
 - Thanks to severedsolo for the Earn Your Stripes and FlightTracker mods, which EAC can integrate with when present.
 - Thanks to JPLRepo / DeepFreeze Continued maintainers for the DeepFreeze ecosystem that EAC can detect and respect when present.
+
+## AI-assisted development disclosure
+
+Artificial intelligence (AI) tools were used during the development of EAC to assist with code review, validation, test planning, analysis of diagnostic logs and selected code refactoring. AI tools were also used to create some of the images used in EAC. AI was used as a development and creative aid, not as a substitute for developer review or hands-on testing or coding.
+
+All code included in EAC, including AI-assisted changes, was personally reviewed, verified and tested by me, ItchyBrother, the author and maintainer of EAC. Final design decisions, acceptance of code changes and responsibility for the release remain with me. Known limitations and areas requiring further gameplay testing are documented above.
