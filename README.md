@@ -1,6 +1,6 @@
 # Enhanced Astronaut Complex (EAC)
 
-**Version 1.7.1 | Kerbal Space Program 1.12.x (developed and tested on 1.12.5)**
+**Version 1.7.1 | HOTFIX for Assigned-tab visibility**
 
 Enhanced Astronaut Complex gives your Kerbals careers, not just crew assignments. It extends the stock Astronaut Complex with training, recruitment, aging, retirement, recovery leave, service history and optional practical graduation examinations. Build an experienced astronaut corps, manage availability between missions and preserve the history of your space program as generations of Kerbals come and go.
 
