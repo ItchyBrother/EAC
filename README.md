@@ -1,12 +1,20 @@
 # Enhanced Astronaut Complex (EAC)
 
-**Version 1.7.0 | Kerbal Space Program 1.12.x (developed and tested on 1.12.5)**
+**Version 1.7.1 | Kerbal Space Program 1.12.x (developed and tested on 1.12.5)**
 
 Enhanced Astronaut Complex gives your Kerbals careers, not just crew assignments. It extends the stock Astronaut Complex with training, recruitment, aging, retirement, recovery leave, service history and optional practical graduation examinations. Build an experienced astronaut corps, manage availability between missions and preserve the history of your space program as generations of Kerbals come and go.
 
 EAC is designed to complement stock gameplay. It can provide an integrated personnel-management experience on its own, or defer overlapping functions to supported specialist mods when their assemblies are loaded.
 
 [Downloads](https://github.com/ItchyBrother/EAC/releases) · [Change log](https://github.com/ItchyBrother/EAC/blob/main/CHANGE_LOG.md) · [Report an issue](https://github.com/ItchyBrother/EAC/issues) · [KSP forum](https://forum.kerbalspaceprogram.com/topic/229909-enhanced-astronaut-complex-eac)
+
+## What's new in 1.7.1 — Assigned-tab visibility hotfix
+
+This maintenance release corrects an EAC 1.7.0 regression in which the stock Astronaut Complex Assigned tab could appear empty despite displaying the correct assigned-crew count. When KSP reused the Available scroll-list container, EAC's Available-row visibility locks could incorrectly remain active after switching to Assigned.
+
+EAC now releases those locks for confirmed assigned crew, reconciles row visibility on tab activation and refresh, and retains the Available-tab ownership safeguards. The affected established career was tested on KSP 1.12.5, where all five previously hidden assigned Kerbals became visible again. The maintainer also completed roster-tab switching, reopening, duplicate-row and tooltip checks, and a regression test in the development career.
+
+**This is a UI-only hotfix.** The Kerbals and their assignments were not lost. No save-format changes, career repair or new migration are required when upgrading from 1.7.0. Back up your complete career folder as usual. The unified installation and optional Contract Configurator integration remain unchanged.
 
 ## What's new in 1.7.0
 
@@ -48,7 +56,7 @@ Much of what EAC has become is the result of community suggestions, bug reports,
 
 1. Exit KSP and back up the complete career folder for each save you intend to upgrade.
 2. Install [HarmonyKSP](https://github.com/KSPModdingLibs/HarmonyKSP), if not already installed.
-3. Download the EAC 1.7.0 unified release from [GitHub Releases](https://github.com/ItchyBrother/EAC/releases).
+3. Download the EAC 1.7.1 unified release from [GitHub Releases](https://github.com/ItchyBrother/EAC/releases).
 4. For an upgrade, follow the migration instructions below before installing the new package.
 5. Extract the supplied `GameData/EAC` folder into your KSP installation's `GameData` directory. Do not create a nested `GameData/GameData` directory.
 6. If you want graduation exams, install Contract Configurator as well. Review the EAC final exam setting after loading your career.
@@ -81,7 +89,7 @@ Kerbal Space Program/
 
 ### Upgrading from EAC 1.6.x or earlier
 
-**Important: the old standalone EAC Contract Configuration add-on must not be installed alongside EAC 1.7.0.**
+**Important: the old standalone EAC Contract Configuration add-on must not be installed alongside EAC 1.7.0 or later.**
 
 - Back up the entire `saves/<career>/` directory, especially its `EAC/` subdirectory. Back up any custom EAC configuration or contract edits separately.
 - For manual installations, move the old `GameData/EAC` installation outside `GameData` and install the new unified package in its place. Reapply compatible customizations selectively; do not copy old DLLs or outdated examination contracts back into the new installation.

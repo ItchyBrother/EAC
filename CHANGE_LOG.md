@@ -1,6 +1,24 @@
 # Enhanced Astronaut Complex (EAC)
 # Change Log
 
+### 2026-1125: EAC v1.7.1 — Astronaut Complex Assigned-tab Visibility Hotfix for KSP >= 1.12.x
+
+This focused maintenance release corrects a post-release regression in EAC 1.7.0. The stock Astronaut Complex could show the correct Assigned count but no crew rows, while EAC's Space Center Assigned view still listed those Kerbals. The affected crew and their assignments remained intact.
+
+#### Astronaut Complex roster presentation
+- Corrected handling of the shared stock Available/Assigned scroll-list container. Available-specific row visibility locks are released for confirmed assigned personnel when switching to Assigned.
+- Retained Available-tab ownership filtering so assigned and otherwise ineligible crew do not appear as available astronauts.
+- Reconciled EAC-hidden Assigned rows during tab activation and roster refresh, including after DeepFreeze synthetic-row handling, with safeguards against activating inactive duplicate rows.
+- Added verbose `[AssignedVisibility]` diagnostics to report visible assigned rows and released EAC visibility locks.
+
+#### Validation and compatibility
+- Verified in the affected SimNASA production career on KSP 1.12.5: all five assigned ISS crew became visible again; the log confirmed five Available visibility locks were released. Normal external revision loading, cold archive loading and subsequent saves were observed.
+- The maintainer reported passing repeated roster-tab switching, Available exclusion, closing/reopening the Astronaut Complex, duplicate-row and tooltip checks, and regression testing in the Code development career.
+- Changes are confined to Astronaut Complex UI presentation; no intended changes to crew assignments, retirement eligibility, exam contracts, external data storage or save formats. No new save migration or career repair is required for this hotfix.
+
+#### Packaging
+- Version metadata updated to 1.7.1. The unified EAC package is retained; HarmonyKSP remains required and Contract Configurator remains optional.
+
 ### EAC v1.7.0 — Bringing the Journey Full Circle for KSP >= 1.12.x
 
 EAC 1.7 is intended to conclude the major planned feature-development cycle and bring the original Kerbonaut career-management vision to completion. Building on community feedback, this release prioritizes performance, save-data integrity, career and mission history, and maintainability. Ongoing support is not ending: bug fixes, compatibility updates and necessary improvements may continue as issues are identified.
