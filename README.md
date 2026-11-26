@@ -8,6 +8,20 @@ EAC is designed to complement stock gameplay. It can provide an integrated perso
 
 [Downloads](https://github.com/ItchyBrother/EAC/releases) · [Change log](https://github.com/ItchyBrother/EAC/blob/main/CHANGE_LOG.md) · [Report an issue](https://github.com/ItchyBrother/EAC/issues) · [KSP forum](https://forum.kerbalspaceprogram.com/topic/229909-enhanced-astronaut-complex-eac)
 
+## 🎬 Official EAC Video Showcase
+
+**Every Kerbal Has a Story.**
+
+Discover how Enhanced Astronaut Complex brings the
+astronaut career journey full circle — from recruitment
+and training to exploration, retirement and remembrance.
+
+[![Enhanced Astronaut Complex - Official Showcase](https://img.youtube.com/vi/t0nzpW_U4Pw/maxresdefault.jpg)](https://youtu.be/t0nzpW_U4Pw)
+
+▶ [Watch the official showcase on YouTube](https://youtu.be/t0nzpW_U4Pw)
+
+---
+
 ## What's new in 1.7.1 — Assigned-tab visibility hotfix
 
 This maintenance release corrects an EAC 1.7.0 regression in which the stock Astronaut Complex Assigned tab could appear empty despite displaying the correct assigned-crew count. When KSP reused the Available scroll-list container, EAC's Available-row visibility locks could incorrectly remain active after switching to Assigned.
